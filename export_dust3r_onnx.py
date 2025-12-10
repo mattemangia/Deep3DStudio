@@ -68,19 +68,38 @@ def hardsigmoid_symbolic(g, input):
     clipped = g.op("Clip", added, zero, six)
     return g.op("Div", clipped, six)
 
-def gelu_symbolic(g, input):
-    """aten::gelu -> approximate with tanh"""
-    # GELU(x) ≈ 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
-    sqrt_2_over_pi = g.op("Constant", value_t=torch.tensor(0.7978845608028654))
-    coeff = g.op("Constant", value_t=torch.tensor(0.044715))
-    half = g.op("Constant", value_t=torch.tensor(0.5))
-    one = g.op("Constant", value_t=torch.tensor(1.0))
+def gelu_symbolic(g, input, approximate='none'):
+    """aten::gelu -> approximate with tanh or use Erf"""
+    # Check if approximate is a string or needs extraction
+    if hasattr(approximate, 'node'):
+        # It's a graph node, try to extract the value
+        try:
+            approximate = approximate.node().s('value') if approximate.node().kind() == 'prim::Constant' else 'none'
+        except:
+            approximate = 'tanh'  # Default to tanh approximation
 
-    x_cubed = g.op("Pow", input, g.op("Constant", value_t=torch.tensor(3.0)))
-    inner = g.op("Add", input, g.op("Mul", coeff, x_cubed))
-    inner = g.op("Mul", sqrt_2_over_pi, inner)
-    tanh_val = g.op("Tanh", inner)
-    return g.op("Mul", half, g.op("Mul", input, g.op("Add", one, tanh_val)))
+    if approximate == 'tanh':
+        # GELU(x) ≈ 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
+        sqrt_2_over_pi = g.op("Constant", value_t=torch.tensor(0.7978845608028654))
+        coeff = g.op("Constant", value_t=torch.tensor(0.044715))
+        half = g.op("Constant", value_t=torch.tensor(0.5))
+        one = g.op("Constant", value_t=torch.tensor(1.0))
+        three = g.op("Constant", value_t=torch.tensor(3.0))
+
+        x_cubed = g.op("Pow", input, three)
+        inner = g.op("Add", input, g.op("Mul", coeff, x_cubed))
+        inner = g.op("Mul", sqrt_2_over_pi, inner)
+        tanh_val = g.op("Tanh", inner)
+        return g.op("Mul", half, g.op("Mul", input, g.op("Add", one, tanh_val)))
+    else:
+        # Exact GELU: 0.5 * x * (1 + erf(x / sqrt(2)))
+        sqrt_2 = g.op("Constant", value_t=torch.tensor(1.4142135623730951))
+        half = g.op("Constant", value_t=torch.tensor(0.5))
+        one = g.op("Constant", value_t=torch.tensor(1.0))
+
+        x_div_sqrt2 = g.op("Div", input, sqrt_2)
+        erf_val = g.op("Erf", x_div_sqrt2)
+        return g.op("Mul", half, g.op("Mul", input, g.op("Add", one, erf_val)))
 
 # Register all custom symbolics for opset versions 9-20
 custom_ops = {
