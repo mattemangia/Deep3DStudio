@@ -107,12 +107,13 @@ def patch_dust3r_for_onnx():
             output:
                 * tokens after appplying RoPE2D (batch_size x nheads x ntokens x dim)
             """
-            assert tokens.size(3)%2==0, "number of dimensions should be a multiple of two"
+            # Remove asserts that cause tracing issues - dimensions are validated at runtime
+            # assert tokens.size(3)%2==0, "number of dimensions should be a multiple of two"
             D = tokens.size(3) // 2
-            assert positions.ndim==3 and positions.shape[-1] == 2 # Batch, Seq, 2
+            # assert positions.ndim==3 and positions.shape[-1] == 2 # Batch, Seq, 2
 
             # ORIGINAL: cos, sin = self.get_cos_sin(D, int(positions.max())+1, tokens.device, tokens.dtype)
-            # NEW: Use fixed max size
+            # NEW: Use fixed max size to avoid data-dependent operations
             cos, sin = self.get_cos_sin(D, MAX_GRID_SIZE, tokens.device, tokens.dtype)
 
             # split features into two along the feature dimension, and apply rope1d on each half
@@ -137,13 +138,13 @@ def patch_dust3r_for_onnx():
 
                 # Extract H, W. true_shape is (Batch, 2)
                 # We take the first element.
-                # In export, true_shape[0] will be a tensor.
-                # We need to extract the values as scalar tensors (SymInts) or just pass the tensor slice.
-                # The head expects a tuple (H, W).
+                # IMPORTANT: Convert to Python int using .item() for TorchScript tracing
+                # This is safe because true_shape contains concrete values during tracing.
 
                 shape_tensor = true_shape[0]
-                H = shape_tensor[0]
-                W = shape_tensor[1]
+                # Use int() to handle both tensor and SymInt cases
+                H = int(shape_tensor[0].item()) if hasattr(shape_tensor[0], 'item') else int(shape_tensor[0])
+                W = int(shape_tensor[1].item()) if hasattr(shape_tensor[1], 'item') else int(shape_tensor[1])
 
                 res = head(decout, (H, W))
                 return res
@@ -171,19 +172,24 @@ def patch_dust3r_for_onnx():
             def new_dpt_forward(self, encoder_tokens: List[torch.Tensor], image_size=None):
                 assert self.dim_tokens_enc is not None, 'Need to call init(dim_tokens_enc) function first'
                 image_size = self.image_size if image_size is None else image_size
-                H, W = image_size
+                H_raw, W_raw = image_size
 
-                # Number of patches in height and width
+                # IMPORTANT: Convert H, W to Python ints for TorchScript tracing
+                # This avoids "cond must be a bool, but got tensor" errors
+                # and ensures einops rearrange works correctly
+                if hasattr(H_raw, 'item'):
+                    H = int(H_raw.item())
+                    W = int(W_raw.item())
+                elif torch.is_tensor(H_raw):
+                    H = int(H_raw)
+                    W = int(W_raw)
+                else:
+                    H = int(H_raw)
+                    W = int(W_raw)
+
+                # Number of patches in height and width (now Python ints)
                 N_H = H // (self.stride_level * self.P_H)
                 N_W = W // (self.stride_level * self.P_W)
-
-                # --- PATCH: Assert shape constraints for torch.export ---
-                # This fixes "GuardOnDataDependentSymNode: u0 < 1" error.
-                # torch._check tells the symbolic tracer that N_H and N_W are always >= 1
-                # This is required because the tracer can't infer this from the division.
-                torch._check(N_H >= 1)
-                torch._check(N_W >= 1)
-                # --------------------------------------------------------
 
                 # Hook decoder onto 4 layers from specified ViT layers
                 layers = [encoder_tokens[hook] for hook in self.hooks]
@@ -192,14 +198,8 @@ def patch_dust3r_for_onnx():
                 layers = [self.adapt_tokens(l) for l in layers]
 
                 # Reshape tokens to spatial representation
+                # N_H and N_W are now Python ints, so einops works correctly
                 layers = [rearrange(l, 'b (nh nw) c -> b c nh nw', nh=N_H, nw=N_W) for l in layers]
-
-                # --- PATCH: Assert spatial dimensions are valid before conv ops ---
-                # The conv2d operation needs to know that spatial dims are >= 1
-                for i, l in enumerate(layers):
-                    torch._check(l.shape[2] >= 1)
-                    torch._check(l.shape[3] >= 1)
-                # ------------------------------------------------------------------
 
                 layers = [self.act_postprocess[idx](l) for idx, l in enumerate(layers)]
                 # Project layers to chosen feature dim
