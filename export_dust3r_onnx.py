@@ -64,82 +64,135 @@ def patch_dust3r_for_onnx():
     """
     Monkey-patches parts of Dust3r/CroCo that are unfriendly to ONNX export,
     specifically the PositionGetter which uses dictionary caching with (h,w) keys
-    that fail with symbolic shapes (SymInt).
+    that fail with symbolic shapes (SymInt), and RoPE which uses data-dependent max().
     """
     print("Applying ONNX export patches...")
 
-    # Try to find PositionGetter
-    # It is usually imported in dust3r.patch_embed, which gets it from models.blocks (croco)
+    # --- Patch 1: PositionGetter ---
 
-    try:
-        # Dependent on how dust3r sets up path, it might be in models.blocks or croco.models.blocks
-        # dust3r usually puts 'croco' in path so 'import models.blocks' works, OR it imports it internally.
+    def patch_position_getter(cls_obj):
+        def new_call(self, b, h, w, device):
+            # Replacement for caching logic.
+            # Avoids: if not (h,w) in self.cache_positions: ...
 
-        # We look for the class in sys.modules to be sure we patch the one being used
-        patched = False
+            x = torch.arange(w, device=device)
+            y = torch.arange(h, device=device)
 
-        # Helper to patch the class
-        def apply_patch(cls_obj):
-            def new_call(self, b, h, w, device):
-                # Replacement for caching logic.
-                # Avoids: if not (h,w) in self.cache_positions: ...
-                # Uses torch.meshgrid instead of cartesian_prod for potential better ONNX support
+            grid_y, grid_x = torch.meshgrid(y, x, indexing='ij')
 
-                x = torch.arange(w, device=device)
-                y = torch.arange(h, device=device)
+            # Stack to get (H, W, 2)
+            pos = torch.stack((grid_y, grid_x), dim=-1)
 
-                # grid_y, grid_x = torch.meshgrid(y, x, indexing='ij')
-                # Note: indexing arg is available in recent torch, but let's be safe
-                # cartesian_prod(y, x) is (y0,x0), (y0,x1)... which is meshgrid(y,x) with ij
+            # Flatten to (1, H*W, 2) and expand to batch
+            pos = pos.reshape(1, h*w, 2).expand(b, -1, 2).clone()
+            return pos
 
-                grid_y, grid_x = torch.meshgrid(y, x, indexing='ij')
+        cls_obj.__call__ = new_call
+        print(f"Patched {cls_obj.__name__} in {cls_obj.__module__}")
 
-                # Stack to get (H, W, 2)
-                pos = torch.stack((grid_y, grid_x), dim=-1)
+    # --- Patch 2: RoPE2D ---
 
-                # Flatten to (1, H*W, 2) and expand to batch
-                pos = pos.reshape(1, h*w, 2).expand(b, -1, 2).clone()
-                return pos
+    def patch_rope(cls_obj):
+        # We need to replace the forward method to avoid `int(positions.max())`
+        # We will use a fixed large size for the precomputed tables.
+        # This is safe because F.embedding will just look up the values we need.
+        # 4096 pixels is a reasonable upper bound for standard usage (4K resolution).
 
-            cls_obj.__call__ = new_call
-            print(f"Patched {cls_obj}")
+        MAX_GRID_SIZE = 4096
 
-        # Strategy 1: Look in dust3r.patch_embed where it is used
+        def new_forward(self, tokens, positions):
+            """
+            input:
+                * tokens: batch_size x nheads x ntokens x dim
+                * positions: batch_size x ntokens x 2 (y and x position of each token)
+            output:
+                * tokens after appplying RoPE2D (batch_size x nheads x ntokens x dim)
+            """
+            assert tokens.size(3)%2==0, "number of dimensions should be a multiple of two"
+            D = tokens.size(3) // 2
+            assert positions.ndim==3 and positions.shape[-1] == 2 # Batch, Seq, 2
+
+            # ORIGINAL: cos, sin = self.get_cos_sin(D, int(positions.max())+1, tokens.device, tokens.dtype)
+            # NEW: Use fixed max size
+            cos, sin = self.get_cos_sin(D, MAX_GRID_SIZE, tokens.device, tokens.dtype)
+
+            # split features into two along the feature dimension, and apply rope1d on each half
+            y, x = tokens.chunk(2, dim=-1)
+            y = self.apply_rope1d(y, positions[:,:,0], cos, sin)
+            x = self.apply_rope1d(x, positions[:,:,1], cos, sin)
+            tokens = torch.cat((y, x), dim=-1)
+            return tokens
+
+        cls_obj.forward = new_forward
+        print(f"Patched {cls_obj.__name__} in {cls_obj.__module__}")
+
+    # Apply Patch 1 (PositionGetter)
+    patched_pos = False
+    targets_pos = [
+        ('dust3r.patch_embed', 'PositionGetter'),
+        ('models.blocks', 'PositionGetter'),
+        ('croco.models.blocks', 'PositionGetter')
+    ]
+
+    for module_name, cls_name in targets_pos:
         try:
-            import dust3r.patch_embed
-            if hasattr(dust3r.patch_embed, 'PositionGetter'):
-                apply_patch(dust3r.patch_embed.PositionGetter)
-                patched = True
-        except ImportError:
-            pass
+            mod = sys.modules.get(module_name)
+            if not mod:
+                 # Try import if not loaded
+                 try:
+                     __import__(module_name)
+                     mod = sys.modules[module_name]
+                 except ImportError:
+                     continue
 
-        # Strategy 2: Look in models.blocks (CroCo)
-        if not patched:
-            try:
-                import models.blocks
-                if hasattr(models.blocks, 'PositionGetter'):
-                    apply_patch(models.blocks.PositionGetter)
-                    patched = True
-            except ImportError:
-                pass
+            if hasattr(mod, cls_name):
+                patch_position_getter(getattr(mod, cls_name))
+                patched_pos = True
+                # Keep searching to patch all occurrences if imported in multiple places
+        except Exception as e:
+            print(f"Error checking {module_name}: {e}")
 
-        # Strategy 3: Look in croco.models.blocks
-        if not patched:
+    if not patched_pos:
+        print("Warning: Could not find PositionGetter to patch.")
+
+    # Apply Patch 2 (RoPE2D)
+    patched_rope = False
+    targets_rope = [
+        ('dust3r.croco.models.pos_embed', 'RoPE2D'), # Likely path given imports
+        ('models.pos_embed', 'RoPE2D'),
+        ('croco.models.pos_embed', 'RoPE2D'),
+        ('dust3r.models.pos_embed', 'RoPE2D') # Possible
+    ]
+
+    # Need to find where RoPE2D is actually used.
+    # In `croco/models/blocks.py`, it imports `from .pos_embed import ...`
+    # But dust3r might import it via `dust3r.utils.path_to_croco` magic.
+
+    # Let's try to find it in sys.modules
+    for module_name in list(sys.modules.keys()):
+        if 'pos_embed' in module_name and 'croco' in module_name:
+            mod = sys.modules[module_name]
+            if hasattr(mod, 'RoPE2D'):
+                patch_rope(mod.RoPE2D)
+                patched_rope = True
+
+    if not patched_rope:
+        print("Warning: Could not find RoPE2D to patch via sys.modules iteration. Trying explicit imports.")
+        for module_name, cls_name in targets_rope:
              try:
-                import croco.models.blocks
-                if hasattr(croco.models.blocks, 'PositionGetter'):
-                    apply_patch(croco.models.blocks.PositionGetter)
-                    patched = True
+                 __import__(module_name)
+                 mod = sys.modules[module_name]
+                 if hasattr(mod, cls_name):
+                    patch_rope(getattr(mod, cls_name))
+                    patched_rope = True
              except ImportError:
-                pass
+                 pass
 
-        if not patched:
-            print("Warning: Could not find PositionGetter to patch. ONNX export might fail with SymInt errors.")
-        else:
-            print("Successfully patched PositionGetter.")
+    if not patched_rope:
+        print("CRITICAL WARNING: Could not patch RoPE2D. Export will likely fail.")
+    else:
+        print("Successfully patched RoPE2D.")
 
-    except Exception as e:
-        print(f"Error during patching: {e}")
 
 class Dust3rOnnxWrapper(nn.Module):
     """
@@ -195,14 +248,20 @@ def main():
     ensure_dependencies()
     install_and_import_dust3r()
 
-    # Apply patch before loading model
-    patch_dust3r_for_onnx()
+    # Load model first to ensure modules are imported, then patch
+    # Actually, we need to import modules to patch them.
+    # install_and_import_dust3r adds path, but doesn't import everything.
+    # But from_pretrained will trigger imports.
+    # If we patch AFTER loading, the instances might already be created with bound methods?
+    # Python methods are usually looked up on class at runtime, so patching Class.method works even for existing instances.
 
     from dust3r.model import AsymmetricCroCo3DStereo
-
     print(f"Loading model {MODEL_NAME}...")
-    # This will download the model weights automatically via HuggingFace Hub
     model = AsymmetricCroCo3DStereo.from_pretrained(MODEL_NAME)
+
+    # Now patch
+    patch_dust3r_for_onnx()
+
     model.eval()
 
     print("Wrapping model for ONNX export...")
