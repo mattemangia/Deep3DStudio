@@ -13,27 +13,37 @@ MODEL_NAME = "naver/DUSt3R_ViTLarge_BaseDecoder_512_dpt" # Using a standard mode
 def install_and_import_dust3r():
     """
     Checks if dust3r is importable. If not, clones the repository and adds it to path.
+    Also ensures submodules (like croco) are initialized.
     """
+    if not os.path.exists(REPO_DIR):
+        print(f"Cloning {REPO_URL} into {REPO_DIR}...")
+        subprocess.check_call(["git", "clone", "--recursive", REPO_URL, REPO_DIR])
+        print(f"Cloned {REPO_URL} into {REPO_DIR}")
+    else:
+        # If repo exists, ensure submodules are up to date.
+        # This fixes the case where a previous clone failed or didn't include recursive submodules.
+        print(f"Updating submodules in {REPO_DIR}...")
+        subprocess.check_call(["git", "submodule", "update", "--init", "--recursive"], cwd=REPO_DIR)
+
+    # Add to sys.path
+    if REPO_DIR not in sys.path:
+        sys.path.insert(0, REPO_DIR)
+
     try:
         import dust3r
         print("Dust3r module found.")
-    except ImportError:
-        print("Dust3r module not found. Attempting to clone repository...")
-        if not os.path.exists(REPO_DIR):
-            subprocess.check_call(["git", "clone", REPO_URL, REPO_DIR])
-            print(f"Cloned {REPO_URL} into {REPO_DIR}")
-
-        # Add to sys.path
-        if REPO_DIR not in sys.path:
-            sys.path.insert(0, REPO_DIR)
-
-        # Try importing again to verify
+        # Trigger an import that depends on croco to fail early if submodule is missing
+        import dust3r.utils.path_to_croco
+    except ImportError as e:
+        print(f"Failed to import dust3r: {e}")
+        print("Attempting to fix by updating submodules again...")
         try:
-            import dust3r
-            print("Dust3r module successfully imported from cloned repo.")
-        except ImportError as e:
-            print(f"Failed to import dust3r after cloning: {e}")
-            print("You may need to install additional dependencies manually (e.g., rope, einops, huggingface_hub).")
+             subprocess.check_call(["git", "submodule", "update", "--init", "--recursive"], cwd=REPO_DIR)
+             import dust3r
+             print("Dust3r module successfully imported.")
+        except Exception as e2:
+            print(f"Still failed to import dust3r: {e2}")
+            print("You may need to install additional dependencies manually (e.g., einops, huggingface_hub).")
             print("Try running: pip install -r dust3r_repo/requirements.txt")
             sys.exit(1)
 
@@ -47,8 +57,6 @@ def ensure_dependencies():
     except ImportError as e:
         print(f"Missing dependency: {e.name}")
         print(f"Please install it using: pip install {e.name}")
-        # We don't auto-install pip packages to avoid messing up user env without permission,
-        # but the git clone above is 'local'.
         sys.exit(1)
 
 class Dust3rOnnxWrapper(nn.Module):
@@ -68,10 +76,6 @@ class Dust3rOnnxWrapper(nn.Module):
 
         # Extract relevant outputs
         # Dust3r model returns res1['pts3d'] and res2['pts3d'] (or 'pts3d_in_other_view' if transformed)
-        # We check keys carefully to avoid errors.
-
-        # Note: In AsymmetricCroCo3DStereo.forward, res2['pts3d_in_other_view'] IS set by popping 'pts3d'.
-        # However, for robustness we check both.
 
         pts3d1 = res1.get('pts3d')
         if pts3d1 is None:
@@ -102,13 +106,9 @@ def main():
     # Handle directory output
     if os.path.isdir(onnx_output_path):
         onnx_output_path = os.path.join(onnx_output_path, "dust3r.onnx")
-    elif not onnx_output_path.endswith('.onnx'):
-        # If user provided a path without extension but it's not an existing dir, assume they meant a file.
-        # But if they meant a dir that doesn't exist, this might be ambiguous.
-        # Standard behavior: exact path.
-        # But if it looks like a directory (no extension), maybe warn or append?
-        # Let's stick to: if it is an existing dir, join. Else use as is.
-        pass
+    elif not onnx_output_path.endswith('.onnx') and not os.path.exists(os.path.dirname(onnx_output_path) or '.'):
+         # If parent dir doesn't exist and no extension, it's ambiguous, but we proceed.
+         pass
 
     ensure_dependencies()
     install_and_import_dust3r()
@@ -125,7 +125,6 @@ def main():
 
     # Prepare dummy inputs
     # Shape: Batch=1, Channels=3, Height=512, Width=512
-    # Note: Dust3r usually expects 224 or 512 depending on model, but is somewhat flexible if patch_size divides input.
     # The selected model is 512_dpt.
     H, W = 512, 512
     dummy_img1 = torch.randn(1, 3, H, W)
@@ -141,7 +140,6 @@ def main():
     dynamic_axes = {
         'img1': {0: 'batch_size', 2: 'height', 3: 'width'},
         'img2': {0: 'batch_size', 2: 'height', 3: 'width'},
-        # true_shape is usually fixed to 2, but batch size varies
         'true_shape1': {0: 'batch_size'},
         'true_shape2': {0: 'batch_size'},
         'pts3d1': {0: 'batch_size', 1: 'height', 2: 'width'},
