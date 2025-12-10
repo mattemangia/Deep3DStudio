@@ -148,30 +148,72 @@ def patch_dust3r_for_onnx():
                 res = head(decout, (H, W))
                 return res
 
-            # We force use of wrapper_no because typically we export for a fixed scenario or handle "landscape" logic externally
-            # If the model was initialized with landscape_only=True (default), it uses wrapper_no.
-            # If landscape_only=False, it uses wrapper_yes.
-            # However, wrapper_yes also has data dependent logic (if is_landscape.all(): ...).
-            # For ONNX export simplicity, we usually want to export a specific path.
-            # If we assume standard usage where images are resized/padded to be same resolution, wrapper_no is often what is active.
-            # But let's check `activate`.
-
-            if activate:
-                 # If activate is True (meaning landscape_only=False in standard init, wait...)
-                 # Let's check model.py:
-                 # self.head1 = transpose_to_landscape(self.downstream_head1, activate=landscape_only)
-                 # So if landscape_only=True, activate=True.
-
-                 # The wrapper_yes implementation in original code handles mixed batches.
-                 # For ONNX, dynamic branching on data content is hard.
-                 # We will implement a simplified version that assumes the layout matches the input tensor shape.
-
-                 return wrapper_no
-            else:
-                 return wrapper_no
+            # Force wrapper_no logic
+            return wrapper_no
 
         dust3r.utils.misc.transpose_to_landscape = new_transpose_to_landscape
         print("Patched dust3r.utils.misc.transpose_to_landscape")
+
+    # --- Patch 4: DPTOutputAdapter_fix ---
+
+    def patch_dpt_head():
+        # Resolves GuardOnDataDependentSymNode in dpt_head.py
+        try:
+            import dust3r.heads.dpt_head
+            from einops import rearrange
+            from typing import List
+
+            def new_dpt_forward(self, encoder_tokens: List[torch.Tensor], image_size=None):
+                assert self.dim_tokens_enc is not None, 'Need to call init(dim_tokens_enc) function first'
+                # H, W = input_info['image_size']
+                image_size = self.image_size if image_size is None else image_size
+                H, W = image_size
+                # Number of patches in height and width
+                N_H = H // (self.stride_level * self.P_H)
+                N_W = W // (self.stride_level * self.P_W)
+
+                # Hook decoder onto 4 layers from specified ViT layers
+                layers = [encoder_tokens[hook] for hook in self.hooks]
+
+                # Extract only task-relevant tokens and ignore global tokens.
+                layers = [self.adapt_tokens(l) for l in layers]
+
+                # Reshape tokens to spatial representation
+                layers = [rearrange(l, 'b (nh nw) c -> b c nh nw', nh=N_H, nw=N_W) for l in layers]
+
+                # --- PATCH START: Hint shapes for ONNX export ---
+                # This prevents "GuardOnDataDependentSymNode: Could not guard on data-dependent expression u0 < 1"
+                # We assert/check that the spatial dimensions are at least 1.
+                if hasattr(torch, "_check"):
+                    # torch._check tells the compiler/exporter that this condition holds true
+                    torch._check(N_H >= 1)
+                    torch._check(N_W >= 1)
+                    # Also check actual tensor shapes if available, though N_H/N_W should suffice
+                    for l in layers:
+                        torch._check(l.size(2) >= 1)
+                        torch._check(l.size(3) >= 1)
+                # --- PATCH END ---
+
+                layers = [self.act_postprocess[idx](l) for idx, l in enumerate(layers)]
+                # Project layers to chosen feature dim
+                layers = [self.scratch.layer_rn[idx](l) for idx, l in enumerate(layers)]
+
+                # Fuse layers using refinement stages
+                path_4 = self.scratch.refinenet4(layers[3])[:, :, :layers[2].shape[2], :layers[2].shape[3]]
+                path_3 = self.scratch.refinenet3(path_4, layers[2])
+                path_2 = self.scratch.refinenet2(path_3, layers[1])
+                path_1 = self.scratch.refinenet1(path_2, layers[0])
+
+                # Output head
+                out = self.head(path_1)
+
+                return out
+
+            dust3r.heads.dpt_head.DPTOutputAdapter_fix.forward = new_dpt_forward
+            print("Patched dust3r.heads.dpt_head.DPTOutputAdapter_fix.forward")
+
+        except Exception as e:
+            print(f"Error patching DPTOutputAdapter_fix: {e}")
 
     # Apply Patch 1 (PositionGetter)
     patched_pos = False
@@ -232,8 +274,9 @@ def patch_dust3r_for_onnx():
     else:
         print("Successfully patched RoPE2D.")
 
-    # Apply Patch 3
+    # Apply Patch 3 & 4
     patch_transpose_to_landscape()
+    patch_dpt_head()
 
 
 class Dust3rOnnxWrapper(nn.Module):
@@ -294,43 +337,11 @@ def main():
     print(f"Loading model {MODEL_NAME}...")
     model = AsymmetricCroCo3DStereo.from_pretrained(MODEL_NAME)
 
-    # Apply patches after loading to ensure modules are ready but before tracing
+    # Apply patches
     patch_dust3r_for_onnx()
 
-    # Re-instantiate heads or re-apply transpose_to_landscape if it was applied at init?
-    # model.head1 and model.head2 are created in __init__ using transpose_to_landscape.
-    # The patching of `dust3r.utils.misc.transpose_to_landscape` only affects FUTURE calls.
-    # We need to manually re-wrap the heads of the loaded model.
-
     print("Re-wrapping model heads with patched logic...")
-    # Logic from model.py:
-    # self.head1 = transpose_to_landscape(self.downstream_head1, activate=landscape_only)
-
-    # We need to access the underlying function from the patch we just applied
     from dust3r.utils.misc import transpose_to_landscape
-
-    # Check if 'landscape_only' was true or false.
-    # In load_model (called by from_pretrained), it ensures 'landscape_only=False'.
-    # So activate was likely True (because args said landscape_only=False, but then... wait)
-    # in model.py:
-    # self.head1 = transpose_to_landscape(self.downstream_head1, activate=landscape_only)
-    # The loaded args string forces landscape_only=False.
-    # So activate=False passed to transpose_to_landscape? No, wait.
-    # If landscape_only=False, then activate=?
-    # Let's check model.py again.
-    # def set_downstream_head(..., landscape_only, ...):
-    #    self.head1 = transpose_to_landscape(self.downstream_head1, activate=landscape_only)
-
-    # The checkpoint args are modified to force landscape_only=False.
-    # So activate=False.
-    # So it uses wrapper_no.
-
-    # Our patched `transpose_to_landscape` ignores the `activate` arg and returns `wrapper_no` anyway (patched version).
-    # So we just re-wrap using the patched function.
-
-    # Note: We assume the existing head1 is a wrapper, but we want to wrap the inner head.
-    # But self.downstream_head1 is stored on the object.
-
     model.head1 = transpose_to_landscape(model.downstream_head1, activate=False)
     model.head2 = transpose_to_landscape(model.downstream_head2, activate=False)
 
