@@ -4,3 +4,4 @@ huggingface_hub
 einops
 opencv-python
 scipy
+safetensors

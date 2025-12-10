@@ -54,6 +54,7 @@ def ensure_dependencies():
     try:
         import huggingface_hub
         import einops
+        import safetensors
     except ImportError as e:
         print(f"Missing dependency: {e.name}")
         print(f"Please install it using: pip install {e.name}")
