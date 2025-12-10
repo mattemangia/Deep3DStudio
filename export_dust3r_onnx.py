@@ -60,6 +60,87 @@ def ensure_dependencies():
         print(f"Please install it using: pip install {e.name}")
         sys.exit(1)
 
+def patch_dust3r_for_onnx():
+    """
+    Monkey-patches parts of Dust3r/CroCo that are unfriendly to ONNX export,
+    specifically the PositionGetter which uses dictionary caching with (h,w) keys
+    that fail with symbolic shapes (SymInt).
+    """
+    print("Applying ONNX export patches...")
+
+    # Try to find PositionGetter
+    # It is usually imported in dust3r.patch_embed, which gets it from models.blocks (croco)
+
+    try:
+        # Dependent on how dust3r sets up path, it might be in models.blocks or croco.models.blocks
+        # dust3r usually puts 'croco' in path so 'import models.blocks' works, OR it imports it internally.
+
+        # We look for the class in sys.modules to be sure we patch the one being used
+        patched = False
+
+        # Helper to patch the class
+        def apply_patch(cls_obj):
+            def new_call(self, b, h, w, device):
+                # Replacement for caching logic.
+                # Avoids: if not (h,w) in self.cache_positions: ...
+                # Uses torch.meshgrid instead of cartesian_prod for potential better ONNX support
+
+                x = torch.arange(w, device=device)
+                y = torch.arange(h, device=device)
+
+                # grid_y, grid_x = torch.meshgrid(y, x, indexing='ij')
+                # Note: indexing arg is available in recent torch, but let's be safe
+                # cartesian_prod(y, x) is (y0,x0), (y0,x1)... which is meshgrid(y,x) with ij
+
+                grid_y, grid_x = torch.meshgrid(y, x, indexing='ij')
+
+                # Stack to get (H, W, 2)
+                pos = torch.stack((grid_y, grid_x), dim=-1)
+
+                # Flatten to (1, H*W, 2) and expand to batch
+                pos = pos.reshape(1, h*w, 2).expand(b, -1, 2).clone()
+                return pos
+
+            cls_obj.__call__ = new_call
+            print(f"Patched {cls_obj}")
+
+        # Strategy 1: Look in dust3r.patch_embed where it is used
+        try:
+            import dust3r.patch_embed
+            if hasattr(dust3r.patch_embed, 'PositionGetter'):
+                apply_patch(dust3r.patch_embed.PositionGetter)
+                patched = True
+        except ImportError:
+            pass
+
+        # Strategy 2: Look in models.blocks (CroCo)
+        if not patched:
+            try:
+                import models.blocks
+                if hasattr(models.blocks, 'PositionGetter'):
+                    apply_patch(models.blocks.PositionGetter)
+                    patched = True
+            except ImportError:
+                pass
+
+        # Strategy 3: Look in croco.models.blocks
+        if not patched:
+             try:
+                import croco.models.blocks
+                if hasattr(croco.models.blocks, 'PositionGetter'):
+                    apply_patch(croco.models.blocks.PositionGetter)
+                    patched = True
+             except ImportError:
+                pass
+
+        if not patched:
+            print("Warning: Could not find PositionGetter to patch. ONNX export might fail with SymInt errors.")
+        else:
+            print("Successfully patched PositionGetter.")
+
+    except Exception as e:
+        print(f"Error during patching: {e}")
+
 class Dust3rOnnxWrapper(nn.Module):
     """
     Wrapper to handle dictionary inputs/outputs for ONNX export.
@@ -113,6 +194,9 @@ def main():
 
     ensure_dependencies()
     install_and_import_dust3r()
+
+    # Apply patch before loading model
+    patch_dust3r_for_onnx()
 
     from dust3r.model import AsymmetricCroCo3DStereo
 
