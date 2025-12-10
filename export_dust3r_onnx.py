@@ -64,7 +64,8 @@ def patch_dust3r_for_onnx():
     """
     Monkey-patches parts of Dust3r/CroCo that are unfriendly to ONNX export,
     specifically the PositionGetter which uses dictionary caching with (h,w) keys
-    that fail with symbolic shapes (SymInt), and RoPE which uses data-dependent max().
+    that fail with symbolic shapes (SymInt), RoPE which uses data-dependent max(),
+    and transpose_to_landscape which uses data-dependent allclose.
     """
     print("Applying ONNX export patches...")
 
@@ -95,8 +96,6 @@ def patch_dust3r_for_onnx():
     def patch_rope(cls_obj):
         # We need to replace the forward method to avoid `int(positions.max())`
         # We will use a fixed large size for the precomputed tables.
-        # This is safe because F.embedding will just look up the values we need.
-        # 4096 pixels is a reasonable upper bound for standard usage (4K resolution).
 
         MAX_GRID_SIZE = 4096
 
@@ -126,6 +125,54 @@ def patch_dust3r_for_onnx():
         cls_obj.forward = new_forward
         print(f"Patched {cls_obj.__name__} in {cls_obj.__module__}")
 
+    # --- Patch 3: transpose_to_landscape ---
+
+    def patch_transpose_to_landscape():
+        import dust3r.utils.misc
+
+        def new_transpose_to_landscape(head, activate=True):
+            # Simplified wrapper that assumes consistent shapes and avoids data-dependent checks
+            def wrapper_no(decout, true_shape):
+                # We skip the assert true_shape[0:1].allclose(true_shape)
+
+                # Extract H, W. true_shape is (Batch, 2)
+                # We take the first element.
+                # In export, true_shape[0] will be a tensor.
+                # We need to extract the values as scalar tensors (SymInts) or just pass the tensor slice.
+                # The head expects a tuple (H, W).
+
+                shape_tensor = true_shape[0]
+                H = shape_tensor[0]
+                W = shape_tensor[1]
+
+                res = head(decout, (H, W))
+                return res
+
+            # We force use of wrapper_no because typically we export for a fixed scenario or handle "landscape" logic externally
+            # If the model was initialized with landscape_only=True (default), it uses wrapper_no.
+            # If landscape_only=False, it uses wrapper_yes.
+            # However, wrapper_yes also has data dependent logic (if is_landscape.all(): ...).
+            # For ONNX export simplicity, we usually want to export a specific path.
+            # If we assume standard usage where images are resized/padded to be same resolution, wrapper_no is often what is active.
+            # But let's check `activate`.
+
+            if activate:
+                 # If activate is True (meaning landscape_only=False in standard init, wait...)
+                 # Let's check model.py:
+                 # self.head1 = transpose_to_landscape(self.downstream_head1, activate=landscape_only)
+                 # So if landscape_only=True, activate=True.
+
+                 # The wrapper_yes implementation in original code handles mixed batches.
+                 # For ONNX, dynamic branching on data content is hard.
+                 # We will implement a simplified version that assumes the layout matches the input tensor shape.
+
+                 return wrapper_no
+            else:
+                 return wrapper_no
+
+        dust3r.utils.misc.transpose_to_landscape = new_transpose_to_landscape
+        print("Patched dust3r.utils.misc.transpose_to_landscape")
+
     # Apply Patch 1 (PositionGetter)
     patched_pos = False
     targets_pos = [
@@ -138,17 +185,14 @@ def patch_dust3r_for_onnx():
         try:
             mod = sys.modules.get(module_name)
             if not mod:
-                 # Try import if not loaded
                  try:
                      __import__(module_name)
                      mod = sys.modules[module_name]
                  except ImportError:
                      continue
-
             if hasattr(mod, cls_name):
                 patch_position_getter(getattr(mod, cls_name))
                 patched_pos = True
-                # Keep searching to patch all occurrences if imported in multiple places
         except Exception as e:
             print(f"Error checking {module_name}: {e}")
 
@@ -158,17 +202,12 @@ def patch_dust3r_for_onnx():
     # Apply Patch 2 (RoPE2D)
     patched_rope = False
     targets_rope = [
-        ('dust3r.croco.models.pos_embed', 'RoPE2D'), # Likely path given imports
+        ('dust3r.croco.models.pos_embed', 'RoPE2D'),
         ('models.pos_embed', 'RoPE2D'),
         ('croco.models.pos_embed', 'RoPE2D'),
-        ('dust3r.models.pos_embed', 'RoPE2D') # Possible
+        ('dust3r.models.pos_embed', 'RoPE2D')
     ]
 
-    # Need to find where RoPE2D is actually used.
-    # In `croco/models/blocks.py`, it imports `from .pos_embed import ...`
-    # But dust3r might import it via `dust3r.utils.path_to_croco` magic.
-
-    # Let's try to find it in sys.modules
     for module_name in list(sys.modules.keys()):
         if 'pos_embed' in module_name and 'croco' in module_name:
             mod = sys.modules[module_name]
@@ -192,6 +231,9 @@ def patch_dust3r_for_onnx():
         print("CRITICAL WARNING: Could not patch RoPE2D. Export will likely fail.")
     else:
         print("Successfully patched RoPE2D.")
+
+    # Apply Patch 3
+    patch_transpose_to_landscape()
 
 
 class Dust3rOnnxWrapper(nn.Module):
@@ -248,19 +290,49 @@ def main():
     ensure_dependencies()
     install_and_import_dust3r()
 
-    # Load model first to ensure modules are imported, then patch
-    # Actually, we need to import modules to patch them.
-    # install_and_import_dust3r adds path, but doesn't import everything.
-    # But from_pretrained will trigger imports.
-    # If we patch AFTER loading, the instances might already be created with bound methods?
-    # Python methods are usually looked up on class at runtime, so patching Class.method works even for existing instances.
-
     from dust3r.model import AsymmetricCroCo3DStereo
     print(f"Loading model {MODEL_NAME}...")
     model = AsymmetricCroCo3DStereo.from_pretrained(MODEL_NAME)
 
-    # Now patch
+    # Apply patches after loading to ensure modules are ready but before tracing
     patch_dust3r_for_onnx()
+
+    # Re-instantiate heads or re-apply transpose_to_landscape if it was applied at init?
+    # model.head1 and model.head2 are created in __init__ using transpose_to_landscape.
+    # The patching of `dust3r.utils.misc.transpose_to_landscape` only affects FUTURE calls.
+    # We need to manually re-wrap the heads of the loaded model.
+
+    print("Re-wrapping model heads with patched logic...")
+    # Logic from model.py:
+    # self.head1 = transpose_to_landscape(self.downstream_head1, activate=landscape_only)
+
+    # We need to access the underlying function from the patch we just applied
+    from dust3r.utils.misc import transpose_to_landscape
+
+    # Check if 'landscape_only' was true or false.
+    # In load_model (called by from_pretrained), it ensures 'landscape_only=False'.
+    # So activate was likely True (because args said landscape_only=False, but then... wait)
+    # in model.py:
+    # self.head1 = transpose_to_landscape(self.downstream_head1, activate=landscape_only)
+    # The loaded args string forces landscape_only=False.
+    # So activate=False passed to transpose_to_landscape? No, wait.
+    # If landscape_only=False, then activate=?
+    # Let's check model.py again.
+    # def set_downstream_head(..., landscape_only, ...):
+    #    self.head1 = transpose_to_landscape(self.downstream_head1, activate=landscape_only)
+
+    # The checkpoint args are modified to force landscape_only=False.
+    # So activate=False.
+    # So it uses wrapper_no.
+
+    # Our patched `transpose_to_landscape` ignores the `activate` arg and returns `wrapper_no` anyway (patched version).
+    # So we just re-wrap using the patched function.
+
+    # Note: We assume the existing head1 is a wrapper, but we want to wrap the inner head.
+    # But self.downstream_head1 is stored on the object.
+
+    model.head1 = transpose_to_landscape(model.downstream_head1, activate=False)
+    model.head2 = transpose_to_landscape(model.downstream_head2, activate=False)
 
     model.eval()
 
