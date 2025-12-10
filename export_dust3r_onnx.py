@@ -444,9 +444,11 @@ def main():
             # Force legacy exporter by using torch.jit.trace first
             print("Tracing model with torch.jit.trace...")
             with torch.no_grad():
+                # check_trace=False disables the verification step that fails with FakeTensors
                 traced_model = torch.jit.trace(
                     wrapped_model,
-                    (dummy_img1, dummy_img2, dummy_true_shape1, dummy_true_shape2)
+                    (dummy_img1, dummy_img2, dummy_true_shape1, dummy_true_shape2),
+                    check_trace=False
                 )
 
             print("Exporting traced model to ONNX...")
@@ -473,9 +475,11 @@ def main():
         fixed_output_path = onnx_output_path.replace('.onnx', '_fixed_512x512.onnx')
         try:
             with torch.no_grad():
+                # check_trace=False disables the verification step that fails with FakeTensors
                 traced_model = torch.jit.trace(
                     wrapped_model,
-                    (dummy_img1, dummy_img2, dummy_true_shape1, dummy_true_shape2)
+                    (dummy_img1, dummy_img2, dummy_true_shape1, dummy_true_shape2),
+                    check_trace=False
                 )
 
             torch.onnx.export(
