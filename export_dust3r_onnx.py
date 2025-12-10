@@ -437,7 +437,7 @@ def main():
         import traceback
         traceback.print_exc()
 
-    # --- Strategy 2: Try legacy TorchScript-based export ---
+    # --- Strategy 2: Try legacy TorchScript-based export with dynamic axes ---
     if not export_success:
         print("\nAttempting fallback with legacy TorchScript-based exporter...")
         try:
@@ -451,7 +451,9 @@ def main():
                     check_trace=False
                 )
 
-            print("Exporting traced model to ONNX...")
+            print("Exporting traced model to ONNX (with dynamic axes)...")
+            # dynamo=False forces the legacy TorchScript-based ONNX exporter
+            # This avoids the dynamo exporter trying to re-trace and failing
             torch.onnx.export(
                 traced_model,
                 (dummy_img1, dummy_img2, dummy_true_shape1, dummy_true_shape2),
@@ -460,12 +462,13 @@ def main():
                 output_names=['pts3d1', 'conf1', 'pts3d2', 'conf2'],
                 opset_version=17,
                 dynamic_axes=dynamic_axes_config,
-                do_constant_folding=True
+                do_constant_folding=True,
+                dynamo=False  # Force legacy exporter
             )
             export_success = True
             print(f"Success! Model exported to {onnx_output_path} (via TorchScript)")
         except Exception as e2:
-            print(f"TorchScript-based export also failed: {e2}")
+            print(f"TorchScript-based export with dynamic axes failed: {e2}")
             import traceback
             traceback.print_exc()
 
@@ -482,6 +485,8 @@ def main():
                     check_trace=False
                 )
 
+            print("Exporting traced model to ONNX (fixed shapes)...")
+            # dynamo=False forces the legacy TorchScript-based ONNX exporter
             torch.onnx.export(
                 traced_model,
                 (dummy_img1, dummy_img2, dummy_true_shape1, dummy_true_shape2),
@@ -489,8 +494,8 @@ def main():
                 input_names=['img1', 'img2', 'true_shape1', 'true_shape2'],
                 output_names=['pts3d1', 'conf1', 'pts3d2', 'conf2'],
                 opset_version=17,
-                do_constant_folding=True
-                # No dynamic_axes = fixed shape model
+                do_constant_folding=True,
+                dynamo=False  # Force legacy exporter
             )
             export_success = True
             print(f"Success! Fixed-shape model exported to {fixed_output_path}")
