@@ -5,6 +5,25 @@ import torch
 import torch.nn as nn
 import argparse
 
+# Register custom ONNX symbolic for aten::clip (not supported in legacy exporter)
+from torch.onnx import register_custom_op_symbolic
+
+def clip_symbolic(g, input, min_val=None, max_val=None):
+    """Custom symbolic function for aten::clip -> ONNX Clip"""
+    # Handle the case where min/max might be None or tensors
+    if min_val is None or (hasattr(min_val, 'node') and min_val.node().kind() == 'prim::Constant' and min_val.node().output().type().kind() == 'NoneType'):
+        min_val = g.op("Constant", value_t=torch.tensor(float('-inf')))
+    if max_val is None or (hasattr(max_val, 'node') and max_val.node().kind() == 'prim::Constant' and max_val.node().output().type().kind() == 'NoneType'):
+        max_val = g.op("Constant", value_t=torch.tensor(float('inf')))
+    return g.op("Clip", input, min_val, max_val)
+
+# Register for multiple opset versions
+for opset in range(9, 20):
+    try:
+        register_custom_op_symbolic('aten::clip', clip_symbolic, opset)
+    except:
+        pass
+
 # Configuration
 REPO_URL = "https://github.com/naver/dust3r.git"
 REPO_DIR = "dust3r_repo"
@@ -427,7 +446,7 @@ def main():
             onnx_output_path,
             input_names=['img1', 'img2', 'true_shape1', 'true_shape2'],
             output_names=['pts3d1', 'conf1', 'pts3d2', 'conf2'],
-            opset_version=17,
+            opset_version=14,
             dynamic_axes=dynamic_axes_config
         )
         export_success = True
@@ -460,7 +479,7 @@ def main():
                 onnx_output_path,
                 input_names=['img1', 'img2', 'true_shape1', 'true_shape2'],
                 output_names=['pts3d1', 'conf1', 'pts3d2', 'conf2'],
-                opset_version=17,
+                opset_version=14,
                 dynamic_axes=dynamic_axes_config,
                 do_constant_folding=True,
                 dynamo=False  # Force legacy exporter
@@ -493,7 +512,7 @@ def main():
                 fixed_output_path,
                 input_names=['img1', 'img2', 'true_shape1', 'true_shape2'],
                 output_names=['pts3d1', 'conf1', 'pts3d2', 'conf2'],
-                opset_version=17,
+                opset_version=14,
                 do_constant_folding=True,
                 dynamo=False  # Force legacy exporter
             )
