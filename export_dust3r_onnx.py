@@ -3,12 +3,12 @@ import sys
 import subprocess
 import torch
 import torch.nn as nn
+import argparse
 
 # Configuration
 REPO_URL = "https://github.com/naver/dust3r.git"
 REPO_DIR = "dust3r_repo"
 MODEL_NAME = "naver/DUSt3R_ViTLarge_BaseDecoder_512_dpt" # Using a standard model
-ONNX_OUTPUT_PATH = "dust3r.onnx"
 
 def install_and_import_dust3r():
     """
@@ -78,7 +78,15 @@ class Dust3rOnnxWrapper(nn.Module):
 
         return pts3d1, conf1, pts3d2, conf2
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Export Dust3r model to ONNX.")
+    parser.add_argument("--output", type=str, default="dust3r.onnx", help="Path to save the exported ONNX model.")
+    return parser.parse_args()
+
 def main():
+    args = parse_args()
+    onnx_output_path = args.output
+
     ensure_dependencies()
     install_and_import_dust3r()
 
@@ -104,7 +112,7 @@ def main():
     dummy_true_shape1 = torch.tensor([[H, W]], dtype=torch.int32)
     dummy_true_shape2 = torch.tensor([[H, W]], dtype=torch.int32)
 
-    print(f"Exporting to {ONNX_OUTPUT_PATH}...")
+    print(f"Exporting to {onnx_output_path}...")
 
     # Dynamic axes definition to allow different resolutions and batch sizes
     dynamic_axes = {
@@ -123,13 +131,13 @@ def main():
         torch.onnx.export(
             wrapped_model,
             (dummy_img1, dummy_img2, dummy_true_shape1, dummy_true_shape2),
-            ONNX_OUTPUT_PATH,
+            onnx_output_path,
             input_names=['img1', 'img2', 'true_shape1', 'true_shape2'],
             output_names=['pts3d1', 'conf1', 'pts3d2', 'conf2'],
             opset_version=17, # Higher opset for better transformer support
             dynamic_axes=dynamic_axes
         )
-        print(f"Success! Model exported to {ONNX_OUTPUT_PATH}")
+        print(f"Success! Model exported to {onnx_output_path}")
     except Exception as e:
         print(f"Export failed: {e}")
         import traceback
