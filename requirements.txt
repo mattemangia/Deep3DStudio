@@ -1,0 +1,6 @@
+torch>=2.0.0
+torchvision
+huggingface_hub
+einops
+opencv-python
+scipy

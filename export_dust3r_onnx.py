@@ -67,25 +67,48 @@ class Dust3rOnnxWrapper(nn.Module):
         res1, res2 = self.model(view1, view2)
 
         # Extract relevant outputs
-        # res1 keys: 'pts3d', 'conf' (if available)
-        # res2 keys: 'pts3d_in_other_view', 'conf'
+        # Dust3r model returns res1['pts3d'] and res2['pts3d'] (or 'pts3d_in_other_view' if transformed)
+        # We check keys carefully to avoid errors.
 
-        pts3d1 = res1['pts3d']
-        conf1 = res1.get('conf', torch.zeros(1)) # Handle cases without confidence if needed
+        # Note: In AsymmetricCroCo3DStereo.forward, res2['pts3d_in_other_view'] IS set by popping 'pts3d'.
+        # However, for robustness we check both.
 
-        pts3d2 = res2['pts3d_in_other_view']
+        pts3d1 = res1.get('pts3d')
+        if pts3d1 is None:
+             raise KeyError("Output res1 missing 'pts3d'")
+
+        conf1 = res1.get('conf', torch.zeros(1))
+
+        pts3d2 = res2.get('pts3d_in_other_view')
+        if pts3d2 is None:
+            pts3d2 = res2.get('pts3d') # Fallback if standard key is present
+
+        if pts3d2 is None:
+             raise KeyError("Output res2 missing 'pts3d' or 'pts3d_in_other_view'")
+
         conf2 = res2.get('conf', torch.zeros(1))
 
         return pts3d1, conf1, pts3d2, conf2
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Export Dust3r model to ONNX.")
-    parser.add_argument("--output", type=str, default="dust3r.onnx", help="Path to save the exported ONNX model.")
+    parser.add_argument("--output", type=str, default="dust3r.onnx", help="Path (file or directory) to save the exported ONNX model. If a directory is provided, 'dust3r.onnx' will be appended.")
     return parser.parse_args()
 
 def main():
     args = parse_args()
     onnx_output_path = args.output
+
+    # Handle directory output
+    if os.path.isdir(onnx_output_path):
+        onnx_output_path = os.path.join(onnx_output_path, "dust3r.onnx")
+    elif not onnx_output_path.endswith('.onnx'):
+        # If user provided a path without extension but it's not an existing dir, assume they meant a file.
+        # But if they meant a dir that doesn't exist, this might be ambiguous.
+        # Standard behavior: exact path.
+        # But if it looks like a directory (no extension), maybe warn or append?
+        # Let's stick to: if it is an existing dir, join. Else use as is.
+        pass
 
     ensure_dependencies()
     install_and_import_dust3r()
