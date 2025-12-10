@@ -1,0 +1,68 @@
+Dust3r ONNX Model Information
+=============================
+
+This file describes the interface for the exported Dust3r ONNX model.
+
+Inputs
+------
+
+1. `img1`
+   - Type: float32
+   - Shape: (Batch, 3, Height, Width)
+   - Description: The first input image. Should be normalized.
+   - Note: Dimensions `Height` and `Width` are dynamic but must be multiples of the patch size (usually 16).
+
+2. `img2`
+   - Type: float32
+   - Shape: (Batch, 3, Height, Width)
+   - Description: The second input image.
+   - Note: Same resolution constraints as `img1`.
+
+3. `true_shape1`
+   - Type: int32
+   - Shape: (Batch, 2)
+   - Description: The original resolution of the first image as [Height, Width].
+   - Note: Used by the model to handle aspect ratios correctly.
+
+4. `true_shape2`
+   - Type: int32
+   - Shape: (Batch, 2)
+   - Description: The original resolution of the second image as [Height, Width].
+
+Outputs
+-------
+
+1. `pts3d1`
+   - Type: float32
+   - Shape: (Batch, Height, Width, 3)
+   - Description: Estimated 3D points for pixels in `img1`, expressed in the coordinate system of `img1`.
+
+2. `conf1`
+   - Type: float32
+   - Shape: (Batch, Height, Width)
+   - Description: Confidence map for the 3D estimates of `img1`. Higher values indicate higher confidence.
+
+3. `pts3d2`
+   - Type: float32
+   - Shape: (Batch, Height, Width, 3)
+   - Description: Estimated 3D points for pixels in `img2`, expressed in the **coordinate system of `img1`** (aligned).
+
+4. `conf2`
+   - Type: float32
+   - Shape: (Batch, Height, Width)
+   - Description: Confidence map for the 3D estimates of `img2`.
+
+Usage in C# (Microsoft.ML.OnnxRuntime)
+--------------------------------------
+When loading this model in C#, ensure you populate the input named-values dictionary with keys matching the input names above (`img1`, `img2`, `true_shape1`, `true_shape2`).
+
+Dynamic Axes
+------------
+- Batch size (dim 0) is dynamic for all inputs/outputs.
+- Height (dim 2 for images, dim 1 for points) and Width (dim 3 for images, dim 2 for points) are dynamic.
+- Ensure `img1` and `img2` have the same resolution for the inference call.
+
+Preprocessing
+-------------
+Images are typically preprocessed with:
+- Normalization (mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]) is standard for Dust3r (derived from CroCo).
