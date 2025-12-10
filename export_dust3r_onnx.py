@@ -173,22 +173,17 @@ def patch_dust3r_for_onnx():
                 image_size = self.image_size if image_size is None else image_size
                 H, W = image_size
 
-                # --- PATCH: Constrain symbolic shapes ---
-                # This fixes "GuardOnDataDependentSymNode: u0 < 1"
-                # We tell the compiler that the image dimensions are at least 32 pixels
-                # (or whatever ensures N_H >= 1). Patch size is typically 16.
-                # 16 * 1 = 16. So H >= 16 is min. We use 32 to be safe.
-                if hasattr(torch.export, "constrain_as_size"):
-                     torch.export.constrain_as_size(H, min=32)
-                     torch.export.constrain_as_size(W, min=32)
-                elif hasattr(torch.export, "constrain_as_value"):
-                     torch.export.constrain_as_value(H, min=32)
-                     torch.export.constrain_as_value(W, min=32)
-                # ----------------------------------------
-
                 # Number of patches in height and width
                 N_H = H // (self.stride_level * self.P_H)
                 N_W = W // (self.stride_level * self.P_W)
+
+                # --- PATCH: Assert shape constraints for torch.export ---
+                # This fixes "GuardOnDataDependentSymNode: u0 < 1" error.
+                # torch._check tells the symbolic tracer that N_H and N_W are always >= 1
+                # This is required because the tracer can't infer this from the division.
+                torch._check(N_H >= 1)
+                torch._check(N_W >= 1)
+                # --------------------------------------------------------
 
                 # Hook decoder onto 4 layers from specified ViT layers
                 layers = [encoder_tokens[hook] for hook in self.hooks]
@@ -198,6 +193,13 @@ def patch_dust3r_for_onnx():
 
                 # Reshape tokens to spatial representation
                 layers = [rearrange(l, 'b (nh nw) c -> b c nh nw', nh=N_H, nw=N_W) for l in layers]
+
+                # --- PATCH: Assert spatial dimensions are valid before conv ops ---
+                # The conv2d operation needs to know that spatial dims are >= 1
+                for i, l in enumerate(layers):
+                    torch._check(l.shape[2] >= 1)
+                    torch._check(l.shape[3] >= 1)
+                # ------------------------------------------------------------------
 
                 layers = [self.act_postprocess[idx](l) for idx, l in enumerate(layers)]
                 # Project layers to chosen feature dim
@@ -219,6 +221,41 @@ def patch_dust3r_for_onnx():
 
         except Exception as e:
             print(f"Error patching DPTOutputAdapter_fix: {e}")
+
+    # --- Patch 5: Disable autocast during export ---
+    # The torch.cuda.amp.autocast context manager can cause issues with torch.export
+    def patch_autocast():
+        try:
+            import dust3r.model as dust3r_model
+
+            # Store original forward
+            original_forward = dust3r_model.AsymmetricCroCo3DStereo.forward
+
+            def new_model_forward(self, view1, view2):
+                # Remove the autocast wrapper - just run in float32
+                # This is the relevant part from the original forward:
+                # with torch.cuda.amp.autocast(enabled=False):
+                #     res1 = self._downstream_head(...)
+                #     res2 = self._downstream_head(...)
+
+                # Get the encoder output
+                (shape1, shape2), (feat1, feat2), (pos1, pos2) = self._encode_symmetrized(view1, view2)
+
+                dec1, dec2 = self._decoder(feat1, pos1, feat2, pos2)
+
+                # Call downstream heads without autocast wrapper
+                res1 = self._downstream_head(1, [tok.float() for tok in dec1], shape1)
+                res2 = self._downstream_head(2, [tok.float() for tok in dec2], shape2)
+
+                res2['pts3d_in_other_view'] = res2.pop('pts3d')  # Rename key
+                return res1, res2
+
+            dust3r_model.AsymmetricCroCo3DStereo.forward = new_model_forward
+            print("Patched dust3r.model.AsymmetricCroCo3DStereo.forward (removed autocast)")
+        except Exception as e:
+            print(f"Warning: Could not patch autocast: {e}")
+
+    patch_autocast()
 
     # Apply Patch 1 (PositionGetter)
     patched_pos = False
@@ -368,74 +405,22 @@ def main():
 
     print(f"Exporting to {onnx_output_path}...")
 
-    # Define dynamic shapes explicitely to help the exporter constraints
-    # This replaces simple dict dynamic_axes with explicit dynamic_shapes spec for torch.export based ONNX
-
-    # Batch size
-    B_dim = torch.export.Dim("batch_size", min=1)
-    # Height and Width must be multiples of patch size (16).
-    # We can constrain them to be >= 224 or similar to avoid "u0 < 1" errors if U0 is derived from them.
-    # U0 in error was likely N_H or N_W (number of patches).
-    # N_H = H // 16. If H < 16, N_H < 1.
-    # So we need H >= 16. Let's start with a safer min like 32.
-    H_dim = torch.export.Dim("height", min=32)
-    W_dim = torch.export.Dim("width", min=32)
-
-    dynamic_shapes = {
-        'img1': {0: B_dim, 2: H_dim, 3: W_dim},
-        'img2': {0: B_dim, 2: H_dim, 3: W_dim},
-        'true_shape1': {0: B_dim},
-        'true_shape2': {0: B_dim},
+    dynamic_axes_config = {
+        'img1': {0: 'batch_size', 2: 'height', 3: 'width'},
+        'img2': {0: 'batch_size', 2: 'height', 3: 'width'},
+        'true_shape1': {0: 'batch_size'},
+        'true_shape2': {0: 'batch_size'},
+        'pts3d1': {0: 'batch_size', 1: 'height', 2: 'width'},
+        'conf1': {0: 'batch_size', 1: 'height', 2: 'width'},
+        'pts3d2': {0: 'batch_size', 1: 'height', 2: 'width'},
+        'conf2': {0: 'batch_size', 1: 'height', 2: 'width'}
     }
 
+    export_success = False
+
+    # --- Strategy 1: Try dynamo-based export (default in PyTorch 2.x) ---
+    print("Attempting export with dynamo-based exporter...")
     try:
-        # Use newer torch.onnx.export API defaults (which use dynamo) but feed it the dynamic_shapes
-        # Note: 'dynamic_shapes' arg in torch.onnx.export is specific to dynamo exporter.
-        # 'dynamic_axes' is for the legacy exporter.
-        # The user's error trace showed internal usage of torch.export, meaning Dynamo IS being used (default in 2.x often).
-        # We will try passing dynamic_shapes if available in this torch version's export, otherwise rely on the patch + dynamic_axes.
-
-        # In Torch 2.4, onnx.export supports 'dynamic_shapes' instead of 'dynamic_axes' when using dynamo=True?
-        # Actually, torch.onnx.export still accepts dynamic_axes for compatibility.
-        # But to solve the Guard error, we need to enforce constraints.
-
-        # Let's try to set dynamic_axes but with keys that imply the constraint? No, dynamic_axes is just names.
-
-        # Strategy: Use torch.export.export manually to create an ExportedProgram with constraints, then onnx export that?
-        # That's complicated.
-
-        # Simpler: Just ensure input dummy vars are large enough, and hope the 'min=32' constraint is inferred?
-        # No, we need to pass constraints.
-
-        # If we stick to legacy export (dynamo=False), we might avoid this Guard issue entirely!
-        # The trace shows `torch.onnx._internal.exporter._capture_strategies.py` calling `torch.export.export`.
-        # This means the new exporter is active.
-        # We can force legacy exporter by `dynamo=False`? No, that arg might not exist or be `export_options`.
-
-        # For torch >= 2.1, passing `input_names` / `dynamic_axes` usually triggers legacy path unless configured otherwise?
-        # Wait, the log says: "Setting ONNX exporter to use operator set version 18 ... Automatic version conversion ...".
-
-        # Let's try to disable Dynamo by treating it as a ScriptModule? No.
-
-        # We will use `dynamic_axes` as before, but since we removed `torch._check`, we rely on `patch_dpt_head` logic being clean.
-        # The `u0 < 1` error appeared BEFORE I added `torch._check` (in the user's run).
-        # It appeared at `layers = [self.act_postprocess[idx](l) for idx, l in enumerate(layers)]`.
-        # This implies `layers` (derived from `encoder_tokens`) has a size issue or `N_H` issue.
-        # `N_H = H // (self.stride_level * self.P_H)`.
-        # If H=512, N_H is plenty.
-        # Why did it think `u0 < 1`? `u0` is a symbol.
-        # The compiler treats `H` as a symbol (unbounded). So `N_H` is `Symbol // Constant`.
-        # It doesn't know `H >= 32`.
-
-        # FIX: We MUST constrain the symbol H and W.
-        # We can do this by adding assertions in the patched forward pass using pure python `assert` which dynamo might trace into constraints?
-        # No, dynamo guards on asserts.
-        # The best way is `torch.export.constrain_as_size(H, min=32)`.
-        # This is safe to add in the patched function.
-
-        pass
-        # (See below for implementation inside patch_dpt_head in the wrapper)
-
         torch.onnx.export(
             wrapped_model,
             (dummy_img1, dummy_img2, dummy_true_shape1, dummy_true_shape2),
@@ -443,22 +428,84 @@ def main():
             input_names=['img1', 'img2', 'true_shape1', 'true_shape2'],
             output_names=['pts3d1', 'conf1', 'pts3d2', 'conf2'],
             opset_version=17,
-            dynamic_axes={
-                'img1': {0: 'batch_size', 2: 'height', 3: 'width'},
-                'img2': {0: 'batch_size', 2: 'height', 3: 'width'},
-                'true_shape1': {0: 'batch_size'},
-                'true_shape2': {0: 'batch_size'},
-                'pts3d1': {0: 'batch_size', 1: 'height', 2: 'width'},
-                'conf1': {0: 'batch_size', 1: 'height', 2: 'width'},
-                'pts3d2': {0: 'batch_size', 1: 'height', 2: 'width'},
-                'conf2': {0: 'batch_size', 1: 'height', 2: 'width'}
-            }
+            dynamic_axes=dynamic_axes_config
         )
+        export_success = True
         print(f"Success! Model exported to {onnx_output_path}")
     except Exception as e:
-        print(f"Export failed: {e}")
+        print(f"Dynamo-based export failed: {e}")
         import traceback
         traceback.print_exc()
+
+    # --- Strategy 2: Try legacy TorchScript-based export ---
+    if not export_success:
+        print("\nAttempting fallback with legacy TorchScript-based exporter...")
+        try:
+            # Force legacy exporter by using torch.jit.trace first
+            print("Tracing model with torch.jit.trace...")
+            with torch.no_grad():
+                traced_model = torch.jit.trace(
+                    wrapped_model,
+                    (dummy_img1, dummy_img2, dummy_true_shape1, dummy_true_shape2)
+                )
+
+            print("Exporting traced model to ONNX...")
+            torch.onnx.export(
+                traced_model,
+                (dummy_img1, dummy_img2, dummy_true_shape1, dummy_true_shape2),
+                onnx_output_path,
+                input_names=['img1', 'img2', 'true_shape1', 'true_shape2'],
+                output_names=['pts3d1', 'conf1', 'pts3d2', 'conf2'],
+                opset_version=17,
+                dynamic_axes=dynamic_axes_config,
+                do_constant_folding=True
+            )
+            export_success = True
+            print(f"Success! Model exported to {onnx_output_path} (via TorchScript)")
+        except Exception as e2:
+            print(f"TorchScript-based export also failed: {e2}")
+            import traceback
+            traceback.print_exc()
+
+    # --- Strategy 3: Export with fixed shapes (no dynamic axes) ---
+    if not export_success:
+        print("\nAttempting export with fixed input shapes (no dynamic axes)...")
+        fixed_output_path = onnx_output_path.replace('.onnx', '_fixed_512x512.onnx')
+        try:
+            with torch.no_grad():
+                traced_model = torch.jit.trace(
+                    wrapped_model,
+                    (dummy_img1, dummy_img2, dummy_true_shape1, dummy_true_shape2)
+                )
+
+            torch.onnx.export(
+                traced_model,
+                (dummy_img1, dummy_img2, dummy_true_shape1, dummy_true_shape2),
+                fixed_output_path,
+                input_names=['img1', 'img2', 'true_shape1', 'true_shape2'],
+                output_names=['pts3d1', 'conf1', 'pts3d2', 'conf2'],
+                opset_version=17,
+                do_constant_folding=True
+                # No dynamic_axes = fixed shape model
+            )
+            export_success = True
+            print(f"Success! Fixed-shape model exported to {fixed_output_path}")
+            print("Note: This model only accepts 512x512 inputs. For dynamic shapes, additional work is needed.")
+        except Exception as e3:
+            print(f"Fixed-shape export also failed: {e3}")
+            import traceback
+            traceback.print_exc()
+
+    if not export_success:
+        print("\n" + "="*60)
+        print("ALL EXPORT STRATEGIES FAILED")
+        print("="*60)
+        print("Please check the error messages above.")
+        print("Common issues:")
+        print("  1. Missing torch._check() constraints on tensor shapes")
+        print("  2. Data-dependent control flow in the model")
+        print("  3. Unsupported operations for ONNX export")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
