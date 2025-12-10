@@ -5,24 +5,104 @@ import torch
 import torch.nn as nn
 import argparse
 
-# Register custom ONNX symbolic for aten::clip (not supported in legacy exporter)
+# =============================================================================
+# Register ALL custom ONNX symbolic functions for unsupported operators
+# =============================================================================
 from torch.onnx import register_custom_op_symbolic
+import torch.onnx.symbolic_helper as sym_help
 
 def clip_symbolic(g, input, min_val=None, max_val=None):
-    """Custom symbolic function for aten::clip -> ONNX Clip"""
-    # Handle the case where min/max might be None or tensors
-    if min_val is None or (hasattr(min_val, 'node') and min_val.node().kind() == 'prim::Constant' and min_val.node().output().type().kind() == 'NoneType'):
+    """aten::clip -> ONNX Clip"""
+    if min_val is None or (hasattr(min_val, 'node') and min_val.node().kind() == 'prim::Constant'
+                           and min_val.node().output().type().kind() == 'NoneType'):
         min_val = g.op("Constant", value_t=torch.tensor(float('-inf')))
-    if max_val is None or (hasattr(max_val, 'node') and max_val.node().kind() == 'prim::Constant' and max_val.node().output().type().kind() == 'NoneType'):
+    if max_val is None or (hasattr(max_val, 'node') and max_val.node().kind() == 'prim::Constant'
+                           and max_val.node().output().type().kind() == 'NoneType'):
         max_val = g.op("Constant", value_t=torch.tensor(float('inf')))
     return g.op("Clip", input, min_val, max_val)
 
-# Register for multiple opset versions
-for opset in range(9, 20):
-    try:
-        register_custom_op_symbolic('aten::clip', clip_symbolic, opset)
-    except:
-        pass
+def expm1_symbolic(g, input):
+    """aten::expm1 -> exp(x) - 1"""
+    exp_val = g.op("Exp", input)
+    one = g.op("Constant", value_t=torch.tensor(1.0))
+    return g.op("Sub", exp_val, one)
+
+def log1p_symbolic(g, input):
+    """aten::log1p -> log(1 + x)"""
+    one = g.op("Constant", value_t=torch.tensor(1.0))
+    added = g.op("Add", input, one)
+    return g.op("Log", added)
+
+def rsqrt_symbolic(g, input):
+    """aten::rsqrt -> 1 / sqrt(x)"""
+    sqrt_val = g.op("Sqrt", input)
+    one = g.op("Constant", value_t=torch.tensor(1.0))
+    return g.op("Div", one, sqrt_val)
+
+def silu_symbolic(g, input):
+    """aten::silu -> x * sigmoid(x)"""
+    sigmoid_val = g.op("Sigmoid", input)
+    return g.op("Mul", input, sigmoid_val)
+
+def mish_symbolic(g, input):
+    """aten::mish -> x * tanh(softplus(x))"""
+    softplus = g.op("Softplus", input)
+    tanh_val = g.op("Tanh", softplus)
+    return g.op("Mul", input, tanh_val)
+
+def hardswish_symbolic(g, input):
+    """aten::hardswish -> x * relu6(x + 3) / 6"""
+    three = g.op("Constant", value_t=torch.tensor(3.0))
+    six = g.op("Constant", value_t=torch.tensor(6.0))
+    zero = g.op("Constant", value_t=torch.tensor(0.0))
+    added = g.op("Add", input, three)
+    clipped = g.op("Clip", added, zero, six)
+    return g.op("Div", g.op("Mul", input, clipped), six)
+
+def hardsigmoid_symbolic(g, input):
+    """aten::hardsigmoid -> relu6(x + 3) / 6"""
+    three = g.op("Constant", value_t=torch.tensor(3.0))
+    six = g.op("Constant", value_t=torch.tensor(6.0))
+    zero = g.op("Constant", value_t=torch.tensor(0.0))
+    added = g.op("Add", input, three)
+    clipped = g.op("Clip", added, zero, six)
+    return g.op("Div", clipped, six)
+
+def gelu_symbolic(g, input):
+    """aten::gelu -> approximate with tanh"""
+    # GELU(x) ≈ 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
+    sqrt_2_over_pi = g.op("Constant", value_t=torch.tensor(0.7978845608028654))
+    coeff = g.op("Constant", value_t=torch.tensor(0.044715))
+    half = g.op("Constant", value_t=torch.tensor(0.5))
+    one = g.op("Constant", value_t=torch.tensor(1.0))
+
+    x_cubed = g.op("Pow", input, g.op("Constant", value_t=torch.tensor(3.0)))
+    inner = g.op("Add", input, g.op("Mul", coeff, x_cubed))
+    inner = g.op("Mul", sqrt_2_over_pi, inner)
+    tanh_val = g.op("Tanh", inner)
+    return g.op("Mul", half, g.op("Mul", input, g.op("Add", one, tanh_val)))
+
+# Register all custom symbolics for opset versions 9-20
+custom_ops = {
+    'aten::clip': clip_symbolic,
+    'aten::expm1': expm1_symbolic,
+    'aten::log1p': log1p_symbolic,
+    'aten::rsqrt': rsqrt_symbolic,
+    'aten::silu': silu_symbolic,
+    'aten::mish': mish_symbolic,
+    'aten::hardswish': hardswish_symbolic,
+    'aten::hardsigmoid': hardsigmoid_symbolic,
+    'aten::gelu': gelu_symbolic,
+}
+
+for op_name, op_func in custom_ops.items():
+    for opset in range(9, 21):
+        try:
+            register_custom_op_symbolic(op_name, op_func, opset)
+        except Exception:
+            pass
+
+print(f"Registered {len(custom_ops)} custom ONNX symbolic functions")
 
 # Configuration
 REPO_URL = "https://github.com/naver/dust3r.git"
