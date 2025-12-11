@@ -558,11 +558,65 @@ def parse_args():
     parser.add_argument("--output", type=str, default="dust3r.onnx", help="Path (file or directory) to save the exported ONNX model. If a directory is provided, 'dust3r.onnx' will be appended.")
     return parser.parse_args()
 
+def save_onnx_with_external_data(onnx_path):
+    """
+    Re-save ONNX model with external data format.
+    This is REQUIRED for models > 2GB due to protobuf limitations.
+    The weights will be saved to a separate .onnx.data file.
+    """
+    import onnx
+    from onnx.external_data_helper import convert_model_to_external_data
+
+    print(f"\nConverting to external data format (required for models > 2GB)...")
+
+    # Load the model
+    model = onnx.load(onnx_path)
+
+    # Get the directory and filename
+    onnx_dir = os.path.dirname(os.path.abspath(onnx_path))
+    onnx_filename = os.path.basename(onnx_path)
+    data_filename = onnx_filename + ".data"
+
+    # Convert to external data format
+    convert_model_to_external_data(
+        model,
+        all_tensors_to_one_file=True,
+        location=data_filename,
+        size_threshold=1024,  # Tensors larger than 1KB go to external file
+        convert_attribute=False
+    )
+
+    # Save the model (this will create both .onnx and .onnx.data files)
+    onnx.save_model(model, onnx_path)
+
+    # Verify the files exist and report sizes
+    data_path = os.path.join(onnx_dir, data_filename)
+    if os.path.exists(data_path):
+        onnx_size = os.path.getsize(onnx_path) / (1024*1024)
+        data_size = os.path.getsize(data_path) / (1024*1024)
+        print(f"  - ONNX file: {onnx_path} ({onnx_size:.2f} MB)")
+        print(f"  - Data file: {data_path} ({data_size:.2f} MB)")
+        print(f"  - Total size: {onnx_size + data_size:.2f} MB")
+        print(f"\nIMPORTANT: Keep both files together when deploying the model!")
+        return True
+    else:
+        print(f"Warning: External data file not created at {data_path}")
+        return False
+
 def verify_onnx_has_weights(onnx_path):
     """Verify that the exported ONNX model contains weight initializers."""
     try:
         import onnx
-        model = onnx.load(onnx_path)
+
+        # Check if external data file exists
+        data_path = onnx_path + ".data"
+        has_external_data = os.path.exists(data_path)
+
+        if has_external_data:
+            # Load with external data
+            model = onnx.load(onnx_path, load_external_data=True)
+        else:
+            model = onnx.load(onnx_path)
 
         # Count initializers (weights)
         num_initializers = len(model.graph.initializer)
@@ -570,20 +624,38 @@ def verify_onnx_has_weights(onnx_path):
             init.ByteSize() for init in model.graph.initializer
         )
 
+        onnx_file_size = os.path.getsize(onnx_path) / (1024*1024)
+        total_file_size = onnx_file_size
+        if has_external_data:
+            total_file_size += os.path.getsize(data_path) / (1024*1024)
+
         print(f"\n{'='*60}")
         print(f"ONNX Model Verification:")
         print(f"  - Number of initializers (weights): {num_initializers}")
         print(f"  - Total weight data size: {total_weight_size / (1024*1024):.2f} MB")
-        print(f"  - File size: {os.path.getsize(onnx_path) / (1024*1024):.2f} MB")
+        print(f"  - ONNX file size: {onnx_file_size:.2f} MB")
+        if has_external_data:
+            print(f"  - External data file: {os.path.getsize(data_path) / (1024*1024):.2f} MB")
+        print(f"  - Total file size: {total_file_size:.2f} MB")
+        print(f"  - External data format: {'Yes' if has_external_data else 'No'}")
         print(f"{'='*60}\n")
 
-        if num_initializers == 0 or total_weight_size < 1024*1024:  # Less than 1MB of weights
-            print("WARNING: Model appears to have no weights or very few weights!")
-            print("This is likely an export error.")
+        if num_initializers == 0:
+            print("WARNING: Model has no weight initializers!")
             return False
+
+        # Check if file size is reasonable (should be close to weight size for non-external)
+        if not has_external_data and total_file_size < total_weight_size / (1024*1024) * 0.5:
+            print("WARNING: File size is much smaller than weight data!")
+            print("This may indicate weights were not properly saved.")
+            print("Will attempt to convert to external data format...")
+            return False
+
         return True
     except Exception as e:
         print(f"Could not verify ONNX model: {e}")
+        import traceback
+        traceback.print_exc()
         return True  # Don't fail if verification itself fails
 
 
@@ -668,7 +740,11 @@ def main():
         )
         export_success = True
         print(f"Success! Model exported to {onnx_output_path}")
-        verify_onnx_has_weights(onnx_output_path)
+
+        # Verify and convert to external data format if needed (for models > 2GB)
+        if not verify_onnx_has_weights(onnx_output_path):
+            save_onnx_with_external_data(onnx_output_path)
+            verify_onnx_has_weights(onnx_output_path)
     except Exception as e:
         print(f"Dynamo-based export failed: {e}")
         import traceback
@@ -699,7 +775,11 @@ def main():
                 )
             export_success = True
             print(f"Success! Model exported to {onnx_output_path} (via legacy exporter)")
-            verify_onnx_has_weights(onnx_output_path)
+
+            # Verify and convert to external data format if needed (for models > 2GB)
+            if not verify_onnx_has_weights(onnx_output_path):
+                save_onnx_with_external_data(onnx_output_path)
+                verify_onnx_has_weights(onnx_output_path)
         except Exception as e2:
             print(f"Legacy export with dynamic axes failed: {e2}")
             import traceback
@@ -728,7 +808,11 @@ def main():
             export_success = True
             print(f"Success! Fixed-shape model exported to {fixed_output_path}")
             print("Note: This model only accepts 512x512 inputs. For dynamic shapes, additional work is needed.")
-            verify_onnx_has_weights(fixed_output_path)
+
+            # Verify and convert to external data format if needed (for models > 2GB)
+            if not verify_onnx_has_weights(fixed_output_path):
+                save_onnx_with_external_data(fixed_output_path)
+                verify_onnx_has_weights(fixed_output_path)
         except Exception as e3:
             print(f"Fixed-shape export also failed: {e3}")
             import traceback
