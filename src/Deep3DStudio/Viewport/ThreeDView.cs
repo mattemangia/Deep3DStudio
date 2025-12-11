@@ -213,14 +213,92 @@ namespace Deep3DStudio.Viewport
 
         private void DrawPointCloud(Model.MeshData mesh)
         {
-             GL.Begin(PrimitiveType.Points);
-             for(int i=0; i<mesh.Vertices.Count; i++)
-             {
-                 var c = mesh.Colors[i];
-                 GL.Color3(c.X, c.Y, c.Z);
-                 GL.Vertex3(mesh.Vertices[i]);
-             }
-             GL.End();
+            var settings = AppSettings.Instance;
+
+            if (settings.PointCloudColor == PointCloudColorMode.DistanceMap)
+            {
+                DrawPointCloudDepthMap(mesh);
+            }
+            else
+            {
+                // RGB mode - use original colors
+                GL.Begin(PrimitiveType.Points);
+                for(int i=0; i<mesh.Vertices.Count; i++)
+                {
+                    var c = mesh.Colors[i];
+                    GL.Color3(c.X, c.Y, c.Z);
+                    GL.Vertex3(mesh.Vertices[i]);
+                }
+                GL.End();
+            }
+        }
+
+        private void DrawPointCloudDepthMap(Model.MeshData mesh)
+        {
+            if (mesh.Vertices.Count == 0) return;
+
+            // Calculate min/max distance from origin for normalization
+            float minDist = float.MaxValue;
+            float maxDist = float.MinValue;
+
+            foreach(var v in mesh.Vertices)
+            {
+                float dist = v.Length;
+                if (dist < minDist) minDist = dist;
+                if (dist > maxDist) maxDist = dist;
+            }
+
+            float range = maxDist - minDist;
+            if (range < 0.0001f) range = 1.0f; // Avoid division by zero
+
+            GL.Begin(PrimitiveType.Points);
+            for(int i=0; i<mesh.Vertices.Count; i++)
+            {
+                var v = mesh.Vertices[i];
+                float dist = v.Length;
+                float t = (dist - minDist) / range; // Normalize to [0, 1]
+
+                // Apply turbo colormap
+                Vector3 color = TurboColormap(t);
+                GL.Color3(color.X, color.Y, color.Z);
+                GL.Vertex3(v);
+            }
+            GL.End();
+        }
+
+        private static Vector3 TurboColormap(float t)
+        {
+            // Turbo colormap approximation: blue -> cyan -> green -> yellow -> red
+            t = Math.Max(0f, Math.Min(1f, t));
+
+            float r, g, b;
+
+            if (t < 0.25f)
+            {
+                // Blue to Cyan
+                float s = t / 0.25f;
+                r = 0.0f; g = s; b = 1.0f;
+            }
+            else if (t < 0.5f)
+            {
+                // Cyan to Green
+                float s = (t - 0.25f) / 0.25f;
+                r = 0.0f; g = 1.0f; b = 1.0f - s;
+            }
+            else if (t < 0.75f)
+            {
+                // Green to Yellow
+                float s = (t - 0.5f) / 0.25f;
+                r = s; g = 1.0f; b = 0.0f;
+            }
+            else
+            {
+                // Yellow to Red
+                float s = (t - 0.75f) / 0.25f;
+                r = 1.0f; g = 1.0f - s; b = 0.0f;
+            }
+
+            return new Vector3(r, g, b);
         }
 
         private void DrawMesh(Model.MeshData mesh)
