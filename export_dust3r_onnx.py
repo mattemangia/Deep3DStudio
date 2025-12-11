@@ -563,21 +563,46 @@ def save_onnx_with_external_data(onnx_path):
     Re-save ONNX model with external data format.
     This is REQUIRED for models > 2GB due to protobuf limitations.
     The weights will be saved to a separate .onnx.data file.
+    This function also cleans up any scattered weight files created during export.
     """
     import onnx
     from onnx.external_data_helper import convert_model_to_external_data
+    import glob
 
     print(f"\nConverting to external data format (required for models > 2GB)...")
 
-    # Load the model
-    model = onnx.load(onnx_path)
-
     # Get the directory and filename
-    onnx_dir = os.path.dirname(os.path.abspath(onnx_path))
+    onnx_dir = os.path.dirname(os.path.abspath(onnx_path)) or '.'
     onnx_filename = os.path.basename(onnx_path)
     data_filename = onnx_filename + ".data"
+    data_path = os.path.join(onnx_dir, data_filename)
 
-    # Convert to external data format
+    # Find all potential scattered external data files in the directory
+    # These are created by torch.onnx.export when model is too large
+    scattered_files = []
+    for f in os.listdir(onnx_dir):
+        full_path = os.path.join(onnx_dir, f)
+        if os.path.isfile(full_path) and f != onnx_filename and f != data_filename:
+            # Check if it looks like a weight file (no extension, or specific patterns)
+            if (f.startswith('model.') or
+                f.startswith('onnx__') or
+                f.startswith('Constant_') or
+                ('weight' in f.lower() and not f.endswith('.py') and not f.endswith('.txt'))):
+                scattered_files.append(full_path)
+
+    if scattered_files:
+        print(f"  Found {len(scattered_files)} scattered weight files to consolidate...")
+
+    # Load the model - try with external data first
+    try:
+        # Try loading with external data (handles scattered files)
+        model = onnx.load(onnx_path, load_external_data=True)
+    except Exception as e:
+        print(f"  Warning: Could not load with external data: {e}")
+        print(f"  Trying to load without external data...")
+        model = onnx.load(onnx_path, load_external_data=False)
+
+    # Remove any existing external data references and convert to single file
     convert_model_to_external_data(
         model,
         all_tensors_to_one_file=True,
@@ -586,17 +611,40 @@ def save_onnx_with_external_data(onnx_path):
         convert_attribute=False
     )
 
-    # Save the model (this will create both .onnx and .onnx.data files)
-    onnx.save_model(model, onnx_path)
+    # Delete the old scattered files BEFORE saving (to avoid conflicts)
+    for f in scattered_files:
+        try:
+            os.remove(f)
+        except Exception as e:
+            print(f"  Warning: Could not remove {f}: {e}")
+
+    # Also remove old data file if it exists (will be recreated)
+    if os.path.exists(data_path):
+        try:
+            os.remove(data_path)
+        except:
+            pass
+
+    # Save the model - this creates both .onnx and .onnx.data files
+    # Use save_model with size threshold to force external data
+    onnx.save_model(
+        model,
+        onnx_path,
+        save_as_external_data=True,
+        all_tensors_to_one_file=True,
+        location=data_filename,
+        size_threshold=1024
+    )
 
     # Verify the files exist and report sizes
-    data_path = os.path.join(onnx_dir, data_filename)
     if os.path.exists(data_path):
         onnx_size = os.path.getsize(onnx_path) / (1024*1024)
         data_size = os.path.getsize(data_path) / (1024*1024)
         print(f"  - ONNX file: {onnx_path} ({onnx_size:.2f} MB)")
         print(f"  - Data file: {data_path} ({data_size:.2f} MB)")
         print(f"  - Total size: {onnx_size + data_size:.2f} MB")
+        if scattered_files:
+            print(f"  - Cleaned up {len(scattered_files)} scattered weight files")
         print(f"\nIMPORTANT: Keep both files together when deploying the model!")
         return True
     else:
