@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using OpenTK.Mathematics;
-using Deep3DStudio.Model; // Ensure ImageUtils is visible
+using Deep3DStudio.Model;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 
 namespace Deep3DStudio.Model
 {
@@ -130,41 +132,12 @@ namespace Deep3DStudio.Model
 
             for (int iter = 0; iter < iterations; iter++)
             {
-                // To avoid global locks, we accumulate gradients per thread/pose and merge them.
-                // However, allocating a full GridSize^3 array per thread is too much memory (128^3 * 4bytes * numThreads ~ GBs).
-                // Instead, we will process one image at a time in parallel blocks, or just accept that the outer loop
-                // iterates over poses sequentially, and we parallelize the PIXELS (Raycasting) within each pose.
-                // Parallelizing pixels allows us to accumulate into a per-pose gradient grid.
-                // This is still memory intensive if we have many poses.
-
-                // Better Strategy for Memory/Performance Balance:
-                // Accumulate gradients into a single global buffer, but use Atomics or small locks? No, OpenTK Vector3 isn't atomic.
-                // Or, simply process poses sequentially, but parallelize the raycasting for that pose,
-                // and accumulate into a `local` gradient buffer for that pose, then apply to global.
-                // Since `iter` loop is outer, sequential pose processing is fine.
-
                 var densityGrad = new float[GridSize, GridSize, GridSize];
                 var colorGrad = new Vector3[GridSize, GridSize, GridSize];
                 var counts = new int[GridSize, GridSize, GridSize];
 
-                // Parallel.ForEach over Poses is dangerous if they write to same `counts` array without lock.
-                // So we change loop to sequential over Poses, but Parallel over Pixels of that pose.
-
                 foreach (var pose in poses)
                 {
-                    // For this pose, we compute gradients.
-                    // We can reuse the gradient buffers if we reset them, or accumulate.
-                    // Let's accumulate for one epoch (all poses), then apply.
-                    // Wait, if we process poses sequentially, we can't write to `densityGrad` in parallel from multiple pixels
-                    // if those rays hit the same voxel!
-                    // Rays from the same image CAN hit the same voxel.
-                    // So we still need locking or atomics even within one image.
-
-                    // Optimized Approach:
-                    // Use a Dictionary<int, Accumulator> per thread in Parallel.For loop for pixels?
-                    // Then merge dictionaries.
-                    // This avoids the massive array allocation and locking contention.
-
                     ProcessImageOptimized(pose, densityGrad, colorGrad, counts);
                 }
 
@@ -177,11 +150,6 @@ namespace Deep3DStudio.Model
 
         private void ProcessImageOptimized(CameraPose pose, float[,,] densityGrad, Vector3[,,] colorGrad, int[,,] counts)
         {
-            // Load image data
-            // pose.ImagePath is available.
-            // We need dimensions. pose.Width/Height might be original size.
-            // ImageUtils.LoadAndPreprocessImage resizes it.
-            // We should use the same logic.
             var (tensor, shape) = ImageUtils.LoadAndPreprocessImage(pose.ImagePath);
             int W = shape[1];
             int H = shape[0];
@@ -195,11 +163,6 @@ namespace Deep3DStudio.Model
 
             int stride = 4;
             int numRaysY = (H + stride - 1) / stride;
-
-            // We use ThreadLocal storage to accumulate updates to avoid locking.
-            // Since a full grid is too big, we use a Sparse representation (Dictionary).
-            // Key: Voxel Index (z*size*size + y*size + x).
-            // Value: (ColorSum, DensitySum, Count).
 
             Parallel.For(0, numRaysY,
                 () => new Dictionary<int, (Vector3 colSum, float denSum, int count)>(), // Local Init
@@ -224,7 +187,9 @@ namespace Deep3DStudio.Model
                         float transmittance = 1.0f;
 
                         var targetColP = colors[y * W + x];
-                        var targetCol = new Vector3(targetColP.R/255f, targetColP.G/255f, targetColP.B/255f);
+                        // Correctly extract RGB from Rgb24 using ToPixel<Rgb24>
+                        var pixel = targetColP.ToPixel<Rgb24>();
+                        var targetCol = new Vector3(pixel.R/255f, pixel.G/255f, pixel.B/255f);
 
                         while (t < tMax && transmittance > 0.01f)
                         {
@@ -270,8 +235,6 @@ namespace Deep3DStudio.Model
                 },
                 (localState) => // Finalizer
                 {
-                    // Merge local dictionary into global arrays.
-                    // We still need a lock here, but it's only once per thread (e.g. 16 times), not per pixel.
                     lock (counts)
                     {
                         foreach (var kvp in localState)
