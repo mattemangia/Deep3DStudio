@@ -27,6 +27,12 @@ namespace Deep3DStudio.Configuration
         LeftHanded_Y_Up
     }
 
+    public enum PointCloudColorMode
+    {
+        RGB,        // Original vertex colors from reconstruction
+        DistanceMap // Colormap based on distance from camera/origin
+    }
+
     public class AppSettings
     {
         private static AppSettings _instance;
@@ -43,6 +49,7 @@ namespace Deep3DStudio.Configuration
         // Rendering State
         public bool ShowPointCloud { get; set; } = false;
         public bool ShowWireframe { get; set; } = false;
+        public PointCloudColorMode PointCloudColor { get; set; } = PointCloudColorMode.RGB;
 
         private AppSettings() { }
 

@@ -23,6 +23,8 @@ namespace Deep3DStudio
         private ToggleToolButton _pointsToggle;
         private ToggleToolButton _wireToggle;
         private ToggleToolButton _meshToggle;
+        private ToggleToolButton _rgbColorToggle;
+        private ToggleToolButton _depthColorToggle;
 
         public MainWindow() : base(WindowType.Toplevel)
         {
@@ -126,6 +128,47 @@ namespace Deep3DStudio
 
             toolbar.Insert(new SeparatorToolItem(), -1);
 
+            // Point Cloud Color Mode Toggles
+            _rgbColorToggle = new ToggleToolButton();
+            _rgbColorToggle.IconWidget = AppIconFactory.GenerateIcon("rgb", iconSize);
+            _rgbColorToggle.Label = "RGB";
+            _rgbColorToggle.TooltipText = "Show original RGB colors";
+            _rgbColorToggle.Active = AppSettings.Instance.PointCloudColor == PointCloudColorMode.RGB;
+            _rgbColorToggle.Toggled += (s, e) => {
+                if (_rgbColorToggle.Active)
+                {
+                    AppSettings.Instance.PointCloudColor = PointCloudColorMode.RGB;
+                    _depthColorToggle.Active = false;
+                    _viewport.QueueDraw();
+                }
+                else if (!_depthColorToggle.Active)
+                {
+                    _rgbColorToggle.Active = true; // Keep one active
+                }
+            };
+            toolbar.Insert(_rgbColorToggle, -1);
+
+            _depthColorToggle = new ToggleToolButton();
+            _depthColorToggle.IconWidget = AppIconFactory.GenerateIcon("depthmap", iconSize);
+            _depthColorToggle.Label = "Depth";
+            _depthColorToggle.TooltipText = "Show distance map with colormap";
+            _depthColorToggle.Active = AppSettings.Instance.PointCloudColor == PointCloudColorMode.DistanceMap;
+            _depthColorToggle.Toggled += (s, e) => {
+                if (_depthColorToggle.Active)
+                {
+                    AppSettings.Instance.PointCloudColor = PointCloudColorMode.DistanceMap;
+                    _rgbColorToggle.Active = false;
+                    _viewport.QueueDraw();
+                }
+                else if (!_rgbColorToggle.Active)
+                {
+                    _depthColorToggle.Active = true; // Keep one active
+                }
+            };
+            toolbar.Insert(_depthColorToggle, -1);
+
+            toolbar.Insert(new SeparatorToolItem(), -1);
+
             // Workflow
             var wfItem = new ToolItem();
             var wfBox = new Box(Orientation.Horizontal, 5);
@@ -211,6 +254,8 @@ namespace Deep3DStudio
             if (_pointsToggle != null) _pointsToggle.Active = s.ShowPointCloud;
             if (_wireToggle != null) _wireToggle.Active = s.ShowWireframe;
             if (_meshToggle != null) _meshToggle.Active = !s.ShowPointCloud;
+            if (_rgbColorToggle != null) _rgbColorToggle.Active = s.PointCloudColor == PointCloudColorMode.RGB;
+            if (_depthColorToggle != null) _depthColorToggle.Active = s.PointCloudColor == PointCloudColorMode.DistanceMap;
             _viewport.QueueDraw();
         }
 
