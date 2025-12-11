@@ -8,34 +8,34 @@ namespace Deep3DStudio.Icons
     {
         public static Image GenerateIcon(string name, int size)
         {
-            var surface = new ImageSurface(Format.Argb32, size, size);
-            using (var cr = new Context(surface))
+            using (var surface = new ImageSurface(Format.Argb32, size, size))
             {
-                cr.SetSourceRGBA(0, 0, 0, 0); // Transparent background
-                cr.Paint();
-
-                // Draw Icon based on name
-                switch (name)
+                using (var cr = new Context(surface))
                 {
-                    case "open": DrawOpenIcon(cr, size); break;
-                    case "settings": DrawSettingsIcon(cr, size); break;
-                    case "run": DrawRunIcon(cr, size); break;
-                    case "pointcloud": DrawPointCloudIcon(cr, size); break;
-                    case "mesh": DrawMeshIcon(cr, size); break;
-                    case "wireframe": DrawWireframeIcon(cr, size); break;
+                    cr.SetSourceRGBA(0, 0, 0, 0); // Transparent background
+                    cr.Paint();
+
+                    // Draw Icon based on name
+                    switch (name)
+                    {
+                        case "open": DrawOpenIcon(cr, size); break;
+                        case "settings": DrawSettingsIcon(cr, size); break;
+                        case "run": DrawRunIcon(cr, size); break;
+                        case "pointcloud": DrawPointCloudIcon(cr, size); break;
+                        case "mesh": DrawMeshIcon(cr, size); break;
+                        case "wireframe": DrawWireframeIcon(cr, size); break;
+                    }
                 }
+
+                // Convert Surface to Pixbuf
+                surface.Flush();
+                var data = surface.Data;
+                // Copy the data since surface will be disposed
+                var dataCopy = new byte[data.Length];
+                Array.Copy(data, dataCopy, data.Length);
+                var pixbuf = new Gdk.Pixbuf(dataCopy, Gdk.Colorspace.Rgb, true, 8, size, size, surface.Stride);
+                return new Image(pixbuf);
             }
-
-            // Convert Surface to Pixbuf
-            // This is a bit tricky in pure GtkSharp without intermediate file.
-            // But we can return an Image widget from Pixbuf.
-            // Wait, ToolButton takes a Widget or IconName.
-            // Let's create a Pixbuf from the data.
-
-            surface.Flush();
-            var data = surface.Data;
-            var pixbuf = new Gdk.Pixbuf(data, Gdk.Colorspace.Rgb, true, 8, size, size, surface.Stride);
-            return new Image(pixbuf);
         }
 
         private static void DrawOpenIcon(Context cr, int size)

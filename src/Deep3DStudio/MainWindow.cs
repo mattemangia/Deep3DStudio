@@ -45,13 +45,13 @@ namespace Deep3DStudio
             _viewport = new ThreeDView();
             hPaned.Pack1(_viewport, true, false);
 
+            // 3. Status Bar (initialize before CreateSidePanel which uses _statusLabel)
+            _statusLabel = new Label("Ready");
+
             // Side Panel
             var sidePanel = CreateSidePanel();
             hPaned.Pack2(sidePanel, false, false);
             hPaned.Position = 900;
-
-            // 3. Status Bar
-            _statusLabel = new Label("Ready");
             _statusLabel.Halign = Align.Start;
             var statusBox = new Box(Orientation.Horizontal, 5);
             statusBox.PackStart(_statusLabel, true, true, 5);
