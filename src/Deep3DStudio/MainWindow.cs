@@ -423,13 +423,15 @@ namespace Deep3DStudio
                     depthMap[x, y] = float.MaxValue;
 
             // If we have pixel-to-vertex mapping, use it directly
-            if (mesh.PixelToVertexIndex != null && mesh.PixelToVertexIndex.GetLength(0) == width && mesh.PixelToVertexIndex.GetLength(1) == height)
+            // PixelToVertexIndex is a 1D array with index = y * width + x
+            if (mesh.PixelToVertexIndex != null && mesh.PixelToVertexIndex.Length == width * height)
             {
                 for (int y = 0; y < height; y++)
                 {
                     for (int x = 0; x < width; x++)
                     {
-                        int vertIdx = mesh.PixelToVertexIndex[x, y];
+                        int pIdx = y * width + x;
+                        int vertIdx = mesh.PixelToVertexIndex[pIdx];
                         if (vertIdx >= 0 && vertIdx < mesh.Vertices.Count)
                         {
                             var v = mesh.Vertices[vertIdx];
