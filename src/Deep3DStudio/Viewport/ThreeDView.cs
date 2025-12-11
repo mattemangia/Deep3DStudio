@@ -4,6 +4,7 @@ using OpenTK.Graphics.OpenGL;
 using OpenTK.Mathematics;
 using System.Runtime.InteropServices;
 using System.Collections.Generic;
+using Deep3DStudio.Configuration;
 
 namespace Deep3DStudio.Viewport
 {
@@ -124,6 +125,8 @@ namespace Deep3DStudio.Viewport
                 GL.Enable(EnableCap.Blend);
                 GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
                 GL.ClearColor(0.15f, 0.15f, 0.15f, 1.0f); // Dark background
+                // Point size for Point Cloud
+                GL.PointSize(3.0f);
             }
         }
 
@@ -148,27 +151,76 @@ namespace Deep3DStudio.Viewport
             GL.MatrixMode(MatrixMode.Projection);
             GL.LoadMatrix(ref projection);
 
+            // Apply Coordinate System Transformation
+            Matrix4 coordTransform = Matrix4.Identity;
+            var settings = AppSettings.Instance;
+
+            // Base view transform (Camera)
             Matrix4 view = Matrix4.CreateTranslation(_panX, _panY, _zoom) *
                            Matrix4.CreateRotationX(MathHelper.DegreesToRadians(_rotationX)) *
                            Matrix4.CreateRotationY(MathHelper.DegreesToRadians(_rotationY));
+
+            // Apply coordinate system adjustment to the modelview
+            // Assuming default is Right-Handed Y-Up (OpenGL Standard)
+
+            if (settings.CoordSystem == CoordinateSystem.RightHanded_Z_Up)
+            {
+                // Rotate -90 X to make Z up
+                coordTransform = Matrix4.CreateRotationX(MathHelper.DegreesToRadians(-90));
+            }
+            // Add other transforms if needed.
+
             GL.MatrixMode(MatrixMode.Modelview);
-            GL.LoadMatrix(ref view);
+            var finalView = coordTransform * view;
+            GL.LoadMatrix(ref finalView);
 
             DrawGrid();
             DrawAxes();
 
             if (_meshes != null)
             {
+                // Wireframe Mode
+                if (settings.ShowWireframe)
+                {
+                    GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Line);
+                }
+                else
+                {
+                    GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
+                }
+
                 foreach(var mesh in _meshes)
                 {
-                    DrawMesh(mesh);
+                    if (settings.ShowPointCloud)
+                    {
+                        DrawPointCloud(mesh);
+                    }
+                    else
+                    {
+                        DrawMesh(mesh);
+                    }
                 }
+
+                // Restore Polygon Mode
+                GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
             }
 
             if (_showCropBox)
             {
                 DrawCropBox();
             }
+        }
+
+        private void DrawPointCloud(Model.MeshData mesh)
+        {
+             GL.Begin(PrimitiveType.Points);
+             for(int i=0; i<mesh.Vertices.Count; i++)
+             {
+                 var c = mesh.Colors[i];
+                 GL.Color3(c.X, c.Y, c.Z);
+                 GL.Vertex3(mesh.Vertices[i]);
+             }
+             GL.End();
         }
 
         private void DrawMesh(Model.MeshData mesh)

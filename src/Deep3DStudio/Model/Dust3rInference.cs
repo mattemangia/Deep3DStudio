@@ -4,6 +4,7 @@ using System.Linq;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using OpenTK.Mathematics;
+using Deep3DStudio.Configuration;
 
 namespace Deep3DStudio.Model
 {
@@ -32,6 +33,11 @@ namespace Deep3DStudio.Model
 
         public Dust3rInference()
         {
+            InitializeSession();
+        }
+
+        private void InitializeSession()
+        {
             try
             {
                 if (System.IO.File.Exists(_modelPath))
@@ -39,6 +45,24 @@ namespace Deep3DStudio.Model
                     if (new System.IO.FileInfo(_modelPath).Length > 0)
                     {
                         var options = new SessionOptions();
+
+                        // Apply Device Settings
+                        switch (AppSettings.Instance.Device)
+                        {
+                            case ComputeDevice.CUDA:
+                                try { options.AppendExecutionProvider_CUDA(); }
+                                catch(Exception e) { Console.WriteLine("CUDA Init failed: " + e.Message); }
+                                break;
+                            case ComputeDevice.DirectML:
+                                try { options.AppendExecutionProvider_DML(); }
+                                catch(Exception e) { Console.WriteLine("DirectML Init failed: " + e.Message); }
+                                break;
+                            case ComputeDevice.CPU:
+                            default:
+                                options.AppendExecutionProvider_CPU();
+                                break;
+                        }
+
                         _session = new InferenceSession(_modelPath, options);
                     }
                     else

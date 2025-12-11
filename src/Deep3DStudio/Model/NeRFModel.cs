@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using OpenTK.Mathematics;
 using Deep3DStudio.Model;
+using Deep3DStudio.Meshing;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 
@@ -286,8 +287,50 @@ namespace Deep3DStudio.Model
 
         public MeshData GetMesh()
         {
-            // IsoSurface extraction at density threshold
-            return GeometryUtils.MarchingCubes(_density, _color, _boundsMin, _voxelSize, 5.0f);
+            // Default legacy extraction
+            return GetMesh(new MarchingCubesMesher());
+        }
+
+        public MeshData GetMesh(IMesher mesher)
+        {
+            // Use the provided mesher
+            // Note: Most meshers need density, origin, voxelSize, isoLevel.
+            // Some meshers might ignore color.
+
+            // If the mesher supports color sampling internally, great.
+            // My current IMesher interface doesn't pass color grids.
+            // I should have updated IMesher to take color grid or refactor MeshData to include it.
+            // But let's assume the mesher generates vertices and we map colors back.
+
+            // Actually, `MarchingCubesMesher` logic I wrote earlier had a dummy white color grid.
+            // I should update the interface or the implementation to handle this properly if I want colors.
+
+            // To be strictly correct: I will pass the color grid to the mesher if I can cast it,
+            // or perform color sampling post-meshing here.
+
+            var mesh = mesher.GenerateMesh(_density, _boundsMin, _voxelSize.X, 5.0f);
+
+            // Interpolate colors for the vertices
+            for(int i=0; i<mesh.Vertices.Count; i++)
+            {
+                 Vector3 v = mesh.Vertices[i];
+                 Vector3 local = v - _boundsMin;
+                 int x = (int)(local.X / _voxelSize.X);
+                 int y = (int)(local.Y / _voxelSize.Y);
+                 int z = (int)(local.Z / _voxelSize.Z);
+                 x = Math.Clamp(x, 0, GridSize-1);
+                 y = Math.Clamp(y, 0, GridSize-1);
+                 z = Math.Clamp(z, 0, GridSize-1);
+
+                 // If the mesher didn't set colors (defaulting to white/grey), overwrite them.
+                 // MarchingCubes (GeometryUtils) sets colors if provided.
+                 // My wrappers might not.
+                 // Let's just sample nearest voxel color.
+                 if(mesh.Colors.Count <= i) mesh.Colors.Add(_color[x,y,z]);
+                 else mesh.Colors[i] = _color[x,y,z];
+            }
+
+            return mesh;
         }
     }
 }
