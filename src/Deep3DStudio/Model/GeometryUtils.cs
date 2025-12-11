@@ -126,7 +126,186 @@ namespace Deep3DStudio.Model
 
             if (srcPts.Count < 3) return Matrix4.Identity;
 
-            return ComputeRigidTransform(srcPts, dstPts);
+            // Use RANSAC for robust estimation
+            return ComputeRigidTransformRANSAC(srcPts, dstPts, out _, out _);
+        }
+
+        /// <summary>
+        /// RANSAC-based rigid transform estimation for robustness against outliers.
+        /// Returns the best transform, inlier count, and RMSE.
+        /// </summary>
+        public static Matrix4 ComputeRigidTransformRANSAC(
+            List<Vector3> srcPoints,
+            List<Vector3> dstPoints,
+            out int inlierCount,
+            out float rmse,
+            int maxIterations = 100,
+            float inlierThreshold = 0.05f)
+        {
+            inlierCount = 0;
+            rmse = float.MaxValue;
+
+            if (srcPoints.Count != dstPoints.Count || srcPoints.Count < 4)
+                return ComputeRigidTransform(srcPoints, dstPoints);
+
+            int n = srcPoints.Count;
+            var rnd = new Random(42); // Fixed seed for reproducibility
+            Matrix4 bestTransform = Matrix4.Identity;
+            int bestInliers = 0;
+            float bestRMSE = float.MaxValue;
+
+            // If we have few points, just use all of them
+            if (n < 10)
+            {
+                bestTransform = ComputeRigidTransform(srcPoints, dstPoints);
+                (bestInliers, bestRMSE) = CountInliersAndRMSE(srcPoints, dstPoints, bestTransform, inlierThreshold);
+                inlierCount = bestInliers;
+                rmse = bestRMSE;
+                return bestTransform;
+            }
+
+            for (int iter = 0; iter < maxIterations; iter++)
+            {
+                // Sample 4 random point pairs (minimum for 3D rigid transform)
+                var indices = new HashSet<int>();
+                while (indices.Count < 4)
+                    indices.Add(rnd.Next(n));
+
+                var sampleSrc = new List<Vector3>();
+                var sampleDst = new List<Vector3>();
+                foreach (int idx in indices)
+                {
+                    sampleSrc.Add(srcPoints[idx]);
+                    sampleDst.Add(dstPoints[idx]);
+                }
+
+                // Compute transform from sample
+                var candidateTransform = ComputeRigidTransform(sampleSrc, sampleDst);
+
+                // Count inliers
+                var (currentInliers, currentRMSE) = CountInliersAndRMSE(srcPoints, dstPoints, candidateTransform, inlierThreshold);
+
+                if (currentInliers > bestInliers || (currentInliers == bestInliers && currentRMSE < bestRMSE))
+                {
+                    bestInliers = currentInliers;
+                    bestRMSE = currentRMSE;
+                    bestTransform = candidateTransform;
+                }
+
+                // Early termination if we have enough inliers
+                if (bestInliers > n * 0.8)
+                    break;
+            }
+
+            // Refine with all inliers
+            if (bestInliers >= 4)
+            {
+                var inlierSrc = new List<Vector3>();
+                var inlierDst = new List<Vector3>();
+
+                for (int i = 0; i < n; i++)
+                {
+                    var transformed = TransformPoint(srcPoints[i], bestTransform);
+                    float dist = (transformed - dstPoints[i]).Length;
+                    if (dist < inlierThreshold)
+                    {
+                        inlierSrc.Add(srcPoints[i]);
+                        inlierDst.Add(dstPoints[i]);
+                    }
+                }
+
+                if (inlierSrc.Count >= 4)
+                {
+                    bestTransform = ComputeRigidTransform(inlierSrc, inlierDst);
+                    (bestInliers, bestRMSE) = CountInliersAndRMSE(srcPoints, dstPoints, bestTransform, inlierThreshold);
+                }
+            }
+
+            inlierCount = bestInliers;
+            rmse = bestRMSE;
+            return bestTransform;
+        }
+
+        private static (int inliers, float rmse) CountInliersAndRMSE(
+            List<Vector3> src, List<Vector3> dst, Matrix4 transform, float threshold)
+        {
+            int inliers = 0;
+            float sumSqError = 0;
+
+            for (int i = 0; i < src.Count; i++)
+            {
+                var transformed = TransformPoint(src[i], transform);
+                float dist = (transformed - dst[i]).Length;
+                if (dist < threshold)
+                {
+                    inliers++;
+                    sumSqError += dist * dist;
+                }
+            }
+
+            float rmse = inliers > 0 ? (float)Math.Sqrt(sumSqError / inliers) : float.MaxValue;
+            return (inliers, rmse);
+        }
+
+        public static Vector3 TransformPoint(Vector3 point, Matrix4 transform)
+        {
+            var v = new Vector4(point, 1.0f);
+            var result = v * transform;
+            return new Vector3(result.X / result.W, result.Y / result.W, result.Z / result.W);
+        }
+
+        /// <summary>
+        /// Computes alignment quality between two meshes (overlap ratio and RMSE).
+        /// Used for detecting good pair matches and loop closure.
+        /// </summary>
+        public static (float overlapRatio, float rmse, int correspondences) ComputeAlignmentQuality(
+            MeshData source, MeshData target, Matrix4 transform, float distanceThreshold = 0.1f)
+        {
+            if (source.Vertices.Count == 0 || target.Vertices.Count == 0)
+                return (0, float.MaxValue, 0);
+
+            // Build a simple spatial hash for target vertices
+            var targetSet = new HashSet<(int, int, int)>();
+            float cellSize = distanceThreshold;
+
+            foreach (var v in target.Vertices)
+            {
+                int cx = (int)(v.X / cellSize);
+                int cy = (int)(v.Y / cellSize);
+                int cz = (int)(v.Z / cellSize);
+                targetSet.Add((cx, cy, cz));
+            }
+
+            int matches = 0;
+            float sumSqDist = 0;
+
+            foreach (var v in source.Vertices)
+            {
+                var transformed = TransformPoint(v, transform);
+                int cx = (int)(transformed.X / cellSize);
+                int cy = (int)(transformed.Y / cellSize);
+                int cz = (int)(transformed.Z / cellSize);
+
+                // Check neighboring cells
+                bool found = false;
+                for (int dx = -1; dx <= 1 && !found; dx++)
+                    for (int dy = -1; dy <= 1 && !found; dy++)
+                        for (int dz = -1; dz <= 1 && !found; dz++)
+                            if (targetSet.Contains((cx + dx, cy + dy, cz + dz)))
+                                found = true;
+
+                if (found)
+                {
+                    matches++;
+                    // Approximate distance (cell-based)
+                    sumSqDist += cellSize * cellSize * 0.5f;
+                }
+            }
+
+            float overlap = (float)matches / source.Vertices.Count;
+            float rmse = matches > 0 ? (float)Math.Sqrt(sumSqDist / matches) : float.MaxValue;
+
+            return (overlap, rmse, matches);
         }
 
         public static MeshData GenerateMeshFromDepth(Tensor<float> ptsTensor, Tensor<float> confTensor, SixLabors.ImageSharp.Color[] colors, int width, int height)
