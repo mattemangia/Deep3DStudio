@@ -3,6 +3,7 @@ using Gtk;
 using OpenTK.Graphics.OpenGL;
 using OpenTK.Mathematics;
 using System.Runtime.InteropServices;
+using System.Collections.Generic;
 
 namespace Deep3DStudio.Viewport
 {
@@ -57,7 +58,7 @@ namespace Deep3DStudio.Viewport
         {
             _meshes = meshes;
 
-            // Auto-center
+            // Auto-center view on mesh centroid
             if (_meshes.Count > 0 && _meshes[0].Vertices.Count > 0)
             {
                 Vector3 center = Vector3.Zero;
@@ -82,11 +83,6 @@ namespace Deep3DStudio.Viewport
         public void ApplyCrop()
         {
             if (_meshes == null) return;
-            // Crop Box is centered at 0,0,0 with size _cropSize*2 (extends -s to +s)
-            // But we have View Transform (Pan/Zoom/Rot).
-            // The crop box is drawn in World Space (assuming Identity Model matrix for it, but View applies).
-            // Wait, DrawCropBox uses direct GL vertices. It is transformed by the Camera View Matrix.
-            // So the box is defined in "World Space" coordinates: (-s, -s, -s) to (s, s, s).
 
             Vector3 min = new Vector3(-_cropSize, -_cropSize, -_cropSize);
             Vector3 max = new Vector3(_cropSize, _cropSize, _cropSize);
@@ -334,10 +330,7 @@ namespace Deep3DStudio.Viewport
             {
                 if (_selectedHandle != -1)
                 {
-                     // Handle dragging logic could go here
-                     // For now just confirming selection visually is implemented
-                     _isDragging = true; // allow dragging to resize?
-                     // Let's make dragging resize the box if handle selected
+                     _isDragging = true;
                 }
                 else
                 {
@@ -382,7 +375,7 @@ namespace Deep3DStudio.Viewport
 
                 if (_selectedHandle != -1)
                 {
-                    // Simple resize logic: dragging right/up increases size
+                    // Dragging handle resizes box
                     _cropSize += deltaX * 0.01f;
                     if (_cropSize < 0.1f) _cropSize = 0.1f;
                     UpdateCropCorners();

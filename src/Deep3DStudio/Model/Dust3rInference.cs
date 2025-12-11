@@ -41,21 +41,18 @@ namespace Deep3DStudio.Model
 
         public bool IsLoaded => _session != null;
 
+        /// <summary>
+        /// Reconstructs a scene from a sequence of images using pairwise inference and global alignment.
+        /// </summary>
         public List<MeshData> ReconstructScene(List<string> imagePaths)
         {
             var meshes = new List<MeshData>();
             if (_session == null || imagePaths.Count < 2) return meshes;
 
-            // Global Transform Accumulator
+            // Global Transform Accumulator: Frame i -> World Frame
             Matrix4 globalTransform = Matrix4.Identity;
 
-            // Previous step data for alignment
-            // We store the "Target" mesh of the previous pair, in its LOCAL frame (Frame i-1)
-            // Wait, alignment happens between:
-            // Pair (i-1, i) -> Pts_i_in_prev (Target of pair)
-            // Pair (i, i+1) -> Pts_i_in_curr (Source of pair)
-            // Correspondences are pixel-exact.
-
+            // Stores the target mesh of the previous pair in its local frame (Frame i-1) for alignment.
             MeshData? pts_i_in_prev = null;
 
             for (int i = 0; i < imagePaths.Count - 1; i++)
@@ -81,78 +78,33 @@ namespace Deep3DStudio.Model
                     var pts2Tensor = results.First(n => n.Name == "pts3d2").AsTensor<float>();
                     var conf2Tensor = results.First(n => n.Name == "conf2").AsTensor<float>();
 
-                    // Extract Colors
                     var c1 = ImageUtils.ExtractColors(img1Path, s1[1], s1[0]);
                     var c2 = ImageUtils.ExtractColors(img2Path, s2[1], s2[0]);
 
                     var mesh1_local = GeometryUtils.GenerateMeshFromDepth(pts1Tensor, conf1Tensor, c1, s1[1], s1[0]);
                     var mesh2_local = GeometryUtils.GenerateMeshFromDepth(pts2Tensor, conf2Tensor, c2, s2[1], s2[0]);
 
-                    // mesh1_local is Pts_i_in_curr
-                    // mesh2_local is Pts_{i+1}_in_curr
-
                     if (i > 0)
                     {
-                        // Align Current Frame (i) to Previous Frame (i-1)
-                        // Using Pts_i (which exists in both)
-                        // Source: mesh1_local (Pts_i in Frame i)
-                        // Target: pts_i_in_prev (Pts_i in Frame i-1)
-
-                        // Find T s.t. mesh1_local * T = pts_i_in_prev
-                        // Wait, GeometryUtils.ComputeRigidTransform gives M s.t. v' = v * M (OpenTK).
-                        // If we want v_prev = v_curr * T_curr_to_prev
-                        // We use Source=Curr, Target=Prev.
+                        // Align Current Frame (i) to Previous Frame (i-1) using pixel-exact correspondence of Pts_i.
+                        // mesh1_local represents Pts_i in the current pair's coordinate system.
+                        // pts_i_in_prev represents Pts_i in the previous pair's coordinate system.
 
                         var T_curr_to_prev = GeometryUtils.ComputeTransformFromCorrespondences(mesh1_local, pts_i_in_prev!);
-
-                        // Update Global Transform
-                        // Global_{i} = T_curr_to_prev * Global_{i-1} ??
-                        // Let's trace:
-                        // Pts_global = Pts_prev * Global_{i-1}
-                        // Pts_prev = Pts_curr * T_curr_to_prev
-                        // So Pts_global = Pts_curr * T_curr_to_prev * Global_{i-1}
-
                         globalTransform = T_curr_to_prev * globalTransform;
                     }
                     else
                     {
-                        // First pair: Frame 0 is World.
-                        // Add mesh1 (Frame 0) directly.
+                        // First pair sets the World Frame (Frame 0).
                         meshes.Add(mesh1_local);
                     }
 
-                    // Apply current global transform to the NEW part (Mesh 2)
-                    // Note: If i > 0, mesh1_local corresponds to overlapping data we already have (mostly),
-                    // but we might want to merge it? For simplicity, we only add the "new" mesh2 each step,
-                    // chaining the transform.
-                    // Actually, Visual Odometry usually adds the keyframes.
-                    // Here we add Mesh2 transformed to world.
+                    // Preserve local mesh2 for next iteration's alignment step
+                    pts_i_in_prev = CloneMeshData(mesh2_local);
 
-                    var mesh2_world = mesh2_local; // shallow copy ref, but we modify content
-                    mesh2_world.ApplyTransform(globalTransform);
-                    meshes.Add(mesh2_world);
-
-                    // Store Mesh2 (in local frame!) for next iteration alignment
-                    // Wait, we applied transform to mesh2_world. We need the original local one for next step?
-                    // No, next step (i+1) will produce Pts_{i+1} in Frame (i+1).
-                    // We need Pts_{i+1} in Frame (i) to align.
-                    // Frame (i) IS the current frame of this loop iteration.
-                    // mesh2_local was in Frame (i).
-                    // So we must save mesh2_local BEFORE transforming it, or make a copy.
-
-                    // Let's regenerate or deep copy?
-                    // Since GenerateMesh is expensive, let's clone vertices?
-                    // Or just act on copies.
-
-                    // Better: Compute mesh2_local, save it as `pts_i_in_prev` for next loop.
-                    // Then clone it to `mesh2_world`, transform, and add to list.
-
-                    pts_i_in_prev = CloneMeshData(mesh2_local); // Helper needed
-
-                    // Actually, we modified mesh2_world in place above.
-                    // Let's invert the logic:
-                    // 1. Save local mesh2 for next step.
-                    // 2. Transform mesh2 to world and add.
+                    // Add Mesh 2 to the scene, transformed to World Coordinates
+                    mesh2_local.ApplyTransform(globalTransform);
+                    meshes.Add(mesh2_local);
                 }
             }
             return meshes;
@@ -165,7 +117,7 @@ namespace Deep3DStudio.Model
                 Vertices = new List<Vector3>(source.Vertices),
                 Colors = new List<Vector3>(source.Colors),
                 Indices = new List<int>(source.Indices),
-                PixelToVertexIndex = source.PixelToVertexIndex // Array reference is fine if we don't modify content, but we don't.
+                PixelToVertexIndex = source.PixelToVertexIndex
             };
         }
     }

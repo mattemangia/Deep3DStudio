@@ -21,7 +21,6 @@ namespace Deep3DStudio.Model
             for(int i=0; i<Vertices.Count; i++)
             {
                 var v = new Vector4(Vertices[i], 1.0f);
-                // OpenTK: v * M
                 var res = v * transform;
                 Vertices[i] = new Vector3(res.X / res.W, res.Y / res.W, res.Z / res.W);
             }
@@ -30,7 +29,10 @@ namespace Deep3DStudio.Model
 
     public static class GeometryUtils
     {
-        // Kabsch Algorithm for Rigid Alignment
+        /// <summary>
+        /// Computes the optimal rigid transformation (Rotation + Translation) aligning source points to destination points
+        /// using the Kabsch algorithm (SVD).
+        /// </summary>
         public static Matrix4 ComputeRigidTransform(List<Vector3> srcPoints, List<Vector3> dstPoints)
         {
             if (srcPoints.Count != dstPoints.Count || srcPoints.Count < 3)
@@ -47,10 +49,7 @@ namespace Deep3DStudio.Model
             centroidSrc /= srcPoints.Count;
             centroidDst /= dstPoints.Count;
 
-            // 2. Center points & Build Covariance Matrix
-            // H = Sum ( (p_src - c_src) * (p_dst - c_dst)^T )
-
-            // Using MathNet for 3x3 matrices
+            // 2. Center points & Build Covariance Matrix H = Sum ( (p_src - c_src) * (p_dst - c_dst)^T )
             var matH = Matrix<double>.Build.Dense(3, 3);
 
             for(int i=0; i<srcPoints.Count; i++)
@@ -58,7 +57,6 @@ namespace Deep3DStudio.Model
                 var pS = srcPoints[i] - centroidSrc;
                 var pD = dstPoints[i] - centroidDst;
 
-                // Outer product accumulation
                 matH[0,0] += pS.X * pD.X; matH[0,1] += pS.X * pD.Y; matH[0,2] += pS.X * pD.Z;
                 matH[1,0] += pS.Y * pD.X; matH[1,1] += pS.Y * pD.Y; matH[1,2] += pS.Y * pD.Z;
                 matH[2,0] += pS.Z * pD.X; matH[2,1] += pS.Z * pD.Y; matH[2,2] += pS.Z * pD.Z;
@@ -76,47 +74,24 @@ namespace Deep3DStudio.Model
             // Check reflection
             if (R_mat.Determinant() < 0)
             {
-                // Multiply 3rd column of V by -1
                 var V_prime = V.Clone();
                 V_prime.SetColumn(2, V_prime.Column(2).Multiply(-1));
                 R_mat = V_prime * U.Transpose();
             }
 
             // 5. Translation t = c_dst - R * c_src
-            // Convert to OpenTK
-            // OpenTK Matrix4 constructor is Row-Major (Row0, Row1, Row2, Row3)
-            // But mathematically v' = R * v + t
-            // OpenTK vectors are Row Vectors: v' = v * M
-            // So M must be Transpose(R) in the upper-left
-
-            // R_mat is standard math notation (3x3).
-            // OpenTK Matrix4 layout:
-            // [ M11 M12 M13 M14 ]
-            // [ M21 M22 M23 M24 ] ...
-            // Vector4 v = (x, y, z, w)
-            // v * M = (x*M11 + y*M21 + ..., ...)
-
-            // So column 1 of M corresponds to x-basis output.
-            // This means M should be Transpose(R_math).
-            // R_mat (MathNet) [row, col].
-            // We want M[row, col] = R_mat[col, row] (Transpose).
-            // So M[0,0] = R[0,0], M[0,1] = R[1,0]...
+            // Convert to OpenTK Matrix4. Note: OpenTK Matrix4 is Row-Major in memory (compatible with v * M).
+            // We construct M such that M corresponds to the Transpose of the rotation matrix derived here (which assumes col vectors).
 
             var M = Matrix4.Identity;
             M.M11 = (float)R_mat[0,0]; M.M12 = (float)R_mat[1,0]; M.M13 = (float)R_mat[2,0];
             M.M21 = (float)R_mat[0,1]; M.M22 = (float)R_mat[1,1]; M.M23 = (float)R_mat[2,1];
             M.M31 = (float)R_mat[0,2]; M.M32 = (float)R_mat[1,2]; M.M33 = (float)R_mat[2,2];
 
-            // Compute t = c_dst - R * c_src
-            // R * c_src (column vector mult)
-            // Using our OpenTK M (which is R^T), we can do: (c_src, 1) * M? No.
-            // Let's do it manually with R_mat.
-
             double tx = centroidDst.X - (R_mat[0,0]*centroidSrc.X + R_mat[0,1]*centroidSrc.Y + R_mat[0,2]*centroidSrc.Z);
             double ty = centroidDst.Y - (R_mat[1,0]*centroidSrc.X + R_mat[1,1]*centroidSrc.Y + R_mat[1,2]*centroidSrc.Z);
             double tz = centroidDst.Z - (R_mat[2,0]*centroidSrc.X + R_mat[2,1]*centroidSrc.Y + R_mat[2,2]*centroidSrc.Z);
 
-            // In OpenTK, translation goes in Row 3 (M41, M42, M43)
             M.M41 = (float)tx;
             M.M42 = (float)ty;
             M.M43 = (float)tz;
@@ -130,7 +105,7 @@ namespace Deep3DStudio.Model
                 return Matrix4.Identity;
 
             if (source.PixelToVertexIndex.Length != target.PixelToVertexIndex.Length)
-                return Matrix4.Identity; // Mismatched resolution
+                return Matrix4.Identity;
 
             var srcPts = new List<Vector3>();
             var dstPts = new List<Vector3>();
@@ -147,7 +122,6 @@ namespace Deep3DStudio.Model
                 }
             }
 
-            // Need at least 3 points
             if (srcPts.Count < 3) return Matrix4.Identity;
 
             return ComputeRigidTransform(srcPts, dstPts);
@@ -156,11 +130,10 @@ namespace Deep3DStudio.Model
         public static MeshData GenerateMeshFromDepth(Tensor<float> ptsTensor, Tensor<float> confTensor, SixLabors.ImageSharp.Color[] colors, int width, int height)
         {
             var mesh = new MeshData();
-            // Maps pixel index to vertex index
             mesh.PixelToVertexIndex = new int[width * height];
 
             float confThreshold = 1.1f;
-            float edgeThreshold = 0.2f; // Tearing threshold
+            float edgeThreshold = 0.2f;
 
             // 1. Vertices
             for (int y = 0; y < height; y++)
@@ -177,7 +150,6 @@ namespace Deep3DStudio.Model
                         float pz = ptsTensor[0, y, x, 2];
 
                         var c = colors[pIdx];
-                        // Convert Color to Vector3
                         var pixel = c.ToPixel<SixLabors.ImageSharp.PixelFormats.Rgb24>();
 
                         mesh.Vertices.Add(new Vector3(px, py, pz));
@@ -249,7 +221,6 @@ namespace Deep3DStudio.Model
 
         public static void CropMesh(MeshData mesh, Vector3 min, Vector3 max)
         {
-            // Naive approach: Rebuild lists.
             // 1. Identify valid vertices
             int[] oldToNew = new int[mesh.Vertices.Count];
             var newVertices = new List<Vector3>();
@@ -292,8 +263,7 @@ namespace Deep3DStudio.Model
             mesh.Vertices = newVertices;
             mesh.Colors = newColors;
             mesh.Indices = newIndices;
-            // PixelToVertexIndex becomes invalid/outdated here, but that's okay post-alignment.
-            mesh.PixelToVertexIndex = null;
+            mesh.PixelToVertexIndex = null; // Index map invalid after geometric modification
         }
     }
 }
