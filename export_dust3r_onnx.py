@@ -131,22 +131,66 @@ MODEL_NAME = "naver/DUSt3R_ViTLarge_BaseDecoder_512_dpt" # Using a standard mode
 def install_and_import_dust3r():
     """
     Checks if dust3r is importable. If not, clones the repository and adds it to path.
-    Also ensures submodules (like croco) are initialized.
+    Also ensures submodules (like croco) are initialized and dependencies are installed.
+    This function is fully automated - it handles everything from cloning to installing.
     """
-    if not os.path.exists(REPO_DIR):
+    import shutil
+
+    def is_valid_dust3r_repo(path):
+        """Check if the directory is a valid dust3r repository with content."""
+        if not os.path.exists(path):
+            return False
+        # Check for key dust3r files/directories
+        required_items = [
+            os.path.join(path, "dust3r"),
+            os.path.join(path, "dust3r", "model.py"),
+        ]
+        return all(os.path.exists(item) for item in required_items)
+
+    def clone_dust3r():
+        """Clone the dust3r repository with submodules."""
         print(f"Cloning {REPO_URL} into {REPO_DIR}...")
         subprocess.check_call(["git", "clone", "--recursive", REPO_URL, REPO_DIR])
         print(f"Cloned {REPO_URL} into {REPO_DIR}")
+
+    def install_dust3r_requirements():
+        """Install dust3r requirements if requirements.txt exists."""
+        req_file = os.path.join(REPO_DIR, "requirements.txt")
+        if os.path.exists(req_file):
+            print(f"Installing dust3r requirements from {req_file}...")
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_file, "-q"])
+                print("Dust3r requirements installed successfully.")
+            except subprocess.CalledProcessError as e:
+                print(f"Warning: Failed to install some dust3r requirements: {e}")
+                print("Continuing anyway - some dependencies may already be installed.")
+
+    # Check if we have a valid dust3r repo
+    if not is_valid_dust3r_repo(REPO_DIR):
+        # Remove invalid/empty directory if it exists
+        if os.path.exists(REPO_DIR):
+            print(f"Found invalid/empty {REPO_DIR} directory. Removing and re-cloning...")
+            shutil.rmtree(REPO_DIR)
+
+        # Clone fresh
+        clone_dust3r()
+
+        # Install requirements after cloning
+        install_dust3r_requirements()
     else:
-        # If repo exists, ensure submodules are up to date.
-        # This fixes the case where a previous clone failed or didn't include recursive submodules.
-        print(f"Updating submodules in {REPO_DIR}...")
-        subprocess.check_call(["git", "submodule", "update", "--init", "--recursive"], cwd=REPO_DIR)
+        # Repo exists, ensure submodules are up to date
+        print(f"Found existing dust3r repository. Updating submodules...")
+        try:
+            subprocess.check_call(["git", "submodule", "update", "--init", "--recursive"], cwd=REPO_DIR)
+        except subprocess.CalledProcessError:
+            print("Warning: Failed to update submodules. Continuing anyway...")
 
     # Add to sys.path
-    if REPO_DIR not in sys.path:
-        sys.path.insert(0, REPO_DIR)
+    repo_abs_path = os.path.abspath(REPO_DIR)
+    if repo_abs_path not in sys.path:
+        sys.path.insert(0, repo_abs_path)
 
+    # Try to import dust3r
     try:
         import dust3r
         print("Dust3r module found.")
@@ -154,29 +198,64 @@ def install_and_import_dust3r():
         import dust3r.utils.path_to_croco
     except ImportError as e:
         print(f"Failed to import dust3r: {e}")
-        print("Attempting to fix by updating submodules again...")
+        print("Attempting to fix by re-cloning repository...")
+
+        # Remove and re-clone
+        if os.path.exists(REPO_DIR):
+            shutil.rmtree(REPO_DIR)
+
+        clone_dust3r()
+        install_dust3r_requirements()
+
+        # Update sys.path
+        if repo_abs_path not in sys.path:
+            sys.path.insert(0, repo_abs_path)
+
         try:
-             subprocess.check_call(["git", "submodule", "update", "--init", "--recursive"], cwd=REPO_DIR)
-             import dust3r
-             print("Dust3r module successfully imported.")
-        except Exception as e2:
+            import dust3r
+            import dust3r.utils.path_to_croco
+            print("Dust3r module successfully imported after re-clone.")
+        except ImportError as e2:
             print(f"Still failed to import dust3r: {e2}")
-            print("You may need to install additional dependencies manually (e.g., einops, huggingface_hub).")
-            print("Try running: pip install -r dust3r_repo/requirements.txt")
+            print("\nTroubleshooting steps:")
+            print("  1. Ensure git is installed and accessible")
+            print("  2. Check your internet connection")
+            print("  3. Try manually: git clone --recursive https://github.com/naver/dust3r.git dust3r_repo")
+            print("  4. Then: pip install -r dust3r_repo/requirements.txt")
             sys.exit(1)
 
 def ensure_dependencies():
     """
-    Ensures basic dependencies like huggingface_hub are installed.
+    Ensures basic dependencies are installed. Automatically installs missing ones.
     """
-    try:
-        import huggingface_hub
-        import einops
-        import safetensors
-    except ImportError as e:
-        print(f"Missing dependency: {e.name}")
-        print(f"Please install it using: pip install {e.name}")
-        sys.exit(1)
+    required_packages = ['huggingface_hub', 'einops', 'safetensors', 'roma', 'onnx']
+    missing_packages = []
+
+    for package in required_packages:
+        try:
+            __import__(package)
+        except ImportError:
+            missing_packages.append(package)
+
+    if missing_packages:
+        print(f"Installing missing dependencies: {', '.join(missing_packages)}...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install"] + missing_packages + ["-q"])
+            print("Dependencies installed successfully.")
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to install dependencies: {e}")
+            print(f"Please manually install: pip install {' '.join(missing_packages)}")
+            sys.exit(1)
+
+        # Re-import to verify
+        for package in missing_packages:
+            try:
+                __import__(package)
+            except ImportError as e:
+                print(f"Failed to import {package} after installation: {e}")
+                sys.exit(1)
+
+    print("All required dependencies are available.")
 
 def patch_dust3r_for_onnx():
     """
