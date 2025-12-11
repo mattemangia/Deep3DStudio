@@ -7,6 +7,24 @@ using OpenTK.Mathematics;
 
 namespace Deep3DStudio.Model
 {
+    public class CameraPose
+    {
+        public Matrix4 WorldToCamera { get; set; } // View Matrix
+        public Matrix4 CameraToWorld { get; set; } // Pose Matrix
+        public int ImageIndex { get; set; }
+        public string ImagePath { get; set; } = string.Empty;
+        public int Width { get; set; }
+        public int Height { get; set; }
+        // Intrinsics are implicit in Dust3r's output (rays per pixel), but we can store estimated ones if needed.
+        // For NeRF from Dust3r output, we use the RayDataset constructed from Dust3r points.
+    }
+
+    public class SceneResult
+    {
+        public List<MeshData> Meshes { get; set; } = new List<MeshData>();
+        public List<CameraPose> Poses { get; set; } = new List<CameraPose>();
+    }
+
     public class Dust3rInference
     {
         private InferenceSession? _session;
@@ -43,11 +61,12 @@ namespace Deep3DStudio.Model
 
         /// <summary>
         /// Reconstructs a scene from a sequence of images using pairwise inference and global alignment.
+        /// Returns both the geometry and the estimated camera poses.
         /// </summary>
-        public List<MeshData> ReconstructScene(List<string> imagePaths)
+        public SceneResult ReconstructScene(List<string> imagePaths)
         {
-            var meshes = new List<MeshData>();
-            if (_session == null || imagePaths.Count < 2) return meshes;
+            var result = new SceneResult();
+            if (_session == null || imagePaths.Count < 2) return result;
 
             // Global Transform Accumulator: Frame i -> World Frame
             Matrix4 globalTransform = Matrix4.Identity;
@@ -96,7 +115,16 @@ namespace Deep3DStudio.Model
                     else
                     {
                         // First pair sets the World Frame (Frame 0).
-                        meshes.Add(mesh1_local);
+                        result.Meshes.Add(mesh1_local);
+                        result.Poses.Add(new CameraPose
+                        {
+                            ImageIndex = 0,
+                            ImagePath = img1Path,
+                            Width = s1[1],
+                            Height = s1[0],
+                            CameraToWorld = Matrix4.Identity,
+                            WorldToCamera = Matrix4.Identity
+                        });
                     }
 
                     // Preserve local mesh2 for next iteration's alignment step
@@ -104,10 +132,20 @@ namespace Deep3DStudio.Model
 
                     // Add Mesh 2 to the scene, transformed to World Coordinates
                     mesh2_local.ApplyTransform(globalTransform);
-                    meshes.Add(mesh2_local);
+                    result.Meshes.Add(mesh2_local);
+
+                    result.Poses.Add(new CameraPose
+                    {
+                        ImageIndex = i + 1,
+                        ImagePath = img2Path,
+                        Width = s2[1],
+                        Height = s2[0],
+                        CameraToWorld = globalTransform,
+                        WorldToCamera = globalTransform.Inverted()
+                    });
                 }
             }
-            return meshes;
+            return result;
         }
 
         private MeshData CloneMeshData(MeshData source)
@@ -117,7 +155,7 @@ namespace Deep3DStudio.Model
                 Vertices = new List<Vector3>(source.Vertices),
                 Colors = new List<Vector3>(source.Colors),
                 Indices = new List<int>(source.Indices),
-                PixelToVertexIndex = source.PixelToVertexIndex
+                PixelToVertexIndex = source.PixelToVertexIndex // Reference copy is okay here as we don't modify the array content, just read it
             };
         }
     }

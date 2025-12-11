@@ -2,6 +2,7 @@ using System;
 using Gtk;
 using Deep3DStudio.Viewport;
 using Deep3DStudio.Icons;
+using Deep3DStudio.Model;
 using System.Collections.Generic;
 
 namespace Deep3DStudio
@@ -13,6 +14,9 @@ namespace Deep3DStudio
         private Model.Dust3rInference _inference;
         private List<string> _imagePaths = new List<string>();
         private ListStore _imgListStore;
+
+        // Workflow Selection
+        private ComboBoxText _workflowCombo;
 
         public MainWindow() : base(WindowType.Toplevel)
         {
@@ -63,9 +67,21 @@ namespace Deep3DStudio
 
             toolbar.Insert(new SeparatorToolItem(), -1);
 
-            // Run Dust3r Button
-            var runBtn = new ToolButton(IconGenerator.GenerateRunIcon(24), "Run Dust3r");
-            runBtn.TooltipText = "Run Dust3r Inference";
+            // Workflow Selection
+            var wfItem = new ToolItem();
+            var wfBox = new Box(Orientation.Horizontal, 5);
+            wfBox.PackStart(new Label("Workflow: "), false, false, 0);
+            _workflowCombo = new ComboBoxText();
+            _workflowCombo.AppendText("Dust3r (Fast)");
+            _workflowCombo.AppendText("NeRF (Refined)");
+            _workflowCombo.Active = 0;
+            wfBox.PackStart(_workflowCombo, false, false, 0);
+            wfItem.Add(wfBox);
+            toolbar.Insert(wfItem, -1);
+
+            // Run Button
+            var runBtn = new ToolButton(IconGenerator.GenerateRunIcon(24), "Run Reconstruction");
+            runBtn.TooltipText = "Run selected reconstruction workflow";
             runBtn.Clicked += OnRunInference;
             toolbar.Insert(runBtn, -1);
 
@@ -151,21 +167,55 @@ namespace Deep3DStudio
                 return;
             }
 
-            _statusLabel.Text = "Running Inference (ReconstructScene)...";
+            string workflow = _workflowCombo.ActiveText;
+            _statusLabel.Text = $"Running {workflow} Workflow...";
             while (Application.EventsPending()) Application.RunIteration();
 
             try
             {
+                // Step 1: Run Dust3r (Required for both workflows: Poses or full mesh)
+                _statusLabel.Text = "Estimating Geometry and Poses (Dust3r)...";
                 var result = await System.Threading.Tasks.Task.Run(() => _inference.ReconstructScene(_imagePaths));
 
-                if (result.Count > 0)
+                if (result.Meshes.Count == 0)
                 {
-                    _viewport.SetMeshes(result);
-                    _statusLabel.Text = $"Inference Complete. Meshes: {result.Count}";
+                    _statusLabel.Text = "Dust3r Inference failed.";
+                    return;
                 }
-                else
+
+                if (workflow == "Dust3r (Fast)")
                 {
-                    _statusLabel.Text = "Inference produced no meshes.";
+                    _viewport.SetMeshes(result.Meshes);
+                    _statusLabel.Text = $"Dust3r Complete. Meshes: {result.Meshes.Count}";
+                }
+                else if (workflow == "NeRF (Refined)")
+                {
+                    _statusLabel.Text = "Initializing NeRF Voxel Grid...";
+                    var nerf = new VoxelGridNeRF();
+
+                    await System.Threading.Tasks.Task.Run(() =>
+                    {
+                        // Initialize from Dust3r coarse geometry
+                        nerf.InitializeFromMesh(result.Meshes);
+
+                        // Train NeRF
+                        // Update status from thread? (Careful with UI thread)
+                        // Just run for now.
+                        nerf.Train(result.Poses, iterations: 10);
+                    });
+
+                    _statusLabel.Text = "Extracting NeRF Mesh...";
+                    var nerfMesh = await System.Threading.Tasks.Task.Run(() => nerf.GetMesh());
+
+                    if (nerfMesh.Vertices.Count > 0)
+                    {
+                        _viewport.SetMeshes(new List<MeshData> { nerfMesh });
+                        _statusLabel.Text = $"NeRF Complete. Vertices: {nerfMesh.Vertices.Count}";
+                    }
+                    else
+                    {
+                        _statusLabel.Text = "NeRF extraction failed (empty mesh).";
+                    }
                 }
             }
             catch (Exception ex)
