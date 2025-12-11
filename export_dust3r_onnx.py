@@ -479,6 +479,35 @@ def parse_args():
     parser.add_argument("--output", type=str, default="dust3r.onnx", help="Path (file or directory) to save the exported ONNX model. If a directory is provided, 'dust3r.onnx' will be appended.")
     return parser.parse_args()
 
+def verify_onnx_has_weights(onnx_path):
+    """Verify that the exported ONNX model contains weight initializers."""
+    try:
+        import onnx
+        model = onnx.load(onnx_path)
+
+        # Count initializers (weights)
+        num_initializers = len(model.graph.initializer)
+        total_weight_size = sum(
+            init.ByteSize() for init in model.graph.initializer
+        )
+
+        print(f"\n{'='*60}")
+        print(f"ONNX Model Verification:")
+        print(f"  - Number of initializers (weights): {num_initializers}")
+        print(f"  - Total weight data size: {total_weight_size / (1024*1024):.2f} MB")
+        print(f"  - File size: {os.path.getsize(onnx_path) / (1024*1024):.2f} MB")
+        print(f"{'='*60}\n")
+
+        if num_initializers == 0 or total_weight_size < 1024*1024:  # Less than 1MB of weights
+            print("WARNING: Model appears to have no weights or very few weights!")
+            print("This is likely an export error.")
+            return False
+        return True
+    except Exception as e:
+        print(f"Could not verify ONNX model: {e}")
+        return True  # Don't fail if verification itself fails
+
+
 def main():
     args = parse_args()
     onnx_output_path = args.output
@@ -506,6 +535,15 @@ def main():
     model.head2 = transpose_to_landscape(model.downstream_head2, activate=False)
 
     model.eval()
+
+    # Verify model weights are loaded
+    total_params = sum(p.numel() for p in model.parameters())
+    total_size_mb = sum(p.numel() * p.element_size() for p in model.parameters()) / (1024*1024)
+    print(f"\n{'='*60}")
+    print(f"Model Statistics:")
+    print(f"  - Total parameters: {total_params:,}")
+    print(f"  - Expected weight size: {total_size_mb:.2f} MB")
+    print(f"{'='*60}\n")
 
     print("Wrapping model for ONNX export...")
     wrapped_model = Dust3rOnnxWrapper(model)
@@ -546,10 +584,12 @@ def main():
             input_names=['img1', 'img2', 'true_shape1', 'true_shape2'],
             output_names=['pts3d1', 'conf1', 'pts3d2', 'conf2'],
             opset_version=14,
-            dynamic_axes=dynamic_axes_config
+            dynamic_axes=dynamic_axes_config,
+            export_params=True,  # Explicitly include weights
         )
         export_success = True
         print(f"Success! Model exported to {onnx_output_path}")
+        verify_onnx_has_weights(onnx_output_path)
     except Exception as e:
         print(f"Dynamo-based export failed: {e}")
         import traceback
@@ -559,34 +599,30 @@ def main():
     if not export_success:
         print("\nAttempting fallback with legacy TorchScript-based exporter...")
         try:
-            # Force legacy exporter by using torch.jit.trace first
-            print("Tracing model with torch.jit.trace...")
+            # IMPORTANT FIX: Export the wrapped_model directly, NOT a traced model.
+            # When exporting a traced model, weights may not be properly exported as
+            # ONNX initializers. By passing the nn.Module directly and using dynamo=False,
+            # torch.onnx.export will handle tracing internally AND properly export weights.
+            print("Exporting model to ONNX with legacy exporter (with dynamic axes)...")
             with torch.no_grad():
-                # check_trace=False disables the verification step that fails with FakeTensors
-                traced_model = torch.jit.trace(
-                    wrapped_model,
+                # dynamo=False forces the legacy TorchScript-based ONNX exporter
+                torch.onnx.export(
+                    wrapped_model,  # Pass the nn.Module directly, NOT traced model
                     (dummy_img1, dummy_img2, dummy_true_shape1, dummy_true_shape2),
-                    check_trace=False
+                    onnx_output_path,
+                    input_names=['img1', 'img2', 'true_shape1', 'true_shape2'],
+                    output_names=['pts3d1', 'conf1', 'pts3d2', 'conf2'],
+                    opset_version=14,
+                    dynamic_axes=dynamic_axes_config,
+                    do_constant_folding=True,
+                    export_params=True,  # Explicitly include weights
+                    dynamo=False  # Force legacy exporter
                 )
-
-            print("Exporting traced model to ONNX (with dynamic axes)...")
-            # dynamo=False forces the legacy TorchScript-based ONNX exporter
-            # This avoids the dynamo exporter trying to re-trace and failing
-            torch.onnx.export(
-                traced_model,
-                (dummy_img1, dummy_img2, dummy_true_shape1, dummy_true_shape2),
-                onnx_output_path,
-                input_names=['img1', 'img2', 'true_shape1', 'true_shape2'],
-                output_names=['pts3d1', 'conf1', 'pts3d2', 'conf2'],
-                opset_version=14,
-                dynamic_axes=dynamic_axes_config,
-                do_constant_folding=True,
-                dynamo=False  # Force legacy exporter
-            )
             export_success = True
-            print(f"Success! Model exported to {onnx_output_path} (via TorchScript)")
+            print(f"Success! Model exported to {onnx_output_path} (via legacy exporter)")
+            verify_onnx_has_weights(onnx_output_path)
         except Exception as e2:
-            print(f"TorchScript-based export with dynamic axes failed: {e2}")
+            print(f"Legacy export with dynamic axes failed: {e2}")
             import traceback
             traceback.print_exc()
 
@@ -595,29 +631,25 @@ def main():
         print("\nAttempting export with fixed input shapes (no dynamic axes)...")
         fixed_output_path = onnx_output_path.replace('.onnx', '_fixed_512x512.onnx')
         try:
+            # IMPORTANT FIX: Export the wrapped_model directly, NOT a traced model.
+            print("Exporting model to ONNX with fixed shapes...")
             with torch.no_grad():
-                # check_trace=False disables the verification step that fails with FakeTensors
-                traced_model = torch.jit.trace(
-                    wrapped_model,
+                # dynamo=False forces the legacy TorchScript-based ONNX exporter
+                torch.onnx.export(
+                    wrapped_model,  # Pass the nn.Module directly, NOT traced model
                     (dummy_img1, dummy_img2, dummy_true_shape1, dummy_true_shape2),
-                    check_trace=False
+                    fixed_output_path,
+                    input_names=['img1', 'img2', 'true_shape1', 'true_shape2'],
+                    output_names=['pts3d1', 'conf1', 'pts3d2', 'conf2'],
+                    opset_version=14,
+                    do_constant_folding=True,
+                    export_params=True,  # Explicitly include weights
+                    dynamo=False  # Force legacy exporter
                 )
-
-            print("Exporting traced model to ONNX (fixed shapes)...")
-            # dynamo=False forces the legacy TorchScript-based ONNX exporter
-            torch.onnx.export(
-                traced_model,
-                (dummy_img1, dummy_img2, dummy_true_shape1, dummy_true_shape2),
-                fixed_output_path,
-                input_names=['img1', 'img2', 'true_shape1', 'true_shape2'],
-                output_names=['pts3d1', 'conf1', 'pts3d2', 'conf2'],
-                opset_version=14,
-                do_constant_folding=True,
-                dynamo=False  # Force legacy exporter
-            )
             export_success = True
             print(f"Success! Fixed-shape model exported to {fixed_output_path}")
             print("Note: This model only accepts 512x512 inputs. For dynamic shapes, additional work is needed.")
+            verify_onnx_has_weights(fixed_output_path)
         except Exception as e3:
             print(f"Fixed-shape export also failed: {e3}")
             import traceback
