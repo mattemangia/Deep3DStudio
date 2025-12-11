@@ -24,6 +24,9 @@ namespace Deep3DStudio.Viewport
         private int _selectedHandle = -1; // -1 none, 0-7 corners
         private Vector3[] _cropCorners;
 
+        // Meshes
+        private List<Model.MeshData> _meshes;
+
         public ThreeDView()
         {
             this.HasFocus = true;
@@ -47,6 +50,51 @@ namespace Deep3DStudio.Viewport
         public void ToggleCropBox(bool show)
         {
             _showCropBox = show;
+            this.QueueDraw();
+        }
+
+        public void SetMeshes(List<Model.MeshData> meshes)
+        {
+            _meshes = meshes;
+
+            // Auto-center
+            if (_meshes.Count > 0 && _meshes[0].Vertices.Count > 0)
+            {
+                Vector3 center = Vector3.Zero;
+                int count = 0;
+                foreach(var m in _meshes)
+                {
+                    foreach(var p in m.Vertices)
+                    {
+                        center += p;
+                        count++;
+                    }
+                }
+                if (count > 0) center /= count;
+
+                _panX = -center.X;
+                _panY = -center.Y;
+                _zoom = -5.0f;
+            }
+            this.QueueDraw();
+        }
+
+        public void ApplyCrop()
+        {
+            if (_meshes == null) return;
+            // Crop Box is centered at 0,0,0 with size _cropSize*2 (extends -s to +s)
+            // But we have View Transform (Pan/Zoom/Rot).
+            // The crop box is drawn in World Space (assuming Identity Model matrix for it, but View applies).
+            // Wait, DrawCropBox uses direct GL vertices. It is transformed by the Camera View Matrix.
+            // So the box is defined in "World Space" coordinates: (-s, -s, -s) to (s, s, s).
+
+            Vector3 min = new Vector3(-_cropSize, -_cropSize, -_cropSize);
+            Vector3 max = new Vector3(_cropSize, _cropSize, _cropSize);
+
+            foreach(var mesh in _meshes)
+            {
+                Model.GeometryUtils.CropMesh(mesh, min, max);
+            }
             this.QueueDraw();
         }
 
@@ -113,10 +161,34 @@ namespace Deep3DStudio.Viewport
             DrawGrid();
             DrawAxes();
 
+            if (_meshes != null)
+            {
+                foreach(var mesh in _meshes)
+                {
+                    DrawMesh(mesh);
+                }
+            }
+
             if (_showCropBox)
             {
                 DrawCropBox();
             }
+        }
+
+        private void DrawMesh(Model.MeshData mesh)
+        {
+            GL.Begin(PrimitiveType.Triangles);
+            for(int i=0; i<mesh.Indices.Count; i++)
+            {
+                int idx = mesh.Indices[i];
+                if (idx < mesh.Vertices.Count)
+                {
+                    var c = mesh.Colors[idx];
+                    GL.Color3(c.X, c.Y, c.Z);
+                    GL.Vertex3(mesh.Vertices[idx]);
+                }
+            }
+            GL.End();
         }
 
         private void DrawGrid()
