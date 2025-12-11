@@ -5,6 +5,7 @@ using Deep3DStudio.Icons;
 using Deep3DStudio.Model;
 using Deep3DStudio.Configuration;
 using Deep3DStudio.Meshing;
+using Deep3DStudio.UI;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
@@ -16,7 +17,8 @@ namespace Deep3DStudio
         private Label _statusLabel;
         private Model.Dust3rInference _inference;
         private List<string> _imagePaths = new List<string>();
-        private ListStore _imgListStore;
+        private ImageBrowserPanel _imageBrowser;
+        private SceneResult? _lastSceneResult; // Store last reconstruction for depth visualization
 
         // UI References for updates
         private ComboBoxText _workflowCombo;
@@ -194,6 +196,7 @@ namespace Deep3DStudio
         {
             var vbox = new Box(Orientation.Vertical, 5);
             vbox.Margin = 10;
+            vbox.SetSizeRequest(280, -1);
 
             var label = new Label("Mesh Tools");
             label.Attributes = new Pango.AttrList();
@@ -215,26 +218,32 @@ namespace Deep3DStudio
 
             vbox.PackStart(new Separator(Orientation.Horizontal), false, false, 10);
 
-            var imgLabel = new Label("Input Images");
-            imgLabel.Attributes = new Pango.AttrList();
-            imgLabel.Attributes.Insert(new Pango.AttrWeight(Pango.Weight.Bold));
-            vbox.PackStart(imgLabel, false, false, 5);
+            // Image Browser Panel with thumbnails
+            _imageBrowser = new ImageBrowserPanel();
+            _imageBrowser.ImageDoubleClicked += OnImageDoubleClicked;
+            vbox.PackStart(_imageBrowser, true, true, 0);
 
-            var scrolled = new ScrolledWindow();
-            scrolled.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
-
-            _imgListStore = new ListStore(typeof(string));
-            var treeView = new TreeView(_imgListStore);
-            treeView.AppendColumn("Filename", new CellRendererText(), "text", 0);
-
-            scrolled.Add(treeView);
-            vbox.PackStart(scrolled, true, true, 0);
+            // Clear button
+            var clearBtn = new Button("Clear Images");
+            clearBtn.Clicked += (s, e) => {
+                _imagePaths.Clear();
+                _imageBrowser.Clear();
+                _lastSceneResult = null;
+            };
+            vbox.PackStart(clearBtn, false, false, 5);
 
             _inference = new Model.Dust3rInference();
             if (_inference.IsLoaded) _statusLabel.Text = "Model Loaded";
             else _statusLabel.Text = "Model Not Found - Check dust3r.onnx";
 
             return vbox;
+        }
+
+        private void OnImageDoubleClicked(object? sender, ImageEntry entry)
+        {
+            var previewDialog = new ImagePreviewDialog(this, entry);
+            previewDialog.Run();
+            previewDialog.Destroy();
         }
 
         private void OnOpenSettings(object sender, EventArgs e)
@@ -263,13 +272,31 @@ namespace Deep3DStudio
         {
             var fc = new FileChooserDialog("Choose Images", this, FileChooserAction.Open, "Cancel", ResponseType.Cancel, "Open", ResponseType.Accept);
             fc.SelectMultiple = true;
+
+            // Add image file filter
+            var filter = new FileFilter();
+            filter.Name = "Image Files";
+            filter.AddPattern("*.jpg");
+            filter.AddPattern("*.jpeg");
+            filter.AddPattern("*.png");
+            filter.AddPattern("*.bmp");
+            filter.AddPattern("*.tiff");
+            filter.AddPattern("*.tif");
+            fc.AddFilter(filter);
+
+            var allFilter = new FileFilter();
+            allFilter.Name = "All Files";
+            allFilter.AddPattern("*");
+            fc.AddFilter(allFilter);
+
             if (fc.Run() == (int)ResponseType.Accept)
             {
                 foreach (var f in fc.Filenames)
                 {
                     _imagePaths.Add(f);
-                    _imgListStore.AppendValues(System.IO.Path.GetFileName(f));
+                    _imageBrowser.AddImage(f);
                 }
+                _statusLabel.Text = $"{_imageBrowser.ImageCount} images loaded";
             }
             fc.Destroy();
         }
@@ -300,6 +327,10 @@ namespace Deep3DStudio
                     _statusLabel.Text = "Dust3r Inference failed.";
                     return;
                 }
+
+                // Store result and populate depth data for image browser
+                _lastSceneResult = result;
+                PopulateDepthData(result);
 
                 if (workflow == "Dust3r (Fast)")
                 {
@@ -344,6 +375,29 @@ namespace Deep3DStudio
             }
         }
 
+        /// <summary>
+        /// Populates depth data for all images in the browser from the reconstruction result.
+        /// </summary>
+        private void PopulateDepthData(SceneResult result)
+        {
+            if (result.Poses.Count == 0) return;
+
+            for (int i = 0; i < result.Poses.Count && i < result.Meshes.Count; i++)
+            {
+                var pose = result.Poses[i];
+                var mesh = result.Meshes[i];
+
+                // Extract depth map for this view
+                var depthMap = ExtractDepthMap(mesh, pose.Width, pose.Height, pose.WorldToCamera);
+
+                // Set on image browser (by index matching order added)
+                _imageBrowser.SetDepthData(i, depthMap);
+            }
+
+            // Refresh display to show depth is now available
+            _imageBrowser.QueueDraw();
+        }
+
         private IMesher GetMesher(MeshingAlgorithm algo)
         {
             switch (algo)
@@ -353,6 +407,61 @@ namespace Deep3DStudio
                 case MeshingAlgorithm.Blocky: return new BlockMesher();
                 case MeshingAlgorithm.MarchingCubes: default: return new MarchingCubesMesher();
             }
+        }
+
+        /// <summary>
+        /// Extracts depth map from a mesh for a given image size.
+        /// Uses the PixelToVertexIndex mapping if available.
+        /// </summary>
+        private float[,] ExtractDepthMap(MeshData mesh, int width, int height, OpenTK.Mathematics.Matrix4 worldToCamera)
+        {
+            float[,] depthMap = new float[width, height];
+
+            // Initialize with max value (no depth)
+            for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                    depthMap[x, y] = float.MaxValue;
+
+            // If we have pixel-to-vertex mapping, use it directly
+            if (mesh.PixelToVertexIndex != null && mesh.PixelToVertexIndex.GetLength(0) == width && mesh.PixelToVertexIndex.GetLength(1) == height)
+            {
+                for (int y = 0; y < height; y++)
+                {
+                    for (int x = 0; x < width; x++)
+                    {
+                        int vertIdx = mesh.PixelToVertexIndex[x, y];
+                        if (vertIdx >= 0 && vertIdx < mesh.Vertices.Count)
+                        {
+                            var v = mesh.Vertices[vertIdx];
+                            // Transform to camera space
+                            var vCam = OpenTK.Mathematics.Vector3.TransformPosition(v, worldToCamera);
+                            depthMap[x, y] = -vCam.Z; // Depth is positive distance along camera Z
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // Fallback: project all vertices and rasterize
+                foreach (var v in mesh.Vertices)
+                {
+                    var vCam = OpenTK.Mathematics.Vector3.TransformPosition(v, worldToCamera);
+
+                    // Simple orthographic projection for depth visualization
+                    // Scale to image coordinates (assumes normalized coordinates)
+                    int px = (int)((v.X + 1) * 0.5f * width);
+                    int py = (int)((1 - (v.Y + 1) * 0.5f) * height);
+
+                    if (px >= 0 && px < width && py >= 0 && py < height)
+                    {
+                        float depth = -vCam.Z;
+                        if (depth < depthMap[px, py] && depth > 0)
+                            depthMap[px, py] = depth;
+                    }
+                }
+            }
+
+            return depthMap;
         }
 
         private (float[,,], OpenTK.Mathematics.Vector3, float) VoxelizePoints(List<MeshData> meshes)
