@@ -94,6 +94,12 @@ namespace Deep3DStudio.Viewport
 
         public ThreeDView()
         {
+            this.HasDepthBuffer = true;
+            this.HasStencilBuffer = false;
+            // Requesting version 2.1 ensures we get a context compatible with
+            // the fixed-function pipeline (GL.Begin/End) used in this codebase.
+            this.SetRequiredVersion(2, 1);
+
             this.HasFocus = true;
             this.CanFocus = true;
             this.AddEvents((int)Gdk.EventMask.ButtonPressMask |

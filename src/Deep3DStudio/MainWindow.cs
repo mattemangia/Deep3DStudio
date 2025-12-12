@@ -123,6 +123,8 @@ namespace Deep3DStudio
         private Widget CreateMenuBar()
         {
             var menuBar = new MenuBar();
+            var accelGroup = new AccelGroup();
+            this.AddAccelGroup(accelGroup);
 
             // File Menu
             var fileMenu = new Menu();
@@ -179,6 +181,14 @@ namespace Deep3DStudio
             var duplicateItem = new MenuItem("D_uplicate");
             duplicateItem.Activated += OnDuplicateSelected;
             editMenu.Append(duplicateItem);
+
+            editMenu.Append(new SeparatorMenuItem());
+
+            var settingsItemEdit = new MenuItem("_Settings");
+            settingsItemEdit.Activated += OnOpenSettings;
+            settingsItemEdit.AddAccelerator("activate", accelGroup,
+                (uint)Gdk.Key.comma, Gdk.ModifierType.ControlMask, AccelFlags.Visible);
+            editMenu.Append(settingsItemEdit);
 
             editMenu.Append(new SeparatorMenuItem());
 
