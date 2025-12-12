@@ -1176,8 +1176,18 @@ namespace Deep3DStudio
             toolbar.Insert(wfItem, -1);
 
             // Run
-            var runBtn = new ToolButton(AppIconFactory.GenerateIcon("run", iconSize), "Run");
-            runBtn.TooltipText = "Start Reconstruction Process";
+            var runPointsBtn = new ToolButton(AppIconFactory.GenerateIcon("pointcloud", iconSize), "Gen Points");
+            runPointsBtn.TooltipText = "Generate Point Cloud Only";
+            runPointsBtn.Clicked += OnGeneratePointCloud;
+            toolbar.Insert(runPointsBtn, -1);
+
+            var runMeshBtn = new ToolButton(AppIconFactory.GenerateIcon("mesh", iconSize), "Gen Mesh");
+            runMeshBtn.TooltipText = "Generate Mesh from existing Point Cloud";
+            runMeshBtn.Clicked += OnGenerateMesh;
+            toolbar.Insert(runMeshBtn, -1);
+
+            var runBtn = new ToolButton(AppIconFactory.GenerateIcon("run", iconSize), "Run All");
+            runBtn.TooltipText = "Start Full Reconstruction Process";
             runBtn.Clicked += OnRunInference;
             toolbar.Insert(runBtn, -1);
 
@@ -2054,17 +2064,35 @@ namespace Deep3DStudio
             fc.Destroy();
         }
 
+        private async void OnGeneratePointCloud(object? sender, EventArgs e)
+        {
+             await RunPointCloudGeneration();
+        }
+
+        private async void OnGenerateMesh(object? sender, EventArgs e)
+        {
+             await RunMeshing();
+        }
+
         private async void OnRunInference(object? sender, EventArgs e)
+        {
+             bool success = await RunPointCloudGeneration();
+             if (success)
+             {
+                 await RunMeshing();
+             }
+        }
+
+        private async Task<bool> RunPointCloudGeneration()
         {
             if (_imagePaths.Count < 2)
             {
                 ShowMessage("Please add at least 2 images.");
-                return;
+                return false;
             }
 
-            string workflow = _workflowCombo.ActiveText;
             var settings = IniSettings.Instance;
-            _statusLabel.Text = $"Running {workflow} on {settings.Device}...";
+            _statusLabel.Text = $"Estimating Geometry on {settings.Device}...";
 
             while (Application.EventsPending()) Application.RunIteration();
 
@@ -2073,9 +2101,6 @@ namespace Deep3DStudio
                 SceneResult result = new SceneResult();
 
                 // Determine which reconstruction method to use
-                // 1. If reconstruction method is Dust3r and model exists, use it.
-                // 2. If reconstruction method is FeatureMatching or Dust3r model missing, use SfM.
-
                 bool useDust3r = settings.ReconstructionMethod == ReconstructionMethod.Dust3r;
                 if (useDust3r && !_inference.IsLoaded)
                 {
@@ -2097,49 +2122,86 @@ namespace Deep3DStudio
 
                 if (result.Meshes.Count == 0)
                 {
-                    _statusLabel.Text = "Reconstruction failed. No meshes generated.";
-                    return;
+                    _statusLabel.Text = "Reconstruction failed. No points generated.";
+                    return false;
                 }
 
                 _lastSceneResult = result;
                 PopulateDepthData(result);
 
+                // Update Scene with Point Cloud
                 _sceneGraph.Clear();
+
+                // Add Point Clouds (from result.Meshes acting as points)
+                for(int i=0; i<result.Meshes.Count; i++)
+                {
+                    var pcObj = new PointCloudObject($"PointCloud_{i}", result.Meshes[i]);
+                    _sceneGraph.AddObject(pcObj);
+                }
+
+                AddCamerasToScene(result);
+
+                _sceneTreeView.RefreshTree();
+                _viewport.QueueDraw();
+                _statusLabel.Text = "Point Cloud Generation Complete.";
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                 _statusLabel.Text = "Error: " + ex.Message;
+                 Console.WriteLine(ex);
+                 return false;
+            }
+        }
+
+        private async Task RunMeshing()
+        {
+            if (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0)
+            {
+                // Try to build result from current scene if possible?
+                // For now, require point cloud generation first
+                ShowMessage("No point cloud data available. Please generate point cloud first or import data.");
+                return;
+            }
+
+            string workflow = _workflowCombo.ActiveText;
+            _statusLabel.Text = $"Meshing ({workflow})...";
+            while (Application.EventsPending()) Application.RunIteration();
+
+            try
+            {
+                // Remove existing meshes to avoid clutter, or keep them?
+                // Let's remove old reconstruction meshes but keep imported ones?
+                // For simplicity, we are working on _lastSceneResult data.
 
                 if (workflow == "Dust3r (Fast)")
                 {
                     _statusLabel.Text = $"Meshing using {IniSettings.Instance.MeshingAlgo}...";
 
                     var meshedResult = await Task.Run(() => {
-                         var (grid, min, size) = VoxelizePoints(result.Meshes);
+                         var (grid, min, size) = VoxelizePoints(_lastSceneResult.Meshes);
                          IMesher mesher = GetMesher(IniSettings.Instance.MeshingAlgo);
                          return mesher.GenerateMesh(grid, min, size, 0.5f);
                     });
 
                     var meshObj = new MeshObject("Reconstructed Mesh", meshedResult);
                     _sceneGraph.AddObject(meshObj);
-
-                    AddCamerasToScene(result);
-
-                    _statusLabel.Text = "Dust3r & Meshing Complete.";
+                    _statusLabel.Text = "Meshing Complete.";
                 }
                 else if (workflow == "Interior Scan")
                 {
                     _statusLabel.Text = $"Meshing Interior (High Res) using {IniSettings.Instance.MeshingAlgo}...";
 
                     var meshedResult = await Task.Run(() => {
-                         // Use higher resolution (e.g. 500) for interiors to capture details in large spaces
-                         var (grid, min, size) = VoxelizePoints(result.Meshes, 500);
+                         var (grid, min, size) = VoxelizePoints(_lastSceneResult.Meshes, 500);
                          IMesher mesher = GetMesher(IniSettings.Instance.MeshingAlgo);
                          return mesher.GenerateMesh(grid, min, size, 0.5f);
                     });
 
                     var meshObj = new MeshObject("Interior Mesh", meshedResult);
                     _sceneGraph.AddObject(meshObj);
-
-                    AddCamerasToScene(result);
-
-                    _statusLabel.Text = "Interior Scan Complete.";
+                    _statusLabel.Text = "Interior Meshing Complete.";
                 }
                 else
                 {
@@ -2149,8 +2211,8 @@ namespace Deep3DStudio
                     var nerfSettings = IniSettings.Instance;
                     await Task.Run(() =>
                     {
-                        nerf.InitializeFromMesh(result.Meshes);
-                        nerf.Train(result.Poses, iterations: nerfSettings.NeRFIterations);
+                        nerf.InitializeFromMesh(_lastSceneResult.Meshes);
+                        nerf.Train(_lastSceneResult.Poses, iterations: nerfSettings.NeRFIterations);
                     });
 
                     _statusLabel.Text = $"Extracting NeRF Mesh ({IniSettings.Instance.MeshingAlgo})...";
@@ -2161,20 +2223,18 @@ namespace Deep3DStudio
 
                     var meshObj = new MeshObject("NeRF Mesh", nerfMesh);
                     _sceneGraph.AddObject(meshObj);
-
-                    AddCamerasToScene(result);
-
-                    _statusLabel.Text = "NeRF Complete.";
+                    _statusLabel.Text = "NeRF Meshing Complete.";
                 }
 
                 _sceneTreeView.RefreshTree();
+                _viewport.QueueDraw();
 
                 var (meshes, pcs, cams, verts, tris) = _sceneGraph.GetStatistics();
-                _statusLabel.Text += $" | {meshes} meshes, {cams} cameras, {verts:N0} vertices";
+                _statusLabel.Text += $" | {meshes} meshes, {verts:N0} vertices";
             }
             catch (Exception ex)
             {
-                 _statusLabel.Text = "Error: " + ex.Message;
+                 _statusLabel.Text = "Error during meshing: " + ex.Message;
                  Console.WriteLine(ex);
             }
         }

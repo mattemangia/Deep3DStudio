@@ -547,7 +547,7 @@ namespace Deep3DStudio.Model
             if ((edgeTable[cubeIndex] & 1024) != 0) VertexInterp(isoLevel, poss[2], poss[6], vals[2], vals[6], cols[2], cols[6], out vertList[10], out colList[10]);
             if ((edgeTable[cubeIndex] & 2048) != 0) VertexInterp(isoLevel, poss[3], poss[7], vals[3], vals[7], cols[3], cols[7], out vertList[11], out colList[11]);
 
-            for (int i = 0; triTable[cubeIndex, i] != -1; i += 3)
+            for (int i = 0; i < 15 && triTable[cubeIndex, i] != -1; i += 3)
             {
                 int i1 = triTable[cubeIndex, i];
                 int i2 = triTable[cubeIndex, i + 1];
