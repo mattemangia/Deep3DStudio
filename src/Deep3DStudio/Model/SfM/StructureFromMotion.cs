@@ -30,7 +30,6 @@ namespace Deep3DStudio.Model.SfM
             public Size Size;
             public Mat Image;
             public Mat K; // Intrinsics
-            public Mat DistCoeffs;
             public KeyPoint[] KeyPoints;
             public Mat Descriptors;
             public Mat R; // Camera -> World? No, World -> Camera (OpenCV convention)
@@ -259,6 +258,21 @@ namespace Deep3DStudio.Model.SfM
 
                     if (inliers > 50)
                     {
+                        // Ensure Double precision to prevent type mismatch issues
+                        if (R.Type() != MatType.CV_64F) R.ConvertTo(R, MatType.CV_64F);
+                        if (t.Type() != MatType.CV_64F) t.ConvertTo(t, MatType.CV_64F);
+
+                        // Sanity check for initialization translation
+                        double tx = t.At<double>(0, 0);
+                        double ty = t.At<double>(1, 0);
+                        double tz = t.At<double>(2, 0);
+                        if (double.IsNaN(tx) || double.IsNaN(ty) || double.IsNaN(tz) ||
+                            Math.Abs(tx) > 1000 || Math.Abs(ty) > 1000 || Math.Abs(tz) > 1000)
+                        {
+                             Console.WriteLine($"Initialization rejected: Translation too large ({tx}, {ty}, {tz})");
+                             continue;
+                        }
+
                         // Good initialization
                         v1.R = Mat.Eye(3, 3, MatType.CV_64F).ToMat();
                         v1.t = new Mat(3, 1, MatType.CV_64F, Scalar.All(0));
@@ -368,6 +382,22 @@ namespace Deep3DStudio.Model.SfM
                     return false;
                 }
 
+                // Ensure Double precision to prevent type mismatch issues
+                if (rvec.Type() != MatType.CV_64F) rvec.ConvertTo(rvec, MatType.CV_64F);
+                if (tvec.Type() != MatType.CV_64F) tvec.ConvertTo(tvec, MatType.CV_64F);
+
+                // Sanity check: Check for exploding coordinates
+                double tx = tvec.At<double>(0, 0);
+                double ty = tvec.At<double>(1, 0);
+                double tz = tvec.At<double>(2, 0);
+
+                if (double.IsNaN(tx) || double.IsNaN(ty) || double.IsNaN(tz) ||
+                    Math.Abs(tx) > 1000 || Math.Abs(ty) > 1000 || Math.Abs(tz) > 1000)
+                {
+                    Console.WriteLine($"  PnP rejected: Extrinsic translation out of bounds ({tx}, {ty}, {tz})");
+                    return false;
+                }
+
                 view.R = new Mat();
                 Cv2.Rodrigues(rvec, view.R);
                 view.t = tvec.Clone();
@@ -428,6 +458,9 @@ namespace Deep3DStudio.Model.SfM
 
             using var pts4D = new Mat();
             Cv2.TriangulatePoints(P1, P2, InputArray.Create(pts1), InputArray.Create(pts2), pts4D);
+
+            // Ensure output is Double before accessing as Double
+            if (pts4D.Type() != MatType.CV_64F) pts4D.ConvertTo(pts4D, MatType.CV_64F);
 
             int validPoints = 0;
             int rejectedPoints = 0;
