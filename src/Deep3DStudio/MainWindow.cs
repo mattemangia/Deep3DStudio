@@ -37,14 +37,11 @@ namespace Deep3DStudio
 
         // Panel containers for show/hide
         private Widget _leftPanel;
-        private Widget _rightPanel;
         private Widget _verticalToolbar;
         private Paned _mainHPaned;
-        private Paned _rightPaned;
 
         // Menu check items for panel visibility
         private CheckMenuItem? _showSceneTreeMenuItem;
-        private CheckMenuItem? _showToolsPanelMenuItem;
         private CheckMenuItem? _showVerticalToolbarMenuItem;
         private CheckMenuItem? _showGridMenuItem;
         private CheckMenuItem? _showAxesMenuItem;
@@ -89,29 +86,25 @@ namespace Deep3DStudio
             _verticalToolbar = CreateVerticalToolbar();
             contentBox.PackStart(_verticalToolbar, false, false, 0);
 
-            // Main Paned (Tree + Viewport + Side Panel)
+            // Main Paned (Tree + Viewport)
             _mainHPaned = new Paned(Orientation.Horizontal);
             contentBox.PackStart(_mainHPaned, true, true, 0);
 
-            // Left: Scene Tree View
+            // Left: Scene Tree View + Image Browser
             _leftPanel = CreateSceneTreePanel();
             _mainHPaned.Pack1(_leftPanel, false, false);
 
-            // Center + Right: Viewport + Side Panel
-            _rightPaned = new Paned(Orientation.Horizontal);
-            _mainHPaned.Pack2(_rightPaned, true, false);
+            // 3D Viewport
+            _mainHPaned.Pack2(_viewport, true, false);
 
-            // 3D Viewport (already created above, just add to layout)
-            _rightPaned.Pack1(_viewport, true, false);
-
-            // 4. Status Bar (initialize before CreateSidePanel)
+            // Status Bar
             _statusLabel = new Label("Ready");
 
-            // Side Panel (Right)
-            _rightPanel = CreateSidePanel();
-            _rightPaned.Pack2(_rightPanel, false, false);
+            // Initialize inference engine
+            _inference = new Model.Dust3rInference();
+            if (_inference.IsLoaded) _statusLabel.Text = "Model Loaded";
+            else _statusLabel.Text = "Model Not Found - Check dust3r.onnx";
 
-            _rightPaned.Position = 850;
             _mainHPaned.Position = 250;
 
             _statusLabel.Halign = Align.Start;
@@ -377,11 +370,6 @@ namespace Deep3DStudio
             _showSceneTreeMenuItem.Toggled += OnToggleSceneTree;
             windowMenu.Append(_showSceneTreeMenuItem);
 
-            _showToolsPanelMenuItem = new CheckMenuItem("_Tools Panel");
-            _showToolsPanelMenuItem.Active = true;
-            _showToolsPanelMenuItem.Toggled += OnToggleToolsPanel;
-            windowMenu.Append(_showToolsPanelMenuItem);
-
             _showVerticalToolbarMenuItem = new CheckMenuItem("_Vertical Toolbar");
             _showVerticalToolbarMenuItem.Active = true;
             _showVerticalToolbarMenuItem.Toggled += OnToggleVerticalToolbar;
@@ -442,8 +430,11 @@ namespace Deep3DStudio
             var focusBtn = CreateIconButton("focus", "Focus (F)", btnSize, () => _viewport.FocusOnSelection());
             vbox.PackStart(focusBtn, false, false, 1);
 
-            var cropBtn = CreateIconButton("crop", "Crop Box", btnSize, () => _viewport.ToggleCropBox(true));
+            var cropBtn = CreateIconButton("crop", "Toggle Crop Box", btnSize, () => _viewport.ToggleCropBox(true));
             vbox.PackStart(cropBtn, false, false, 1);
+
+            var applyCropBtn = CreateIconButton("apply_crop", "Apply Crop", btnSize, () => _viewport.ApplyCrop());
+            vbox.PackStart(applyCropBtn, false, false, 1);
 
             vbox.PackStart(new Separator(Orientation.Horizontal), false, false, 5);
 
@@ -613,6 +604,22 @@ namespace Deep3DStudio
                     cr.Stroke();
                     break;
 
+                case "apply_crop":
+                    // Scissors/cut icon
+                    cr.LineWidth = 2;
+                    // Crop box outline
+                    cr.SetSourceRGB(0.6, 0.6, 0.6);
+                    cr.Rectangle(4, 4, s - 8, s - 8);
+                    cr.Stroke();
+                    // Checkmark inside
+                    cr.SetSourceRGB(0.3, 0.8, 0.3);
+                    cr.LineWidth = 2.5;
+                    cr.MoveTo(cx - 5, cy);
+                    cr.LineTo(cx - 1, cy + 4);
+                    cr.LineTo(cx + 5, cy - 4);
+                    cr.Stroke();
+                    break;
+
                 case "decimate":
                     // Triangle with down arrow (simplify)
                     cr.LineWidth = 1.5;
@@ -723,12 +730,35 @@ namespace Deep3DStudio
             var panel = new Box(Orientation.Vertical, 0);
             panel.SetSizeRequest(250, -1);
 
+            // Scene Tree (top)
             _sceneTreeView = new SceneTreeView();
             _sceneTreeView.SetSceneGraph(_sceneGraph);
             _sceneTreeView.ObjectSelected += OnSceneObjectSelected;
             _sceneTreeView.ObjectDoubleClicked += OnSceneObjectDoubleClicked;
             _sceneTreeView.ObjectActionRequested += OnSceneObjectAction;
             panel.PackStart(_sceneTreeView, true, true, 0);
+
+            panel.PackStart(new Separator(Orientation.Horizontal), false, false, 5);
+
+            // Image Browser (bottom)
+            var imagesLabel = new Label("Input Images");
+            imagesLabel.Attributes = new Pango.AttrList();
+            imagesLabel.Attributes.Insert(new Pango.AttrWeight(Pango.Weight.Bold));
+            panel.PackStart(imagesLabel, false, false, 2);
+
+            _imageBrowser = new ImageBrowserPanel();
+            _imageBrowser.ImageDoubleClicked += OnImageDoubleClicked;
+            _imageBrowser.SetSizeRequest(-1, 150);
+            panel.PackStart(_imageBrowser, false, false, 0);
+
+            // Clear button
+            var clearBtn = new Button("Clear Images");
+            clearBtn.Clicked += (s, e) => {
+                _imagePaths.Clear();
+                _imageBrowser.Clear();
+                _lastSceneResult = null;
+            };
+            panel.PackStart(clearBtn, false, false, 2);
 
             return panel;
         }
@@ -738,14 +768,6 @@ namespace Deep3DStudio
             if (_showSceneTreeMenuItem != null)
             {
                 _leftPanel.Visible = _showSceneTreeMenuItem.Active;
-            }
-        }
-
-        private void OnToggleToolsPanel(object? sender, EventArgs e)
-        {
-            if (_showToolsPanelMenuItem != null)
-            {
-                _rightPanel.Visible = _showToolsPanelMenuItem.Active;
             }
         }
 
@@ -760,22 +782,18 @@ namespace Deep3DStudio
         private void OnFullViewportMode(object? sender, EventArgs e)
         {
             _leftPanel.Visible = false;
-            _rightPanel.Visible = false;
             _verticalToolbar.Visible = false;
 
             if (_showSceneTreeMenuItem != null) _showSceneTreeMenuItem.Active = false;
-            if (_showToolsPanelMenuItem != null) _showToolsPanelMenuItem.Active = false;
             if (_showVerticalToolbarMenuItem != null) _showVerticalToolbarMenuItem.Active = false;
         }
 
         private void OnRestoreAllPanels(object? sender, EventArgs e)
         {
             _leftPanel.Visible = true;
-            _rightPanel.Visible = true;
             _verticalToolbar.Visible = true;
 
             if (_showSceneTreeMenuItem != null) _showSceneTreeMenuItem.Active = true;
-            if (_showToolsPanelMenuItem != null) _showToolsPanelMenuItem.Active = true;
             if (_showVerticalToolbarMenuItem != null) _showVerticalToolbarMenuItem.Active = true;
         }
 
@@ -900,103 +918,6 @@ namespace Deep3DStudio
             toolbar.Insert(runBtn, -1);
 
             return toolbar;
-        }
-
-        private Widget CreateSidePanel()
-        {
-            var vbox = new Box(Orientation.Vertical, 5);
-            vbox.Margin = 10;
-            vbox.SetSizeRequest(280, -1);
-
-            // Mesh Operations Section
-            var meshOpsLabel = new Label("Mesh Operations");
-            meshOpsLabel.Attributes = new Pango.AttrList();
-            meshOpsLabel.Attributes.Insert(new Pango.AttrWeight(Pango.Weight.Bold));
-            vbox.PackStart(meshOpsLabel, false, false, 5);
-
-            // Decimate button
-            var decimateBtn = new Button("Decimate (50%)");
-            decimateBtn.TooltipText = "Reduce mesh vertex count";
-            decimateBtn.Clicked += OnDecimateClicked;
-            vbox.PackStart(decimateBtn, false, false, 2);
-
-            // Smooth button
-            var smoothBtn = new Button("Smooth");
-            smoothBtn.TooltipText = "Apply Laplacian smoothing";
-            smoothBtn.Clicked += OnSmoothClicked;
-            vbox.PackStart(smoothBtn, false, false, 2);
-
-            // Optimize button
-            var optimizeBtn = new Button("Optimize");
-            optimizeBtn.TooltipText = "Remove duplicate vertices";
-            optimizeBtn.Clicked += OnOptimizeClicked;
-            vbox.PackStart(optimizeBtn, false, false, 2);
-
-            // Split button
-            var splitBtn = new Button("Split by Connectivity");
-            splitBtn.TooltipText = "Split mesh into connected parts";
-            splitBtn.Clicked += OnSplitClicked;
-            vbox.PackStart(splitBtn, false, false, 2);
-
-            vbox.PackStart(new Separator(Orientation.Horizontal), false, false, 5);
-
-            // Merge/Align Section
-            var alignLabel = new Label("Merge & Align");
-            alignLabel.Attributes = new Pango.AttrList();
-            alignLabel.Attributes.Insert(new Pango.AttrWeight(Pango.Weight.Bold));
-            vbox.PackStart(alignLabel, false, false, 5);
-
-            var mergeBtn = new Button("Merge Selected");
-            mergeBtn.TooltipText = "Merge selected meshes into one";
-            mergeBtn.Clicked += OnMergeClicked;
-            vbox.PackStart(mergeBtn, false, false, 2);
-
-            var alignBtn = new Button("Align (ICP)");
-            alignBtn.TooltipText = "Align selected to first using ICP";
-            alignBtn.Clicked += OnAlignClicked;
-            vbox.PackStart(alignBtn, false, false, 2);
-
-            vbox.PackStart(new Separator(Orientation.Horizontal), false, false, 5);
-
-            // Tools with 3D handles
-            var toolsLabel = new Label("Crop Tools");
-            toolsLabel.Attributes = new Pango.AttrList();
-            toolsLabel.Attributes.Insert(new Pango.AttrWeight(Pango.Weight.Bold));
-            vbox.PackStart(toolsLabel, false, false, 5);
-
-            var cropBtn = new Button("Toggle Crop Box");
-            cropBtn.Clicked += (s, e) => {
-                 _viewport.ToggleCropBox(true);
-            };
-            vbox.PackStart(cropBtn, false, false, 2);
-
-            var applyCropBtn = new Button("Apply Crop");
-            applyCropBtn.Clicked += (s, e) => {
-                _viewport.ApplyCrop();
-            };
-            vbox.PackStart(applyCropBtn, false, false, 2);
-
-            vbox.PackStart(new Separator(Orientation.Horizontal), false, false, 10);
-
-            // Image Browser Panel with thumbnails
-            _imageBrowser = new ImageBrowserPanel();
-            _imageBrowser.ImageDoubleClicked += OnImageDoubleClicked;
-            vbox.PackStart(_imageBrowser, true, true, 0);
-
-            // Clear button
-            var clearBtn = new Button("Clear Images");
-            clearBtn.Clicked += (s, e) => {
-                _imagePaths.Clear();
-                _imageBrowser.Clear();
-                _lastSceneResult = null;
-            };
-            vbox.PackStart(clearBtn, false, false, 5);
-
-            _inference = new Model.Dust3rInference();
-            if (_inference.IsLoaded) _statusLabel.Text = "Model Loaded";
-            else _statusLabel.Text = "Model Not Found - Check dust3r.onnx";
-
-            return vbox;
         }
 
         #region Menu Actions
