@@ -351,10 +351,20 @@ namespace Deep3DStudio.Model.SfM
 
             try
             {
+                // Use more relaxed parameters for robust registration
+                // Increased reprojection error from 6.0 to 12.0 pixels to handle imperfect triangulation
+                // Increased iterations for better convergence
                 Cv2.SolvePnPRansac(InputArray.Create(objPts), InputArray.Create(imgPts), view.K, null, rvec, tvec,
-                    useExtrinsicGuess: false, iterationsCount: 200, reprojectionError: 6.0f, confidence: 0.99, inliers: inliers);
+                    useExtrinsicGuess: false, iterationsCount: 500, reprojectionError: 12.0f, confidence: 0.99, inliers: inliers);
 
-                if (inliers.Rows < 10) return false;
+                Console.WriteLine($"  PnP result: {inliers.Rows} inliers from {objPts.Count} correspondences");
+
+                // Lowered minimum inlier threshold from 10 to 6 for challenging cases
+                if (inliers.Rows < 6)
+                {
+                    Console.WriteLine($"  Insufficient inliers ({inliers.Rows} < 6)");
+                    return false;
+                }
 
                 view.R = new Mat();
                 Cv2.Rodrigues(rvec, view.R);
@@ -362,7 +372,11 @@ namespace Deep3DStudio.Model.SfM
                 view.IsRegistered = true;
                 return true;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  PnP exception: {ex.Message}");
+                return false;
+            }
         }
 
         private void ExpandMap(ViewInfo newView)
@@ -413,18 +427,48 @@ namespace Deep3DStudio.Model.SfM
             using var pts4D = new Mat();
             Cv2.TriangulatePoints(P1, P2, InputArray.Create(pts1), InputArray.Create(pts2), pts4D);
 
+            int validPoints = 0;
+            int rejectedPoints = 0;
+
             for (int i = 0; i < pts4D.Cols; i++)
             {
                 double w = pts4D.At<double>(3, i);
-                if (Math.Abs(w) < 1e-6) continue;
+                if (Math.Abs(w) < 1e-6)
+                {
+                    rejectedPoints++;
+                    continue;
+                }
 
                 double x = pts4D.At<double>(0, i) / w;
                 double y = pts4D.At<double>(1, i) / w;
                 double z = pts4D.At<double>(2, i) / w;
 
-                // Parallax check / Z check
-                // Transform to cameras to check Z > 0
-                // Skip for brevity, relying on RANSAC mostly.
+                // Filter invalid points:
+                // 1. Check for NaN/Inf
+                if (double.IsNaN(x) || double.IsNaN(y) || double.IsNaN(z) ||
+                    double.IsInfinity(x) || double.IsInfinity(y) || double.IsInfinity(z))
+                {
+                    rejectedPoints++;
+                    continue;
+                }
+
+                // 2. Check point is in front of both cameras (Z > 0 in camera space)
+                // Transform point to camera 1 space
+                double z1 = v1.R.At<double>(2, 0) * x + v1.R.At<double>(2, 1) * y + v1.R.At<double>(2, 2) * z + v1.t.At<double>(2, 0);
+                double z2 = v2.R.At<double>(2, 0) * x + v2.R.At<double>(2, 1) * y + v2.R.At<double>(2, 2) * z + v2.t.At<double>(2, 0);
+
+                if (z1 < 0.01 || z2 < 0.01)
+                {
+                    rejectedPoints++;
+                    continue; // Point is behind one of the cameras
+                }
+
+                // 3. Check point is not too far (depth sanity check - max 1000 units)
+                if (Math.Abs(x) > 1000 || Math.Abs(y) > 1000 || Math.Abs(z) > 1000)
+                {
+                    rejectedPoints++;
+                    continue;
+                }
 
                 var mp = new MapPoint
                 {
@@ -441,6 +485,11 @@ namespace Deep3DStudio.Model.SfM
                 mp.ObservingViewIndices[v2.Index] = usedMatches[i].TrainIdx;
 
                 _map.Add(mp);
+            }
+
+            if (validPoints > 0 || rejectedPoints > 0)
+            {
+                Console.WriteLine($"  Triangulated {validPoints} valid points, rejected {rejectedPoints} bad points");
             }
         }
 

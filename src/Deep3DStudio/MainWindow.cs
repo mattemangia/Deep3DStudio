@@ -2481,14 +2481,26 @@ namespace Deep3DStudio
 
         private void PopulateDepthData(SceneResult result)
         {
-            if (result.Poses.Count == 0) return;
+            if (result.Poses.Count == 0 || result.Meshes.Count == 0) return;
 
-            for (int i = 0; i < result.Poses.Count && i < result.Meshes.Count; i++)
+            // SfM produces one combined mesh with all points, so use the same mesh for all cameras
+            // Dust3r might produce per-camera meshes, so handle both cases
+            var combinedMesh = result.Meshes[0];
+            if (result.Meshes.Count > 1)
+            {
+                // Combine all meshes if there are multiple
+                combinedMesh = new MeshData();
+                foreach (var m in result.Meshes)
+                {
+                    combinedMesh.Vertices.AddRange(m.Vertices);
+                    combinedMesh.Colors.AddRange(m.Colors);
+                }
+            }
+
+            for (int i = 0; i < result.Poses.Count; i++)
             {
                 var pose = result.Poses[i];
-                var mesh = result.Meshes[i];
-
-                var depthMap = ExtractDepthMap(mesh, pose.Width, pose.Height, pose.WorldToCamera);
+                var depthMap = ExtractDepthMap(combinedMesh, pose.Width, pose.Height, pose.WorldToCamera);
                 _imageBrowser.SetDepthData(i, depthMap);
             }
 
@@ -2534,19 +2546,67 @@ namespace Deep3DStudio
             }
             else
             {
+                // Estimate camera intrinsics (same as SfM uses)
+                // Focal length ~ 0.85 * max(width, height), principal point at center
+                float focal = Math.Max(width, height) * 0.85f;
+                float cx = width / 2.0f;
+                float cy = height / 2.0f;
+
+                int projectedCount = 0;
+                int behindCamera = 0;
+                int outOfBounds = 0;
+
+                // Debug: check first few points
+                int debugCount = 0;
+
                 foreach (var v in mesh.Vertices)
                 {
+                    // Transform to camera space
                     var vCam = OpenTK.Mathematics.Vector3.TransformPosition(v, worldToCamera);
-                    int px = (int)((v.X + 1) * 0.5f * width);
-                    int py = (int)((1 - (v.Y + 1) * 0.5f) * height);
+
+                    // Debug first 5 points
+                    if (debugCount < 5)
+                    {
+                        Console.WriteLine($"    Point {debugCount}: world({v.X:F2},{v.Y:F2},{v.Z:F2}) -> cam({vCam.X:F2},{vCam.Y:F2},{vCam.Z:F2})");
+                        debugCount++;
+                    }
+
+                    // OpenCV camera looks down +Z axis, so Z should be positive for points in front
+                    // Try both conventions
+                    float depth = Math.Abs(vCam.Z);
+                    if (depth < 0.01f)
+                    {
+                        behindCamera++;
+                        continue;
+                    }
+
+                    // Project to image plane using pinhole camera model
+                    // OpenCV: u = fx * X/Z + cx, v = fy * Y/Z + cy
+                    int px = (int)(focal * vCam.X / vCam.Z + cx);
+                    int py = (int)(focal * vCam.Y / vCam.Z + cy);
+
+                    // Try alternative if Z is negative (OpenGL convention)
+                    if (vCam.Z < 0)
+                    {
+                        px = (int)(-focal * vCam.X / vCam.Z + cx);
+                        py = (int)(-focal * vCam.Y / vCam.Z + cy);
+                    }
 
                     if (px >= 0 && px < width && py >= 0 && py < height)
                     {
-                        float depth = -vCam.Z;
-                        if (depth < depthMap[px, py] && depth > 0)
+                        if (depth < depthMap[px, py])
+                        {
                             depthMap[px, py] = depth;
+                            projectedCount++;
+                        }
+                    }
+                    else
+                    {
+                        outOfBounds++;
                     }
                 }
+
+                Console.WriteLine($"  Depth map: {projectedCount} projected, {behindCamera} behind, {outOfBounds} out of bounds");
             }
 
             return depthMap;
