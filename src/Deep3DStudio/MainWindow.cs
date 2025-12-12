@@ -259,6 +259,12 @@ namespace Deep3DStudio
             alignItem.Activated += OnAlignClicked;
             meshOpsMenu.Append(alignItem);
 
+            meshOpsMenu.Append(new SeparatorMenuItem());
+
+            var scaleItem = new MenuItem("Set _Real Size...");
+            scaleItem.Activated += OnSetRealSizeClicked;
+            meshOpsMenu.Append(scaleItem);
+
             editMenu.Append(meshOpsMenuItem);
 
             menuBar.Append(editMenuItem);
@@ -1175,6 +1181,91 @@ namespace Deep3DStudio
 
             _viewport.QueueDraw();
             _statusLabel.Text = $"Aligned {selectedMeshes.Count - 1} mesh(es) to target";
+        }
+
+        private void OnSetRealSizeClicked(object? sender, EventArgs e)
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count == 0)
+            {
+                // If nothing selected, maybe assume all meshes?
+                // For now, require selection.
+                // Or better: Use scene bounds if nothing selected.
+
+                var allMeshes = _sceneGraph.GetObjectsOfType<MeshObject>().ToList();
+                if (allMeshes.Count == 0)
+                {
+                    ShowMessage("No meshes found to scale.");
+                    return;
+                }
+
+                // Use all meshes
+                selectedMeshes = allMeshes;
+            }
+
+            // Calculate bounding box of selection
+            var min = new OpenTK.Mathematics.Vector3(float.MaxValue);
+            var max = new OpenTK.Mathematics.Vector3(float.MinValue);
+            bool hasBounds = false;
+
+            foreach (var obj in selectedMeshes)
+            {
+                var (bMin, bMax) = obj.GetWorldBounds();
+                min = OpenTK.Mathematics.Vector3.ComponentMin(min, bMin);
+                max = OpenTK.Mathematics.Vector3.ComponentMax(max, bMax);
+                hasBounds = true;
+            }
+
+            if (!hasBounds) return;
+
+            float sizeX = max.X - min.X;
+            float sizeY = max.Y - min.Y;
+            float sizeZ = max.Z - min.Z;
+
+            var dlg = new ScaleCalibrationDialog(this, sizeX, sizeY, sizeZ);
+            if (dlg.Run() == (int)ResponseType.Ok)
+            {
+                float factor = dlg.RealScaleFactor;
+                if (Math.Abs(factor - 1.0f) > 0.0001f)
+                {
+                    // Apply scale to selected objects
+                    // Note: We are scaling the transform, not the mesh data directly,
+                    // unless we want to "bake" it.
+                    // To ensure other software understands the size (export),
+                    // we should probably modify the MeshData vertices or ensure Export applies transform.
+                    // Let's modify the objects' scale property for non-destructive editing first,
+                    // BUT user said "other software needs to understand".
+                    // Usually export uses World Transform.
+                    // However, MeshObject.Scale is local.
+                    // Let's just ApplyTransform to vertices to be safe and permanent.
+
+                    // Center of scaling:
+                    var center = (min + max) * 0.5f;
+
+                    foreach (var meshObj in selectedMeshes)
+                    {
+                        // To scale relative to the selection center, we translate to origin, scale, translate back
+                        // But simpler: just scale the mesh vertices in place.
+                        // Matrix4.CreateScale(factor)
+
+                        // We will just update the MeshData directly so it persists
+                        var matrix = OpenTK.Mathematics.Matrix4.CreateScale(factor);
+                        meshObj.MeshData.ApplyTransform(matrix);
+
+                        // Also update position if we want to keep relative positions?
+                        // If we scale vertices, we don't need to move the object position unless it's offset.
+                        // Actually, if we scale each mesh individually, they might drift apart if they are separate.
+                        // To scale the whole "Scene" correctly, we need to scale their positions too.
+
+                        meshObj.Position *= factor;
+                        meshObj.UpdateBounds();
+                    }
+
+                    _viewport.QueueDraw();
+                    _statusLabel.Text = $"Scaled {selectedMeshes.Count} objects by {factor:F4}";
+                }
+            }
+            dlg.Destroy();
         }
 
         #endregion

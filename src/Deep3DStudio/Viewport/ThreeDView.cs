@@ -302,6 +302,9 @@ namespace Deep3DStudio.Viewport
                 GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
                 GL.PointSize(3.0f);
                 GL.LineWidth(1.0f);
+
+                // Ensure initial frame is drawn immediately
+                this.QueueDraw();
             }
         }
 
