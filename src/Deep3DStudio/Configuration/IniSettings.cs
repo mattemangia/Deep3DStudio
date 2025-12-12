@@ -6,6 +6,12 @@ using System.Runtime.InteropServices;
 
 namespace Deep3DStudio.Configuration
 {
+    public enum ReconstructionMethod
+    {
+        Dust3r,
+        FeatureMatching
+    }
+
     /// <summary>
     /// INI file based settings manager with platform-specific storage locations.
     /// - Windows: %APPDATA%/Deep3DStudio/settings.ini
@@ -23,6 +29,7 @@ namespace Deep3DStudio.Configuration
         public MeshingAlgorithm MeshingAlgo { get; set; } = MeshingAlgorithm.MarchingCubes;
         public CoordinateSystem CoordSystem { get; set; } = CoordinateSystem.RightHanded_Y_Up;
         public BoundingBoxMode BoundingBoxStyle { get; set; } = BoundingBoxMode.Full;
+        public ReconstructionMethod ReconstructionMethod { get; set; } = ReconstructionMethod.Dust3r;
 
         // Rendering Settings
         public bool ShowPointCloud { get; set; } = false;
@@ -195,6 +202,7 @@ namespace Deep3DStudio.Configuration
                     writer.WriteLine($"MeshingAlgorithm={MeshingAlgo}");
                     writer.WriteLine($"CoordinateSystem={CoordSystem}");
                     writer.WriteLine($"BoundingBoxStyle={BoundingBoxStyle}");
+                    writer.WriteLine($"ReconstructionMethod={ReconstructionMethod}");
                     writer.WriteLine();
 
                     // [Rendering] section
@@ -254,6 +262,8 @@ namespace Deep3DStudio.Configuration
                 CoordSystem = coord;
             if (TryGetValue("General", "BoundingBoxStyle", out string? bboxStr) && Enum.TryParse<BoundingBoxMode>(bboxStr, out var bbox))
                 BoundingBoxStyle = bbox;
+            if (TryGetValue("General", "ReconstructionMethod", out string? reconStr) && Enum.TryParse<ReconstructionMethod>(reconStr, out var recon))
+                ReconstructionMethod = recon;
 
             // [Rendering]
             if (TryGetValue("Rendering", "ShowPointCloud", out string? spcStr) && bool.TryParse(spcStr, out var spc))
@@ -333,6 +343,7 @@ namespace Deep3DStudio.Configuration
             MeshingAlgo = MeshingAlgorithm.MarchingCubes;
             CoordSystem = CoordinateSystem.RightHanded_Y_Up;
             BoundingBoxStyle = BoundingBoxMode.Full;
+            ReconstructionMethod = ReconstructionMethod.Dust3r;
             ShowPointCloud = false;
             ShowWireframe = false;
             PointCloudColor = PointCloudColorMode.RGB;
