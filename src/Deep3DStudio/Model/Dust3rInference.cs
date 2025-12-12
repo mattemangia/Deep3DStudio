@@ -59,7 +59,7 @@ namespace Deep3DStudio.Model
                     {
                         var options = new SessionOptions();
 
-                        switch (AppSettings.Instance.Device)
+                        switch (IniSettings.Instance.Device)
                         {
                             case ComputeDevice.CUDA:
                                 try { options.AppendExecutionProvider_CUDA(); }

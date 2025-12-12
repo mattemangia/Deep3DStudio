@@ -351,7 +351,7 @@ namespace Deep3DStudio.Viewport
                 List<float> gridVerts = new List<float>();
                 int size = 10;
                 float step = 1.0f;
-                var s = AppSettings.Instance;
+                var s = IniSettings.Instance;
 
                 for (float i = -size; i <= size; i += step)
                 {
@@ -434,7 +434,7 @@ namespace Deep3DStudio.Viewport
             this.MakeCurrent();
 
             // Apply background color from settings (each frame so changes are reflected)
-            var settings = AppSettings.Instance;
+            var settings = IniSettings.Instance;
             GL.ClearColor(settings.ViewportBgR, settings.ViewportBgG, settings.ViewportBgB, 1.0f);
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
@@ -552,7 +552,7 @@ namespace Deep3DStudio.Viewport
 
             int size = 10;
             float step = 1.0f;
-            var s = AppSettings.Instance;
+            var s = IniSettings.Instance;
 
             // Major grid lines (use grid color from settings)
             GL.Color4(s.GridColorR, s.GridColorG, s.GridColorB, 0.5f);
@@ -640,7 +640,7 @@ namespace Deep3DStudio.Viewport
         {
             if (_sceneGraph == null) return;
 
-            var settings = AppSettings.Instance;
+            var settings = IniSettings.Instance;
 
             foreach (var obj in _sceneGraph.GetVisibleObjects())
             {
@@ -695,7 +695,7 @@ namespace Deep3DStudio.Viewport
 
         private void DrawLegacyMeshes()
         {
-            var settings = AppSettings.Instance;
+            var settings = IniSettings.Instance;
 
             if (settings.ShowWireframe)
             {
@@ -723,7 +723,7 @@ namespace Deep3DStudio.Viewport
 
         private void DrawPointCloud(MeshData mesh, bool isSelected)
         {
-            var settings = AppSettings.Instance;
+            var settings = IniSettings.Instance;
             GL.PointSize(isSelected ? 5.0f : 3.0f);
 
             if (settings.PointCloudColor == PointCloudColorMode.DistanceMap)
@@ -860,7 +860,7 @@ namespace Deep3DStudio.Viewport
             var color = ColorPalette[obj.Id % ColorPalette.Length];
             GL.Color4(color.X, color.Y, color.Z, 0.8f);
 
-            var mode = AppSettings.Instance.BoundingBoxStyle;
+            var mode = IniSettings.Instance.BoundingBoxStyle;
 
             GL.Begin(PrimitiveType.Lines);
 

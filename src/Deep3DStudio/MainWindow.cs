@@ -1,5 +1,6 @@
 using System;
 using Gtk;
+using Gdk;
 using Deep3DStudio.Viewport;
 using Deep3DStudio.Icons;
 using Deep3DStudio.Model;
@@ -57,8 +58,23 @@ namespace Deep3DStudio
         public MainWindow() : base(WindowType.Toplevel)
         {
             this.Title = "Deep3D Studio";
-            this.SetDefaultSize(1400, 900);
-            this.DeleteEvent += (o, args) => Application.Quit();
+
+            // Restore window size from settings
+            var settings = IniSettings.Instance;
+            this.SetDefaultSize(settings.LastWindowWidth, settings.LastWindowHeight);
+
+            // Set window icon explicitly (in addition to default icon list)
+            try
+            {
+                this.Icon = ApplicationIcon.Create(64);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Warning: Could not set window icon: {ex.Message}");
+            }
+
+            // Handle window close - save settings and quit
+            this.DeleteEvent += OnWindowDelete;
 
             // Initialize Scene Graph
             _sceneGraph = new SceneGraph();
@@ -106,7 +122,7 @@ namespace Deep3DStudio
             if (_inference.IsLoaded) _statusLabel.Text = "Model Loaded";
             else _statusLabel.Text = "Model Not Found - Check dust3r.onnx";
 
-            _mainHPaned.Position = 250;
+            _mainHPaned.Position = settings.LastPanelWidth;
 
             _statusLabel.Halign = Align.Start;
             var statusBox = new Box(Orientation.Horizontal, 5);
@@ -121,6 +137,51 @@ namespace Deep3DStudio
             this.DragDataReceived += OnDragDataReceived;
 
             this.ShowAll();
+        }
+
+        /// <summary>
+        /// Handles window close event - saves settings and quits application.
+        /// </summary>
+        private void OnWindowDelete(object o, DeleteEventArgs args)
+        {
+            SaveWindowState();
+            Application.Quit();
+        }
+
+        /// <summary>
+        /// Saves the current window state to settings.
+        /// </summary>
+        private void SaveWindowState()
+        {
+            try
+            {
+                var settings = IniSettings.Instance;
+
+                // Get window size
+                this.GetSize(out int width, out int height);
+                settings.LastWindowWidth = width;
+                settings.LastWindowHeight = height;
+
+                // Get panel position
+                if (_mainHPaned != null)
+                {
+                    settings.LastPanelWidth = _mainHPaned.Position;
+                }
+
+                // Save viewport visibility settings
+                settings.ShowGrid = _viewport?.ShowGrid ?? true;
+                settings.ShowAxes = _viewport?.ShowAxes ?? true;
+                settings.ShowCameras = _viewport?.ShowCameras ?? true;
+                settings.ShowInfoOverlay = _viewport?.ShowInfoText ?? true;
+
+                // Save to INI file
+                settings.Save();
+                Console.WriteLine("Window state saved to settings.ini");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error saving window state: {ex.Message}");
+            }
         }
 
         #region Drag and Drop
@@ -389,7 +450,7 @@ namespace Deep3DStudio
             meshModeItem.Toggled += (s, e) => {
                 if (meshModeItem.Active)
                 {
-                    AppSettings.Instance.ShowPointCloud = false;
+                    IniSettings.Instance.ShowPointCloud = false;
                     _viewport.QueueDraw();
                 }
             };
@@ -399,16 +460,16 @@ namespace Deep3DStudio
             pointsModeItem.Toggled += (s, e) => {
                 if (pointsModeItem.Active)
                 {
-                    AppSettings.Instance.ShowPointCloud = true;
+                    IniSettings.Instance.ShowPointCloud = true;
                     _viewport.QueueDraw();
                 }
             };
             viewMenu.Append(pointsModeItem);
 
             var wireframeItem = new CheckMenuItem("_Wireframe");
-            wireframeItem.Active = AppSettings.Instance.ShowWireframe;
+            wireframeItem.Active = IniSettings.Instance.ShowWireframe;
             wireframeItem.Toggled += (s, e) => {
-                AppSettings.Instance.ShowWireframe = wireframeItem.Active;
+                IniSettings.Instance.ShowWireframe = wireframeItem.Active;
                 _viewport.QueueDraw();
             };
             viewMenu.Append(wireframeItem);
@@ -417,22 +478,22 @@ namespace Deep3DStudio
 
             // Color mode
             var rgbColorItem = new RadioMenuItem("_RGB Colors");
-            rgbColorItem.Active = AppSettings.Instance.PointCloudColor == PointCloudColorMode.RGB;
+            rgbColorItem.Active = IniSettings.Instance.PointCloudColor == PointCloudColorMode.RGB;
             rgbColorItem.Toggled += (s, e) => {
                 if (rgbColorItem.Active)
                 {
-                    AppSettings.Instance.PointCloudColor = PointCloudColorMode.RGB;
+                    IniSettings.Instance.PointCloudColor = PointCloudColorMode.RGB;
                     _viewport.QueueDraw();
                 }
             };
             viewMenu.Append(rgbColorItem);
 
             var depthColorItem = new RadioMenuItem(rgbColorItem, "_Depth Colors");
-            depthColorItem.Active = AppSettings.Instance.PointCloudColor == PointCloudColorMode.DistanceMap;
+            depthColorItem.Active = IniSettings.Instance.PointCloudColor == PointCloudColorMode.DistanceMap;
             depthColorItem.Toggled += (s, e) => {
                 if (depthColorItem.Active)
                 {
-                    AppSettings.Instance.PointCloudColor = PointCloudColorMode.DistanceMap;
+                    IniSettings.Instance.PointCloudColor = PointCloudColorMode.DistanceMap;
                     _viewport.QueueDraw();
                 }
             };
@@ -961,7 +1022,7 @@ namespace Deep3DStudio
             _meshToggle.TooltipText = "Show Solid Mesh";
             _meshToggle.Active = true;
             _meshToggle.Toggled += (s, e) => {
-                 AppSettings.Instance.ShowPointCloud = !_meshToggle.Active;
+                 IniSettings.Instance.ShowPointCloud = !_meshToggle.Active;
                  _viewport.QueueDraw();
             };
             toolbar.Insert(_meshToggle, -1);
@@ -970,10 +1031,10 @@ namespace Deep3DStudio
             _pointsToggle.IconWidget = AppIconFactory.GenerateIcon("pointcloud", iconSize);
             _pointsToggle.Label = "Points";
             _pointsToggle.TooltipText = "Show Point Cloud";
-            _pointsToggle.Active = AppSettings.Instance.ShowPointCloud;
+            _pointsToggle.Active = IniSettings.Instance.ShowPointCloud;
             _pointsToggle.Toggled += (s, e) => {
-                AppSettings.Instance.ShowPointCloud = _pointsToggle.Active;
-                _meshToggle.Active = !AppSettings.Instance.ShowPointCloud;
+                IniSettings.Instance.ShowPointCloud = _pointsToggle.Active;
+                _meshToggle.Active = !IniSettings.Instance.ShowPointCloud;
                 _viewport.QueueDraw();
             };
             toolbar.Insert(_pointsToggle, -1);
@@ -982,9 +1043,9 @@ namespace Deep3DStudio
             _wireToggle.IconWidget = AppIconFactory.GenerateIcon("wireframe", iconSize);
             _wireToggle.Label = "Wireframe";
             _wireToggle.TooltipText = "Toggle Wireframe Overlay";
-            _wireToggle.Active = AppSettings.Instance.ShowWireframe;
+            _wireToggle.Active = IniSettings.Instance.ShowWireframe;
             _wireToggle.Toggled += (s, e) => {
-                AppSettings.Instance.ShowWireframe = _wireToggle.Active;
+                IniSettings.Instance.ShowWireframe = _wireToggle.Active;
                 _viewport.QueueDraw();
             };
             toolbar.Insert(_wireToggle, -1);
@@ -996,11 +1057,11 @@ namespace Deep3DStudio
             _rgbColorToggle.IconWidget = AppIconFactory.GenerateIcon("rgb", iconSize);
             _rgbColorToggle.Label = "RGB";
             _rgbColorToggle.TooltipText = "Show original RGB colors";
-            _rgbColorToggle.Active = AppSettings.Instance.PointCloudColor == PointCloudColorMode.RGB;
+            _rgbColorToggle.Active = IniSettings.Instance.PointCloudColor == PointCloudColorMode.RGB;
             _rgbColorToggle.Toggled += (s, e) => {
                 if (_rgbColorToggle.Active)
                 {
-                    AppSettings.Instance.PointCloudColor = PointCloudColorMode.RGB;
+                    IniSettings.Instance.PointCloudColor = PointCloudColorMode.RGB;
                     _depthColorToggle.Active = false;
                     _viewport.QueueDraw();
                 }
@@ -1015,11 +1076,11 @@ namespace Deep3DStudio
             _depthColorToggle.IconWidget = AppIconFactory.GenerateIcon("depthmap", iconSize);
             _depthColorToggle.Label = "Depth";
             _depthColorToggle.TooltipText = "Show distance map with colormap";
-            _depthColorToggle.Active = AppSettings.Instance.PointCloudColor == PointCloudColorMode.DistanceMap;
+            _depthColorToggle.Active = IniSettings.Instance.PointCloudColor == PointCloudColorMode.DistanceMap;
             _depthColorToggle.Toggled += (s, e) => {
                 if (_depthColorToggle.Active)
                 {
-                    AppSettings.Instance.PointCloudColor = PointCloudColorMode.DistanceMap;
+                    IniSettings.Instance.PointCloudColor = PointCloudColorMode.DistanceMap;
                     _rgbColorToggle.Active = false;
                     _viewport.QueueDraw();
                 }
@@ -1645,7 +1706,7 @@ namespace Deep3DStudio
 
         private void ApplyViewSettings()
         {
-            var s = AppSettings.Instance;
+            var s = IniSettings.Instance;
             if (_pointsToggle != null) _pointsToggle.Active = s.ShowPointCloud;
             if (_wireToggle != null) _wireToggle.Active = s.ShowWireframe;
             if (_meshToggle != null) _meshToggle.Active = !s.ShowPointCloud;
@@ -1696,7 +1757,7 @@ namespace Deep3DStudio
             }
 
             string workflow = _workflowCombo.ActiveText;
-            _statusLabel.Text = $"Running {workflow} on {AppSettings.Instance.Device}...";
+            _statusLabel.Text = $"Running {workflow} on {IniSettings.Instance.Device}...";
 
             while (Application.EventsPending()) Application.RunIteration();
 
@@ -1718,11 +1779,11 @@ namespace Deep3DStudio
 
                 if (workflow == "Dust3r (Fast)")
                 {
-                    _statusLabel.Text = $"Meshing using {AppSettings.Instance.MeshingAlgo}...";
+                    _statusLabel.Text = $"Meshing using {IniSettings.Instance.MeshingAlgo}...";
 
                     var meshedResult = await Task.Run(() => {
                          var (grid, min, size) = VoxelizePoints(result.Meshes);
-                         IMesher mesher = GetMesher(AppSettings.Instance.MeshingAlgo);
+                         IMesher mesher = GetMesher(IniSettings.Instance.MeshingAlgo);
                          return mesher.GenerateMesh(grid, min, size, 0.5f);
                     });
 
@@ -1735,12 +1796,12 @@ namespace Deep3DStudio
                 }
                 else if (workflow == "Interior Scan")
                 {
-                    _statusLabel.Text = $"Meshing Interior (High Res) using {AppSettings.Instance.MeshingAlgo}...";
+                    _statusLabel.Text = $"Meshing Interior (High Res) using {IniSettings.Instance.MeshingAlgo}...";
 
                     var meshedResult = await Task.Run(() => {
                          // Use higher resolution (e.g. 500) for interiors to capture details in large spaces
                          var (grid, min, size) = VoxelizePoints(result.Meshes, 500);
-                         IMesher mesher = GetMesher(AppSettings.Instance.MeshingAlgo);
+                         IMesher mesher = GetMesher(IniSettings.Instance.MeshingAlgo);
                          return mesher.GenerateMesh(grid, min, size, 0.5f);
                     });
 
@@ -1756,16 +1817,17 @@ namespace Deep3DStudio
                     _statusLabel.Text = "Initializing NeRF Voxel Grid...";
                     var nerf = new VoxelGridNeRF();
 
+                    var nerfSettings = IniSettings.Instance;
                     await Task.Run(() =>
                     {
                         nerf.InitializeFromMesh(result.Meshes);
-                        nerf.Train(result.Poses, iterations: 50);
+                        nerf.Train(result.Poses, iterations: nerfSettings.NeRFIterations);
                     });
 
-                    _statusLabel.Text = $"Extracting NeRF Mesh ({AppSettings.Instance.MeshingAlgo})...";
+                    _statusLabel.Text = $"Extracting NeRF Mesh ({IniSettings.Instance.MeshingAlgo})...";
 
                     var nerfMesh = await Task.Run(() => {
-                         return nerf.GetMesh(GetMesher(AppSettings.Instance.MeshingAlgo));
+                         return nerf.GetMesh(GetMesher(IniSettings.Instance.MeshingAlgo));
                     });
 
                     var meshObj = new MeshObject("NeRF Mesh", nerfMesh);
