@@ -34,6 +34,7 @@ namespace Deep3DStudio.Configuration
         // Rendering Settings
         public bool ShowPointCloud { get; set; } = false;
         public bool ShowWireframe { get; set; } = false;
+        public bool ShowTexture { get; set; } = true;
         public PointCloudColorMode PointCloudColor { get; set; } = PointCloudColorMode.RGB;
 
         // Viewport Colors (RGB floats 0-1)
@@ -209,6 +210,7 @@ namespace Deep3DStudio.Configuration
                     writer.WriteLine("[Rendering]");
                     writer.WriteLine($"ShowPointCloud={ShowPointCloud}");
                     writer.WriteLine($"ShowWireframe={ShowWireframe}");
+                    writer.WriteLine($"ShowTexture={ShowTexture}");
                     writer.WriteLine($"PointCloudColorMode={PointCloudColor}");
                     writer.WriteLine();
 
@@ -270,6 +272,8 @@ namespace Deep3DStudio.Configuration
                 ShowPointCloud = spc;
             if (TryGetValue("Rendering", "ShowWireframe", out string? swStr) && bool.TryParse(swStr, out var sw))
                 ShowWireframe = sw;
+            if (TryGetValue("Rendering", "ShowTexture", out string? stStr) && bool.TryParse(stStr, out var st))
+                ShowTexture = st;
             if (TryGetValue("Rendering", "PointCloudColorMode", out string? pcmStr) && Enum.TryParse<PointCloudColorMode>(pcmStr, out var pcm))
                 PointCloudColor = pcm;
 
@@ -346,6 +350,7 @@ namespace Deep3DStudio.Configuration
             ReconstructionMethod = ReconstructionMethod.Dust3r;
             ShowPointCloud = false;
             ShowWireframe = false;
+            ShowTexture = true;
             PointCloudColor = PointCloudColorMode.RGB;
             ViewportBgR = 0.12f;
             ViewportBgG = 0.12f;

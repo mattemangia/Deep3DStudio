@@ -34,6 +34,7 @@ namespace Deep3DStudio
         private ComboBoxText _workflowCombo = null!;
         private ToggleToolButton _pointsToggle = null!;
         private ToggleToolButton _wireToggle = null!;
+        private ToggleToolButton _textureToggle = null!;
         private ToggleToolButton _meshToggle = null!;
         private ToggleToolButton _rgbColorToggle = null!;
         private ToggleToolButton _depthColorToggle = null!;
@@ -315,6 +316,10 @@ namespace Deep3DStudio
             var exportPointsItem = new MenuItem("Export _Point Cloud...");
             exportPointsItem.Activated += OnExportPointCloud;
             fileMenu.Append(exportPointsItem);
+
+            var exportDepthItem = new MenuItem("Export _Depth Maps...");
+            exportDepthItem.Activated += OnExportDepthMaps;
+            fileMenu.Append(exportDepthItem);
 
             fileMenu.Append(new SeparatorMenuItem());
 
@@ -1103,6 +1108,17 @@ namespace Deep3DStudio
             };
             toolbar.Insert(_wireToggle, -1);
 
+            _textureToggle = new ToggleToolButton();
+            _textureToggle.IconWidget = AppIconFactory.GenerateIcon("texture", iconSize);
+            _textureToggle.Label = "Texture";
+            _textureToggle.TooltipText = "Toggle Texture Display";
+            _textureToggle.Active = IniSettings.Instance.ShowTexture;
+            _textureToggle.Toggled += (s, e) => {
+                IniSettings.Instance.ShowTexture = _textureToggle.Active;
+                _viewport.QueueDraw();
+            };
+            toolbar.Insert(_textureToggle, -1);
+
             toolbar.Insert(new SeparatorToolItem(), -1);
 
             // Point Cloud Color Mode Toggles
@@ -1325,6 +1341,92 @@ namespace Deep3DStudio
                 _statusLabel.Text = $"Exported {count} point cloud(s).";
             }
             fc.Destroy();
+        }
+
+        private void OnExportDepthMaps(object? sender, EventArgs e)
+        {
+             var images = _imageBrowser.GetImages();
+             var imagesWithDepth = images.Where(i => i.DepthMap != null).ToList();
+
+             if (imagesWithDepth.Count == 0)
+             {
+                 ShowMessage("No depth maps available. Run reconstruction first.");
+                 return;
+             }
+
+             var fc = new FileChooserDialog("Select Output Folder for Depth Maps", this, FileChooserAction.SelectFolder,
+                 "Cancel", ResponseType.Cancel, "Select", ResponseType.Accept);
+
+             if (fc.Run() == (int)ResponseType.Accept)
+             {
+                 string outputDir = fc.Filename;
+                 int exported = 0;
+
+                 _statusLabel.Text = "Exporting depth maps...";
+                 while (Application.EventsPending()) Application.RunIteration();
+
+                 foreach (var img in imagesWithDepth)
+                 {
+                     if (img.DepthMap == null) continue;
+
+                     string baseName = System.IO.Path.GetFileNameWithoutExtension(img.FileName);
+                     string outPath = System.IO.Path.Combine(outputDir, $"{baseName}_depth.png");
+
+                     try
+                     {
+                         var depthMap = img.DepthMap;
+                         int width = depthMap.GetLength(0);
+                         int height = depthMap.GetLength(1);
+
+                         // Find min/max for normalization
+                        float minDepth = float.MaxValue;
+                        float maxDepth = float.MinValue;
+                        for (int y = 0; y < height; y++)
+                        {
+                            for (int x = 0; x < width; x++)
+                            {
+                                float d = depthMap[x, y];
+                                if (d > 0 && d < float.MaxValue)
+                                {
+                                    if (d < minDepth) minDepth = d;
+                                    if (d > maxDepth) maxDepth = d;
+                                }
+                            }
+                        }
+
+                        float range = maxDepth - minDepth;
+                        if (range < 0.0001f) range = 1.0f;
+
+                        using var bitmap = new SkiaSharp.SKBitmap(width, height, SkiaSharp.SKColorType.Rgba8888, SkiaSharp.SKAlphaType.Premul);
+                        for(int y=0; y<height; y++)
+                        {
+                            for(int x=0; x<width; x++)
+                            {
+                                float d = depthMap[x, y];
+                                float t = (d - minDepth) / range;
+                                t = Math.Clamp(t, 0f, 1f);
+
+                                var (r, g, b) = ImageUtils.TurboColormap(t);
+                                bitmap.SetPixel(x, y, new SkiaSharp.SKColor((byte)(r*255), (byte)(g*255), (byte)(b*255), 255));
+                            }
+                        }
+
+                        using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+                        using var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+                        using var stream = File.OpenWrite(outPath);
+                        data.SaveTo(stream);
+
+                        exported++;
+                     }
+                     catch (Exception ex)
+                     {
+                         Console.WriteLine($"Failed to export depth map for {img.FileName}: {ex.Message}");
+                     }
+                 }
+
+                 _statusLabel.Text = $"Exported {exported} depth maps to {outputDir}";
+             }
+             fc.Destroy();
         }
 
         private void OnDeleteSelected(object? sender, EventArgs e)
@@ -1912,6 +2014,7 @@ namespace Deep3DStudio
             var s = IniSettings.Instance;
             if (_pointsToggle != null) _pointsToggle.Active = s.ShowPointCloud;
             if (_wireToggle != null) _wireToggle.Active = s.ShowWireframe;
+            if (_textureToggle != null) _textureToggle.Active = s.ShowTexture;
             if (_meshToggle != null) _meshToggle.Active = !s.ShowPointCloud;
             if (_rgbColorToggle != null) _rgbColorToggle.Active = s.PointCloudColor == PointCloudColorMode.RGB;
             if (_depthColorToggle != null) _depthColorToggle.Active = s.PointCloudColor == PointCloudColorMode.DistanceMap;

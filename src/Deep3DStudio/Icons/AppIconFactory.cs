@@ -27,6 +27,7 @@ namespace Deep3DStudio.Icons
                         case "rgb": DrawRgbIcon(cr, size); break;
                         case "depthmap": DrawDepthMapIcon(cr, size); break;
                         case "select": DrawSelectIcon(cr, size); break;
+                        case "texture": DrawTextureIcon(cr, size); break;
                     }
                 }
 
@@ -158,8 +159,7 @@ namespace Deep3DStudio.Icons
             {
                 // Turbo-like colormap: blue -> cyan -> green -> yellow -> red
                 double t = (double)i / (steps - 1);
-                double r, g, b;
-                TurboColormap(t, out r, out g, out b);
+                var (r, g, b) = Model.ImageUtils.TurboColormap((float)t);
 
                 cr.SetSourceRGB(r, g, b);
                 cr.Rectangle(startX + i * stepWidth, startY, stepWidth + 1, barHeight);
@@ -193,35 +193,33 @@ namespace Deep3DStudio.Icons
             cr.Stroke();
         }
 
-        private static void TurboColormap(double t, out double r, out double g, out double b)
+        private static void DrawTextureIcon(Context cr, int size)
         {
-            // Simplified turbo colormap approximation
-            t = Math.Max(0, Math.Min(1, t));
+            // Checkerboard pattern
+            cr.SetSourceRGB(1.0, 1.0, 1.0);
+            cr.Rectangle(size * 0.2, size * 0.2, size * 0.6, size * 0.6);
+            cr.Fill();
 
-            if (t < 0.25)
-            {
-                // Blue to Cyan
-                double s = t / 0.25;
-                r = 0.0; g = s; b = 1.0;
+            cr.SetSourceRGB(0.4, 0.4, 0.4);
+            int rows = 2;
+            int cols = 2;
+            double w = (size * 0.6) / cols;
+            double h = (size * 0.6) / rows;
+
+            for(int r=0; r<rows; r++) {
+                for(int c=0; c<cols; c++) {
+                    if ((r + c) % 2 == 0) {
+                        cr.Rectangle(size * 0.2 + c * w, size * 0.2 + r * h, w, h);
+                        cr.Fill();
+                    }
+                }
             }
-            else if (t < 0.5)
-            {
-                // Cyan to Green
-                double s = (t - 0.25) / 0.25;
-                r = 0.0; g = 1.0; b = 1.0 - s;
-            }
-            else if (t < 0.75)
-            {
-                // Green to Yellow
-                double s = (t - 0.5) / 0.25;
-                r = s; g = 1.0; b = 0.0;
-            }
-            else
-            {
-                // Yellow to Red
-                double s = (t - 0.75) / 0.25;
-                r = 1.0; g = 1.0 - s; b = 0.0;
-            }
+
+            cr.SetSourceRGB(0, 0, 0);
+            cr.LineWidth = 1;
+            cr.Rectangle(size * 0.2, size * 0.2, size * 0.6, size * 0.6);
+            cr.Stroke();
         }
+
     }
 }

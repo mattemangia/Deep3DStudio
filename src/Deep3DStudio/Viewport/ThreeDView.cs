@@ -798,57 +798,90 @@ namespace Deep3DStudio.Viewport
 
         private static Vector3 TurboColormap(float t)
         {
-            t = Math.Max(0f, Math.Min(1f, t));
-            float r, g, b;
-
-            if (t < 0.25f)
-            {
-                float s = t / 0.25f;
-                r = 0.0f; g = s; b = 1.0f;
-            }
-            else if (t < 0.5f)
-            {
-                float s = (t - 0.25f) / 0.25f;
-                r = 0.0f; g = 1.0f; b = 1.0f - s;
-            }
-            else if (t < 0.75f)
-            {
-                float s = (t - 0.5f) / 0.25f;
-                r = s; g = 1.0f; b = 0.0f;
-            }
-            else
-            {
-                float s = (t - 0.75f) / 0.25f;
-                r = 1.0f; g = 1.0f - s; b = 0.0f;
-            }
-
+            var (r, g, b) = ImageUtils.TurboColormap(t);
             return new Vector3(r, g, b);
         }
 
         private void DrawMesh(MeshData mesh, bool isSelected)
         {
+            bool useTexture = IniSettings.Instance.ShowTexture && mesh.Texture != null;
+
+            if (useTexture)
+            {
+                if (mesh.TextureId == -1)
+                {
+                    UploadTexture(mesh);
+                }
+
+                if (mesh.TextureId != -1)
+                {
+                    GL.Enable(EnableCap.Texture2D);
+                    GL.BindTexture(TextureTarget.Texture2D, mesh.TextureId);
+                    GL.Color3(1.0f, 1.0f, 1.0f); // White to show texture colors
+                }
+                else
+                {
+                    useTexture = false;
+                }
+            }
+
             GL.Begin(PrimitiveType.Triangles);
             for (int i = 0; i < mesh.Indices.Count; i++)
             {
                 int idx = mesh.Indices[i];
                 if (idx < mesh.Vertices.Count)
                 {
-                    var c = mesh.Colors[idx];
-                    if (isSelected)
+                    if (useTexture && idx < mesh.UVs.Count)
                     {
-                        // Add tint to selection if we want to visualize it on the mesh itself,
-                        // but the bounding box is usually enough.
-                        // Keeping existing behavior:
-                        GL.Color3(Math.Min(1f, c.X + 0.2f), Math.Min(1f, c.Y + 0.2f), c.Z);
+                        var uv = mesh.UVs[idx];
+                        GL.TexCoord2(uv.X, uv.Y);
                     }
                     else
                     {
-                        GL.Color3(c.X, c.Y, c.Z);
+                        var c = mesh.Colors[idx];
+                        if (isSelected)
+                        {
+                            GL.Color3(Math.Min(1f, c.X + 0.2f), Math.Min(1f, c.Y + 0.2f), c.Z);
+                        }
+                        else
+                        {
+                            GL.Color3(c.X, c.Y, c.Z);
+                        }
                     }
                     GL.Vertex3(mesh.Vertices[idx]);
                 }
             }
             GL.End();
+
+            if (useTexture)
+            {
+                GL.BindTexture(TextureTarget.Texture2D, 0);
+                GL.Disable(EnableCap.Texture2D);
+            }
+        }
+
+        private void UploadTexture(MeshData mesh)
+        {
+            if (mesh.Texture == null) return;
+
+            int id = GL.GenTexture();
+            GL.BindTexture(TextureTarget.Texture2D, id);
+
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
+
+            // SkiaSharp uses RGBA or BGRA usually.
+            // We assume Rgba8888 for now as per ImageDecoder/TextureBaker usage
+            var info = mesh.Texture.Info;
+            PixelFormat pixelFormat = PixelFormat.Bgra; // Skia usually defaults to BGRA on desktop
+            if (info.ColorType == SkiaSharp.SKColorType.Rgba8888) pixelFormat = PixelFormat.Rgba;
+
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, info.Width, info.Height, 0,
+                pixelFormat, PixelType.UnsignedByte, mesh.Texture.GetPixels());
+
+            mesh.TextureId = id;
         }
 
         private void DrawSelectionOutline(SceneObject obj)
