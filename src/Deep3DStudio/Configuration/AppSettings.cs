@@ -42,7 +42,7 @@ namespace Deep3DStudio.Configuration
 
     public class AppSettings
     {
-        private static AppSettings _instance;
+        private static AppSettings? _instance;
         private static readonly string ConfigPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "Deep3DStudio",
@@ -78,7 +78,7 @@ namespace Deep3DStudio.Configuration
             {
                 if (_instance == null)
                     Load();
-                return _instance;
+                return _instance!;
             }
         }
 

@@ -521,13 +521,21 @@ namespace Deep3DStudio.Scene
         /// </summary>
         public static Matrix4 AlignICP(MeshData source, MeshData target, int maxIterations = 50, float convergenceThreshold = 0.0001f)
         {
+            return AlignICP(source.Vertices, target.Vertices, maxIterations, convergenceThreshold);
+        }
+
+        /// <summary>
+        /// Aligns source point cloud to target using ICP (Iterative Closest Point)
+        /// </summary>
+        public static Matrix4 AlignICP(List<Vector3> sourceVertices, List<Vector3> targetVertices, int maxIterations = 50, float convergenceThreshold = 0.0001f)
+        {
             var transform = Matrix4.Identity;
 
             // Sample points from source (use fewer for speed)
-            var sourcePoints = SamplePoints(source.Vertices, Math.Min(1000, source.Vertices.Count));
+            var sourcePoints = SamplePoints(sourceVertices, Math.Min(1000, sourceVertices.Count));
 
             // Build KD-tree equivalent (spatial hash) for target
-            var targetHash = BuildSpatialHash(target.Vertices, 0.1f);
+            var targetHash = BuildSpatialHash(targetVertices, 0.1f);
 
             float prevError = float.MaxValue;
 
@@ -546,7 +554,7 @@ namespace Deep3DStudio.Scene
 
                 foreach (var p in transformedSource)
                 {
-                    var closest = FindClosestPoint(p, target.Vertices, targetHash, 0.1f);
+                    var closest = FindClosestPoint(p, targetVertices, targetHash, 0.1f);
                     if (closest.HasValue)
                     {
                         srcPts.Add(p);
