@@ -414,15 +414,15 @@ namespace Deep3DStudio.Model.SfM
                 // Increased iterations for better convergence
                 // Use empty distortion coefficients (not null) - null causes exception
                 using var distCoeffs = new Mat();
+                // Relaxed parameters: 20px error, 2000 iterations to find good pose even with outliers
                 Cv2.SolvePnPRansac(InputArray.Create(objPts), InputArray.Create(imgPts), view.K, distCoeffs, rvec, tvec,
-                    useExtrinsicGuess: false, iterationsCount: 500, reprojectionError: 12.0f, confidence: 0.99, inliers: inliers);
+                    useExtrinsicGuess: false, iterationsCount: 2000, reprojectionError: 20.0f, confidence: 0.999, inliers: inliers);
 
                 Console.WriteLine($"  PnP result: {inliers.Rows} inliers from {objPts.Count} correspondences");
 
-                // Lowered minimum inlier threshold from 10 to 6 for challenging cases
-                if (inliers.Rows < 6)
+                if (inliers.Rows < 8)
                 {
-                    Console.WriteLine($"  Insufficient inliers ({inliers.Rows} < 6)");
+                    Console.WriteLine($"  Insufficient inliers ({inliers.Rows} < 8)");
                     return false;
                 }
 

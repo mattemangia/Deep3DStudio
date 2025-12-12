@@ -2643,71 +2643,111 @@ namespace Deep3DStudio
 
         private void FillDepthMapGaps(float[,] depthMap, int width, int height)
         {
-            // Simple multi-pass dilation/diffusion
-            int passes = 4;
-            for (int p = 0; p < passes; p++)
+            // Pyramid Filling (Push-Pull) for dense coverage
+            // 1. Build MipMaps (Downsampling)
+            int levels = 6; // Enough to bridge large gaps (2^6 = 64 pixels)
+            var pyramid = new List<float[,]>();
+            pyramid.Add(depthMap);
+
+            for (int l = 1; l < levels; l++)
             {
-                // Copy current state
-                float[,] nextMap = (float[,])depthMap.Clone();
-                bool changed = false;
+                int prevW = pyramid[l - 1].GetLength(0);
+                int prevH = pyramid[l - 1].GetLength(1);
+                int newW = (prevW + 1) / 2;
+                int newH = (prevH + 1) / 2;
 
-                // Parallelization for speed
-                Parallel.For(0, height, y =>
+                float[,] mip = new float[newW, newH];
+
+                Parallel.For(0, newH, y =>
                 {
-                    for (int x = 0; x < width; x++)
+                    for (int x = 0; x < newW; x++)
                     {
-                        if (depthMap[x, y] < 0) // If invalid pixel
+                        // Downsample: Use Min Positive Depth (Foreground) to preserve edges
+                        float minPos = float.MaxValue;
+                        bool found = false;
+
+                        for (int dy = 0; dy < 2; dy++)
                         {
-                            // Search neighbors (3x3)
-                            float sum = 0;
-                            int count = 0;
-
-                            for (int dy = -1; dy <= 1; dy++)
+                            for (int dx = 0; dx < 2; dx++)
                             {
-                                int ny = y + dy;
-                                if (ny < 0 || ny >= height) continue;
-
-                                for (int dx = -1; dx <= 1; dx++)
+                                int sx = x * 2 + dx;
+                                int sy = y * 2 + dy;
+                                if (sx < prevW && sy < prevH)
                                 {
-                                    int nx = x + dx;
-                                    if (nx < 0 || nx >= width) continue;
-
-                                    float val = depthMap[nx, ny];
+                                    float val = pyramid[l - 1][sx, sy];
                                     if (val > 0)
                                     {
-                                        sum += val;
-                                        count++;
+                                        if (val < minPos) minPos = val;
+                                        found = true;
                                     }
                                 }
                             }
+                        }
+                        mip[x, y] = found ? minPos : -1.0f;
+                    }
+                });
+                pyramid.Add(mip);
+            }
 
-                            if (count >= 2) // If surrounded by enough valid pixels
+            // 2. Upsample and Fill Gaps
+            for (int l = levels - 1; l > 0; l--)
+            {
+                float[,] current = pyramid[l];
+                float[,] target = pyramid[l - 1];
+
+                int tw = target.GetLength(0);
+                int th = target.GetLength(1);
+                int cw = current.GetLength(0);
+                int ch = current.GetLength(1);
+
+                Parallel.For(0, th, y =>
+                {
+                    for (int x = 0; x < tw; x++)
+                    {
+                        if (target[x, y] <= 0) // If gap
+                        {
+                            // Nearest neighbor from coarse level
+                            int cx = x / 2;
+                            int cy = y / 2;
+                            if (cx < cw && cy < ch)
                             {
-                                nextMap[x, y] = sum / count; // Average depth
-                                changed = true;
+                                float val = current[cx, cy];
+                                if (val > 0) target[x, y] = val;
                             }
                         }
                     }
                 });
-
-                if (!changed) break;
-
-                // Update main map
-                depthMap = nextMap;
-                // Note: Reassigning the parameter reference 'depthMap' doesn't change the caller's reference
-                // BUT we need to output it.
-                // Wait, 'depthMap' here is a reference to the array object.
-                // 'nextMap' is a NEW array object.
-                // Reassigning 'depthMap = nextMap' only changes the local variable.
-                // I must copy back or use the array directly.
-
-                // Copy back
-                 Parallel.For(0, height, y =>
-                 {
-                     for (int x = 0; x < width; x++)
-                         depthMap[x, y] = nextMap[x, y];
-                 });
             }
+
+            // 3. Final Smoothing Pass (3x3 Box Filter) to remove blockiness
+            float[,] smoothed = (float[,])depthMap.Clone();
+            Parallel.For(0, height, y =>
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    float sum = 0;
+                    int count = 0;
+                    for(int dy=-1; dy<=1; dy++)
+                    {
+                        int ny = y+dy;
+                        if(ny<0 || ny>=height) continue;
+                        for(int dx=-1; dx<=1; dx++)
+                        {
+                             int nx = x+dx;
+                             if(nx<0 || nx>=width) continue;
+                             float v = depthMap[nx,ny];
+                             if(v > 0) { sum+=v; count++; }
+                        }
+                    }
+                    if(count > 0) smoothed[x,y] = sum/count;
+                }
+            });
+
+            // Copy back
+            Parallel.For(0, height, y =>
+            {
+                for (int x = 0; x < width; x++) depthMap[x, y] = smoothed[x, y];
+            });
         }
 
         private MeshData GenerateDensePointCloud(SceneResult result)
