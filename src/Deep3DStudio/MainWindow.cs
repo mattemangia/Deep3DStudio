@@ -2341,17 +2341,25 @@ namespace Deep3DStudio
                 _sceneGraph.Clear();
 
                 // Add Point Clouds (from result.Meshes acting as points)
+                int totalPoints = 0;
                 for(int i=0; i<result.Meshes.Count; i++)
                 {
-                    var pcObj = new PointCloudObject($"PointCloud_{i}", result.Meshes[i]);
+                    var mesh = result.Meshes[i];
+                    Console.WriteLine($"PointCloud {i}: {mesh.Vertices.Count} points, {mesh.Colors.Count} colors");
+                    totalPoints += mesh.Vertices.Count;
+
+                    var pcObj = new PointCloudObject($"PointCloud_{i}", mesh);
                     _sceneGraph.AddObject(pcObj);
                 }
 
                 AddCamerasToScene(result);
 
                 _sceneTreeView.RefreshTree();
+
+                // Auto-focus on the generated point cloud
+                _viewport.FocusOnSelection();
                 _viewport.QueueDraw();
-                _statusLabel.Text = "Point Cloud Generation Complete.";
+                _statusLabel.Text = $"Point Cloud Complete: {totalPoints:N0} points, {result.Poses.Count} cameras.";
 
                 return true;
             }

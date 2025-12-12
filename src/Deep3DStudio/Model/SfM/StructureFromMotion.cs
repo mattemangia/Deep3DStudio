@@ -99,7 +99,7 @@ namespace Deep3DStudio.Model.SfM
                     }
                 }
 
-                if (bestCandidate != -1 && maxInliers >= 15) // Threshold for reliable PnP
+                if (bestCandidate != -1 && maxInliers >= 8) // Minimum threshold for PnP (lowered from 15 for small image sets)
                 {
                     var view = _views[bestCandidate];
                     if (RegisterView(view, bestObjectPoints, bestImagePoints))
@@ -115,10 +115,20 @@ namespace Deep3DStudio.Model.SfM
                         // Bundle Adjustment (Local refinement)
                         RefinePose(view);
                     }
+                    else
+                    {
+                        Console.WriteLine($"Failed to register Image {bestCandidate} (PnP failed with {maxInliers} matches).");
+                    }
+                }
+                else if (bestCandidate != -1)
+                {
+                    Console.WriteLine($"Skipping Image {bestCandidate}: only {maxInliers} map matches found (minimum 8 required).");
                 }
             }
 
             // 4. Final Polish
+            Console.WriteLine($"SfM Complete: Registered {registeredCount}/{_views.Count} views, {_map.Count} 3D points in map.");
+
             // Remove outliers
             // PruneMap();
 
@@ -160,7 +170,7 @@ namespace Deep3DStudio.Model.SfM
 
         private void PreProcessViews(List<string> paths)
         {
-            using var detector = ORB.Create(nFeatures: 4000); // High feature count for map density
+            using var detector = ORB.Create(nFeatures: 8000); // Very high feature count for dense map and robust matching
 
             for (int i = 0; i < paths.Count; i++)
             {
@@ -216,7 +226,8 @@ namespace Deep3DStudio.Model.SfM
                     var v2 = _views[j];
 
                     var matches = matcher.Match(v1.Descriptors, v2.Descriptors);
-                    if (matches.Length < 100) continue;
+                    Console.WriteLine($"Initialization: Matching views {v1.Index} and {v2.Index}: {matches.Length} matches");
+                    if (matches.Length < 50) continue; // Lowered from 100 to support smaller/simpler scenes
 
                     // Recover Pose
                     var p1 = new List<Point2d>();
