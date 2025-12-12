@@ -14,7 +14,7 @@ namespace Deep3DStudio.Meshing
             int d = densityGrid.GetLength(2);
 
             // 1. Compute Gradients (Normals) from the input density grid
-            // We use central differences.
+            // We use central differences to estimate normals.
             Vector3[,,] vectorField = new Vector3[w, h, d];
 
             Parallel.For(1, w - 1, x =>
@@ -33,7 +33,8 @@ namespace Deep3DStudio.Meshing
             });
 
             // 2. Smooth the Vector Field
-            // We apply a few passes of box blur to the vector field.
+            // Smoothing the vector field helps in reducing noise and providing a cleaner reconstruction,
+            // which is the main advantage of Poisson-like approaches.
             int smoothingPasses = 2;
             for (int i = 0; i < smoothingPasses; i++)
             {
@@ -41,9 +42,12 @@ namespace Deep3DStudio.Meshing
             }
 
             // 3. Compute Divergence of the Vector Field
-            // div V = dVx/dx + dVy/dy + dVz/dz
-            // We negate the divergence because we are solving Negative Laplacian (-L) * phi = -div V
-            // -L is SPD, which is required for CG.
+            // We compute the divergence (div V) to set up the Poisson equation.
+            // Equation: Laplacian(Phi) = Divergence(V)
+            // However, to ensure stability in the Conjugate Gradient solver, we solve for the Negative Laplacian:
+            // -Laplacian(Phi) = -Divergence(V)
+            // The Negative Laplacian operator (6*center - sum_neighbors) is Symmetric Positive Definite (SPD),
+            // which is a strict requirement for the Conjugate Gradient method.
             float[,,] negDivergence = new float[w, h, d];
             Parallel.For(1, w - 1, x =>
             {
@@ -55,18 +59,25 @@ namespace Deep3DStudio.Meshing
                         float dv_dy = (vectorField[x, y + 1, z].Y - vectorField[x, y - 1, z].Y) * 0.5f;
                         float dv_dz = (vectorField[x, y, z + 1].Z - vectorField[x, y, z - 1].Z) * 0.5f;
 
+                        // Negate the divergence for the RHS
                         negDivergence[x, y, z] = -(dv_dx + dv_dy + dv_dz);
                     }
                 }
             });
 
             // 4. Solve Poisson Equation: -Laplacian(Phi) = -Divergence
-            // using Conjugate Gradient (Matrix Free) with Negative Laplacian to ensure SPD matrix.
-            float[,,] phi = SolvePoissonCG(negDivergence, maxIterations: 200);
+            // Using Matrix-Free Conjugate Gradient Solver.
+            // Heuristic for iterations: scale with grid dimension to ensure convergence on larger grids.
+            // Base iterations = 200, plus dimension-dependent factor.
+            int maxDim = Math.Max(w, Math.Max(h, d));
+            int iterations = Math.Max(200, maxDim * 4);
 
-            // 5. Generate Mesh
+            float[,,] phi = SolvePoissonCG(negDivergence, maxIterations: iterations);
 
-            // Dummy color grid
+            // 5. Generate Mesh from the reconstructed potential field (Phi)
+            // We use Marching Cubes to extract the isosurface at the specified isoLevel.
+
+            // Dummy color grid - we can extend this later to interpolate colors from the original field if needed.
             Vector3[,,] colorGrid = new Vector3[w, h, d];
             Parallel.For(0, w, x => {
                 for(int y=0; y<h; y++)
@@ -82,7 +93,7 @@ namespace Deep3DStudio.Meshing
             int w = input.GetLength(0);
             int h = input.GetLength(1);
             int d = input.GetLength(2);
-            Vector3[,,] output = (Vector3[,,])input.Clone(); // Copy input to preserve boundaries
+            Vector3[,,] output = (Vector3[,,])input.Clone(); // Clone to preserve boundary values
 
             Parallel.For(1, w - 1, x =>
             {
@@ -118,7 +129,7 @@ namespace Deep3DStudio.Meshing
             int h = rhs.GetLength(1);
             int d = rhs.GetLength(2);
 
-            float[,,] x = new float[w, h, d]; // Initial guess 0
+            float[,,] x = new float[w, h, d]; // Initial guess 0 (Dirichlet boundary conditions implied)
             float[,,] r = (float[,,])rhs.Clone(); // Residual r = b - Ax. Since x=0, r = b (rhs)
             float[,,] p = (float[,,])r.Clone(); // Search direction
 
@@ -126,17 +137,22 @@ namespace Deep3DStudio.Meshing
 
             for (int i = 0; i < maxIterations; i++)
             {
+                // Convergence check
                 if (rsold < 1e-10) break;
 
-                // Apply Negative Laplacian here
+                // Apply Negative Laplacian operator (A * p)
+                // This operator must be Positive Definite.
                 float[,,] Ap = ApplyNegativeLaplacian(p);
 
                 double pAp = DotProduct(p, Ap);
-                // Safety check to prevent division by zero or negative if numerical instability occurs
+
+                // Stability check: The operator should be positive definite, so pAp > 0.
+                // If it's effectively zero or negative (due to float precision), we stop to avoid NaN.
                 if (pAp <= 1e-20) break;
 
                 double alpha = rsold / pAp;
 
+                // Update solution x and residual r
                 // x = x + alpha * p
                 // r = r - alpha * Ap
                 Parallel.For(1, w - 1, ix =>
@@ -152,10 +168,13 @@ namespace Deep3DStudio.Meshing
                 });
 
                 double rsnew = DotProduct(r, r);
+
+                // Convergence check
                 if (rsnew < 1e-10) break;
 
                 double beta = rsnew / rsold;
 
+                // Update search direction p
                 // p = r + beta * p
                 Parallel.For(1, w - 1, ix =>
                 {
@@ -181,10 +200,11 @@ namespace Deep3DStudio.Meshing
             int d = u.GetLength(2);
             float[,,] result = new float[w, h, d];
 
-            // Negative Laplacian (-L)
-            // L(u) = neighbors - 6*center
-            // -L(u) = 6*center - neighbors
-            // This operator is Positive Definite on the grid (with Dirichlet BCs implied by fixed 0 boundaries).
+            // Negative Laplacian Operator (-L)
+            // Standard Discrete Laplacian L(u) = Sum(neighbors) - 6*u(center)
+            // Negative Laplacian -L(u) = 6*u(center) - Sum(neighbors)
+            // This matrix is Symmetric Positive Definite (SPD) for Dirichlet boundary conditions (u=0 at boundary),
+            // ensuring convergence of the CG method.
 
             Parallel.For(1, w - 1, x =>
             {
@@ -213,6 +233,8 @@ namespace Deep3DStudio.Meshing
             int h = a.GetLength(1);
             int d = a.GetLength(2);
 
+            // Compute dot product of two fields
+            // Using local accumulation to minimize lock contention
             Parallel.For(0, w, () => 0.0, (x, state, localSum) =>
             {
                 for (int y = 0; y < h; y++)
