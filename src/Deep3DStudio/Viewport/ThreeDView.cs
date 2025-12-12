@@ -33,8 +33,7 @@ namespace Deep3DStudio.Viewport
         private float _zoom = -5.0f;
         private float _rotationX = 0f;
         private float _rotationY = 0f;
-        private float _panX = 0f;
-        private float _panY = 0f;
+        private Vector3 _cameraTarget = Vector3.Zero;
         private Point _lastMousePos;
         private bool _isDragging;
         private bool _isPanning;
@@ -194,8 +193,7 @@ namespace Deep3DStudio.Viewport
             var center = (min + max) * 0.5f;
             var size = (max - min).Length;
 
-            _panX = -center.X;
-            _panY = -center.Y;
+            _cameraTarget = center;
             _zoom = -size * 1.5f;
 
             this.QueueDraw();
@@ -251,8 +249,7 @@ namespace Deep3DStudio.Viewport
             if (count > 0)
             {
                 center /= count;
-                _panX = -center.X;
-                _panY = -center.Y;
+                _cameraTarget = center;
                 _zoom = -5.0f;
             }
         }
@@ -460,9 +457,17 @@ namespace Deep3DStudio.Viewport
                 coordTransform = Matrix4.CreateRotationX(MathHelper.DegreesToRadians(-90));
             }
 
-            _viewMatrix = Matrix4.CreateTranslation(_panX, _panY, _zoom) *
-                          Matrix4.CreateRotationX(MathHelper.DegreesToRadians(_rotationX)) *
-                          Matrix4.CreateRotationY(MathHelper.DegreesToRadians(_rotationY));
+            // Improved camera logic:
+            // 1. Translate world so target is at origin
+            // 2. Rotate world (Camera Orbit) - Yaw (Y) then Pitch (X)
+            // 3. Translate world so target is at distance (Zoom)
+            var rx = Matrix4.CreateRotationX(MathHelper.DegreesToRadians(_rotationX));
+            var ry = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(_rotationY));
+            var rotation = ry * rx;
+
+            _viewMatrix = Matrix4.CreateTranslation(-_cameraTarget) *
+                          rotation *
+                          Matrix4.CreateTranslation(0, 0, _zoom);
 
             var finalView = coordTransform * _viewMatrix;
             GL.MatrixMode(MatrixMode.Modelview);
@@ -1609,10 +1614,20 @@ namespace Deep3DStudio.Viewport
                 int deltaX = x - _lastMousePos.X;
                 int deltaY = y - _lastMousePos.Y;
 
-                float panSpeed = 0.01f * Math.Abs(_zoom / 5.0f);
+                float panSpeed = 0.002f * Math.Abs(_zoom);
 
-                _panX += deltaX * panSpeed;
-                _panY -= deltaY * panSpeed;
+                // Calculate screen-aligned pan vectors
+                var rx = Matrix4.CreateRotationX(MathHelper.DegreesToRadians(_rotationX));
+                var ry = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(_rotationY));
+                var rotation = ry * rx;
+
+                // Right is Column 0, Up is Column 1 of the View Matrix Rotation
+                Vector3 right = new Vector3(rotation.M11, rotation.M21, rotation.M31);
+                Vector3 up = new Vector3(rotation.M12, rotation.M22, rotation.M32);
+
+                // Move target opposite to mouse movement to drag the scene
+                _cameraTarget -= right * deltaX * panSpeed;
+                _cameraTarget += up * deltaY * panSpeed;
 
                 _lastMousePos = new Point(x, y);
                 this.QueueDraw();
