@@ -96,9 +96,9 @@ namespace Deep3DStudio.Viewport
         {
             this.HasDepthBuffer = true;
             this.HasStencilBuffer = false;
-            // Requesting version 2.1 ensures we get a context compatible with
-            // the fixed-function pipeline (GL.Begin/End) used in this codebase.
-            this.SetRequiredVersion(2, 1);
+            // Requesting version 3.3 (Compatibility Profile) to satisfy GDK requirements
+            // while maintaining support for fixed-function pipeline commands.
+            this.SetRequiredVersion(3, 3);
 
             this.HasFocus = true;
             this.CanFocus = true;
