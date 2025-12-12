@@ -94,6 +94,12 @@ namespace Deep3DStudio.Viewport
 
         public ThreeDView()
         {
+            this.HasDepthBuffer = true;
+            this.HasStencilBuffer = false;
+            // Requesting version 2.1 ensures we get a context compatible with
+            // the fixed-function pipeline (GL.Begin/End) used in this codebase.
+            this.SetRequiredVersion(2, 1);
+
             this.HasFocus = true;
             this.CanFocus = true;
             this.AddEvents((int)Gdk.EventMask.ButtonPressMask |
@@ -296,6 +302,9 @@ namespace Deep3DStudio.Viewport
                 GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
                 GL.PointSize(3.0f);
                 GL.LineWidth(1.0f);
+
+                // Ensure initial frame is drawn immediately
+                this.QueueDraw();
             }
         }
 
@@ -1356,8 +1365,8 @@ namespace Deep3DStudio.Viewport
             }
             else if (args.Event.Button == 2 || (args.Event.Button == 1 && (args.Event.State & Gdk.ModifierType.ShiftMask) != 0))
             {
-                // Pan with middle mouse or Shift+Left (Note: Shift+Left collides with multiple select, but panning usually requires drag)
-                // We'll prioritize panning if Shift is held and mouse moves
+                // Pan with middle mouse or Shift+Left.
+                // Prioritize panning over selection if Shift is held and drag initiates.
                 _isPanning = true;
                 _lastMousePos = new Point((int)args.Event.X, (int)args.Event.Y);
             }
@@ -1430,8 +1439,8 @@ namespace Deep3DStudio.Viewport
             }
             else if (_isDragging && !_isPanning)
             {
-                // Rotate view if not dragging a handle and not selecting
-                // But in Select mode, left drag should probably still rotate view unless box selecting (which isn't implemented)
+                // Rotate view if not dragging a handle and not selecting.
+                // In Select mode, left drag rotates the view (box selection is not implemented).
 
                 int deltaX = x - _lastMousePos.X;
                 int deltaY = y - _lastMousePos.Y;

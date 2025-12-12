@@ -123,6 +123,8 @@ namespace Deep3DStudio
         private Widget CreateMenuBar()
         {
             var menuBar = new MenuBar();
+            var accelGroup = new AccelGroup();
+            this.AddAccelGroup(accelGroup);
 
             // File Menu
             var fileMenu = new Menu();
@@ -179,6 +181,14 @@ namespace Deep3DStudio
             var duplicateItem = new MenuItem("D_uplicate");
             duplicateItem.Activated += OnDuplicateSelected;
             editMenu.Append(duplicateItem);
+
+            editMenu.Append(new SeparatorMenuItem());
+
+            var settingsItemEdit = new MenuItem("_Settings");
+            settingsItemEdit.Activated += OnOpenSettings;
+            settingsItemEdit.AddAccelerator("activate", accelGroup,
+                (uint)Gdk.Key.comma, Gdk.ModifierType.ControlMask, AccelFlags.Visible);
+            editMenu.Append(settingsItemEdit);
 
             editMenu.Append(new SeparatorMenuItem());
 
@@ -248,6 +258,12 @@ namespace Deep3DStudio
             var alignItem = new MenuItem("_Align (ICP)");
             alignItem.Activated += OnAlignClicked;
             meshOpsMenu.Append(alignItem);
+
+            meshOpsMenu.Append(new SeparatorMenuItem());
+
+            var scaleItem = new MenuItem("Set _Real Size...");
+            scaleItem.Activated += OnSetRealSizeClicked;
+            meshOpsMenu.Append(scaleItem);
 
             editMenu.Append(meshOpsMenuItem);
 
@@ -1165,6 +1181,69 @@ namespace Deep3DStudio
 
             _viewport.QueueDraw();
             _statusLabel.Text = $"Aligned {selectedMeshes.Count - 1} mesh(es) to target";
+        }
+
+        private void OnSetRealSizeClicked(object? sender, EventArgs e)
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+
+            // If no selection, apply to all meshes in the scene
+            if (selectedMeshes.Count == 0)
+            {
+                var allMeshes = _sceneGraph.GetObjectsOfType<MeshObject>().ToList();
+                if (allMeshes.Count == 0)
+                {
+                    ShowMessage("No meshes found to scale.");
+                    return;
+                }
+                selectedMeshes = allMeshes;
+            }
+
+            // Calculate bounding box of selection
+            var min = new OpenTK.Mathematics.Vector3(float.MaxValue);
+            var max = new OpenTK.Mathematics.Vector3(float.MinValue);
+            bool hasBounds = false;
+
+            foreach (var obj in selectedMeshes)
+            {
+                var (bMin, bMax) = obj.GetWorldBounds();
+                min = OpenTK.Mathematics.Vector3.ComponentMin(min, bMin);
+                max = OpenTK.Mathematics.Vector3.ComponentMax(max, bMax);
+                hasBounds = true;
+            }
+
+            if (!hasBounds) return;
+
+            float sizeX = max.X - min.X;
+            float sizeY = max.Y - min.Y;
+            float sizeZ = max.Z - min.Z;
+
+            var dlg = new ScaleCalibrationDialog(this, sizeX, sizeY, sizeZ);
+            if (dlg.Run() == (int)ResponseType.Ok)
+            {
+                float factor = dlg.RealScaleFactor;
+                if (Math.Abs(factor - 1.0f) > 0.0001f)
+                {
+                    // Apply scale to selected objects.
+                    // We apply the transform directly to the mesh vertices ("baking" the scale)
+                    // to ensure that exported models retain the correct physical dimensions
+                    // regardless of the target software's handling of hierarchy transforms.
+
+                    foreach (var meshObj in selectedMeshes)
+                    {
+                        var matrix = OpenTK.Mathematics.Matrix4.CreateScale(factor);
+                        meshObj.MeshData.ApplyTransform(matrix);
+
+                        // Update position to maintain relative distances between objects
+                        meshObj.Position *= factor;
+                        meshObj.UpdateBounds();
+                    }
+
+                    _viewport.QueueDraw();
+                    _statusLabel.Text = $"Scaled {selectedMeshes.Count} objects by {factor:F4}";
+                }
+            }
+            dlg.Destroy();
         }
 
         #endregion
