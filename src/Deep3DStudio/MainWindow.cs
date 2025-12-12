@@ -1564,6 +1564,7 @@ namespace Deep3DStudio
         {
             switch (algo)
             {
+                case MeshingAlgorithm.Poisson: return new PoissonMesher();
                 case MeshingAlgorithm.GreedyMeshing: return new GreedyMesher();
                 case MeshingAlgorithm.SurfaceNets: return new SurfaceNetsMesher();
                 case MeshingAlgorithm.Blocky: return new BlockMesher();

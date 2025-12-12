@@ -15,6 +15,7 @@ namespace Deep3DStudio.Configuration
     public enum MeshingAlgorithm
     {
         MarchingCubes,
+        Poisson,
         GreedyMeshing,
         SurfaceNets,
         Blocky
