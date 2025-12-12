@@ -28,17 +28,17 @@ namespace Deep3DStudio
         private SceneTreeView _sceneTreeView;
 
         // UI References for updates
-        private ComboBoxText _workflowCombo;
-        private ToggleToolButton _pointsToggle;
-        private ToggleToolButton _wireToggle;
-        private ToggleToolButton _meshToggle;
-        private ToggleToolButton _rgbColorToggle;
-        private ToggleToolButton _depthColorToggle;
+        private ComboBoxText _workflowCombo = null!;
+        private ToggleToolButton _pointsToggle = null!;
+        private ToggleToolButton _wireToggle = null!;
+        private ToggleToolButton _meshToggle = null!;
+        private ToggleToolButton _rgbColorToggle = null!;
+        private ToggleToolButton _depthColorToggle = null!;
 
         // Panel containers for show/hide
-        private Widget _leftPanel;
-        private Widget _verticalToolbar;
-        private Paned _mainHPaned;
+        private Widget _leftPanel = null!;
+        private Widget _verticalToolbar = null!;
+        private Paned _mainHPaned = null!;
 
         // Menu check items for panel visibility
         private CheckMenuItem? _showSceneTreeMenuItem;
@@ -144,6 +144,10 @@ namespace Deep3DStudio
             var exportMeshItem = new MenuItem("_Export Mesh...");
             exportMeshItem.Activated += OnExportMesh;
             fileMenu.Append(exportMeshItem);
+
+            var exportPointsItem = new MenuItem("Export _Point Cloud...");
+            exportPointsItem.Activated += OnExportPointCloud;
+            fileMenu.Append(exportPointsItem);
 
             fileMenu.Append(new SeparatorMenuItem());
 
@@ -990,6 +994,77 @@ namespace Deep3DStudio
             fc.Destroy();
         }
 
+        private void OnExportPointCloud(object? sender, EventArgs e)
+        {
+            var selectedObjects = _sceneGraph.SelectedObjects;
+            if (selectedObjects.Count == 0)
+            {
+                ShowMessage("Please select objects (Mesh or Point Cloud) to export.");
+                return;
+            }
+
+            var fc = new FileChooserDialog("Export Point Cloud", this, FileChooserAction.Save,
+                "Cancel", ResponseType.Cancel, "Save", ResponseType.Accept);
+
+            var plyFilter = new FileFilter { Name = "PLY Files" };
+            plyFilter.AddPattern("*.ply");
+            fc.AddFilter(plyFilter);
+
+            var xyzFilter = new FileFilter { Name = "XYZ Files" };
+            xyzFilter.AddPattern("*.xyz");
+            fc.AddFilter(xyzFilter);
+
+            if (fc.Run() == (int)ResponseType.Accept)
+            {
+                string filename = fc.Filename;
+                if (!filename.EndsWith(".ply", StringComparison.OrdinalIgnoreCase) && !filename.EndsWith(".xyz", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Default to PLY if no extension or unknown
+                    filename += ".ply";
+                }
+
+                string ext = System.IO.Path.GetExtension(filename).ToLower();
+                var format = ext == ".xyz" ? PointCloudExporter.ExportFormat.XYZ : PointCloudExporter.ExportFormat.PLY;
+
+                // Ask for RGB
+                bool includeColors = true;
+                var colorMsg = new MessageDialog(this, DialogFlags.Modal, MessageType.Question, ButtonsType.YesNo, "Include RGB Colors?");
+                if (colorMsg.Run() == (int)ResponseType.No) includeColors = false;
+                colorMsg.Destroy();
+
+                int count = 0;
+                foreach (var obj in selectedObjects)
+                {
+                    // If multiple objects, append index or name to filename to avoid overwrite?
+                    // For now, let's just export the first one or handle appropriately.
+                    // Simplification: Export first valid object or merge them?
+                    // Let's iterate and export individually with suffix if count > 1
+
+                    string currentPath = filename;
+                    if (selectedObjects.Count > 1)
+                    {
+                        string dir = System.IO.Path.GetDirectoryName(filename) ?? "";
+                        string name = System.IO.Path.GetFileNameWithoutExtension(filename);
+                        currentPath = System.IO.Path.Combine(dir, $"{name}_{obj.Name}{ext}");
+                    }
+
+                    if (obj is MeshObject meshObj)
+                    {
+                        PointCloudExporter.Export(currentPath, meshObj.MeshData, format, includeColors);
+                        count++;
+                    }
+                    else if (obj is PointCloudObject pcObj)
+                    {
+                        PointCloudExporter.Export(currentPath, pcObj, format, includeColors);
+                        count++;
+                    }
+                }
+
+                _statusLabel.Text = $"Exported {count} point cloud(s).";
+            }
+            fc.Destroy();
+        }
+
         private void OnDeleteSelected(object? sender, EventArgs e)
         {
             foreach (var obj in _sceneGraph.SelectedObjects.ToList())
@@ -1140,48 +1215,93 @@ namespace Deep3DStudio
         private void OnMergeClicked(object? sender, EventArgs e)
         {
             var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
-            if (selectedMeshes.Count < 2)
+            var selectedPointClouds = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
+
+            if (selectedMeshes.Count >= 2)
             {
-                ShowMessage("Please select at least 2 meshes to merge.");
+                var meshDataList = selectedMeshes.Select(m => m.MeshData).ToList();
+                var merged = MeshOperations.MergeWithWelding(meshDataList);
+
+                foreach (var m in selectedMeshes)
+                    _sceneGraph.RemoveObject(m);
+
+                var mergedObj = new MeshObject("Merged Mesh", merged);
+                _sceneGraph.AddObject(mergedObj);
+                _sceneGraph.Select(mergedObj);
+
+                _statusLabel.Text = $"Merged {selectedMeshes.Count} meshes";
+            }
+            else if (selectedPointClouds.Count >= 2)
+            {
+                var merged = MeshOperations.MergePointClouds(selectedPointClouds);
+
+                foreach (var pc in selectedPointClouds)
+                    _sceneGraph.RemoveObject(pc);
+
+                _sceneGraph.AddObject(merged);
+                _sceneGraph.Select(merged);
+
+                _statusLabel.Text = $"Merged {selectedPointClouds.Count} point clouds";
+            }
+            else
+            {
+                ShowMessage("Please select at least 2 meshes or 2 point clouds to merge.");
                 return;
             }
 
-            var meshDataList = selectedMeshes.Select(m => m.MeshData).ToList();
-            var merged = MeshOperations.MergeWithWelding(meshDataList);
-
-            foreach (var m in selectedMeshes)
-                _sceneGraph.RemoveObject(m);
-
-            var mergedObj = new MeshObject("Merged Mesh", merged);
-            _sceneGraph.AddObject(mergedObj);
-            _sceneGraph.Select(mergedObj);
-
             _sceneTreeView.RefreshTree();
             _viewport.QueueDraw();
-            _statusLabel.Text = $"Merged {selectedMeshes.Count} meshes";
         }
 
         private void OnAlignClicked(object? sender, EventArgs e)
         {
             var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
-            if (selectedMeshes.Count < 2)
+            var selectedPointClouds = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
+
+            if (selectedMeshes.Count >= 2)
             {
-                ShowMessage("Please select at least 2 meshes to align.");
+                var target = selectedMeshes[0];
+                for (int i = 1; i < selectedMeshes.Count; i++)
+                {
+                    var source = selectedMeshes[i];
+                    var transform = MeshOperations.AlignICP(source.MeshData, target.MeshData);
+                    source.MeshData.ApplyTransform(transform);
+                    source.UpdateBounds();
+                }
+                _statusLabel.Text = $"Aligned {selectedMeshes.Count - 1} mesh(es) to target";
+            }
+            else if (selectedPointClouds.Count >= 2)
+            {
+                var target = selectedPointClouds[0];
+                var targetPoints = target.Points.Select(p => OpenTK.Mathematics.Vector3.TransformPosition(p, target.GetWorldTransform())).ToList();
+
+                for (int i = 1; i < selectedPointClouds.Count; i++)
+                {
+                    var source = selectedPointClouds[i];
+                    var sourcePoints = source.Points.Select(p => OpenTK.Mathematics.Vector3.TransformPosition(p, source.GetWorldTransform())).ToList();
+
+                    var transform = MeshOperations.AlignICP(sourcePoints, targetPoints);
+
+                    // Apply transform to the object's existing transform
+                    // Note: This applies it in local space, assuming the alignment was computed in world space
+                    // We need to be careful with coordinate spaces.
+                    // AlignICP returns a transform that maps Source -> Target in the space they were passed in (World Space)
+                    // NewWorld = OldWorld * Transform
+                    // Parent * NewLocal = Parent * OldLocal * Transform
+                    // NewLocal = OldLocal * Transform
+
+                    source.ApplyTransform(transform);
+                    source.UpdateBounds();
+                }
+                _statusLabel.Text = $"Aligned {selectedPointClouds.Count - 1} point cloud(s) to target";
+            }
+            else
+            {
+                ShowMessage("Please select at least 2 meshes or 2 point clouds to align.");
                 return;
             }
 
-            var target = selectedMeshes[0];
-
-            for (int i = 1; i < selectedMeshes.Count; i++)
-            {
-                var source = selectedMeshes[i];
-                var transform = MeshOperations.AlignICP(source.MeshData, target.MeshData);
-                source.MeshData.ApplyTransform(transform);
-                source.UpdateBounds();
-            }
-
             _viewport.QueueDraw();
-            _statusLabel.Text = $"Aligned {selectedMeshes.Count - 1} mesh(es) to target";
         }
 
         private void OnSetRealSizeClicked(object? sender, EventArgs e)

@@ -283,7 +283,7 @@ namespace Deep3DStudio.Viewport
 
         #region GL Events
 
-        private void OnRealized(object sender, EventArgs e)
+        private void OnRealized(object? sender, EventArgs e)
         {
             this.MakeCurrent();
             try
@@ -421,12 +421,12 @@ namespace Deep3DStudio.Viewport
             }
         }
 
-        private void OnUnrealized(object sender, EventArgs e)
+        private void OnUnrealized(object? sender, EventArgs e)
         {
             _loaded = false;
         }
 
-        private void OnRender(object sender, RenderArgs args)
+        private void OnRender(object? sender, RenderArgs args)
         {
             if (!_loaded) return;
 
