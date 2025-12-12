@@ -34,14 +34,30 @@ namespace Deep3DStudio
         private ToggleToolButton _rgbColorToggle;
         private ToggleToolButton _depthColorToggle;
 
-        // Gizmo toolbar buttons
-        private RadioToolButton? _translateBtn;
-        private RadioToolButton? _rotateBtn;
-        private RadioToolButton? _scaleBtn;
+        // Panel containers for show/hide
+        private Widget _leftPanel;
+        private Widget _rightPanel;
+        private Widget _verticalToolbar;
+        private Paned _mainHPaned;
+        private Paned _rightPaned;
+
+        // Menu check items for panel visibility
+        private CheckMenuItem? _showSceneTreeMenuItem;
+        private CheckMenuItem? _showToolsPanelMenuItem;
+        private CheckMenuItem? _showVerticalToolbarMenuItem;
+        private CheckMenuItem? _showGridMenuItem;
+        private CheckMenuItem? _showAxesMenuItem;
+        private CheckMenuItem? _showCamerasMenuItem;
+        private CheckMenuItem? _showInfoMenuItem;
+
+        // Gizmo menu items
+        private RadioMenuItem? _translateMenuItem;
+        private RadioMenuItem? _rotateMenuItem;
+        private RadioMenuItem? _scaleMenuItem;
 
         public MainWindow() : base(WindowType.Toplevel)
         {
-            this.Title = "Deep3D Studio - Enhanced";
+            this.Title = "Deep3D Studio";
             this.SetDefaultSize(1400, 900);
             this.DeleteEvent += (o, args) => Application.Quit();
 
@@ -51,45 +67,49 @@ namespace Deep3DStudio
             var mainVBox = new Box(Orientation.Vertical, 0);
             this.Add(mainVBox);
 
-            // 1. Toolbar (Top)
+            // 1. Menu Bar
+            var menuBar = CreateMenuBar();
+            mainVBox.PackStart(menuBar, false, false, 0);
+
+            // 2. Toolbar (Top)
             var toolbar = CreateToolbar();
             mainVBox.PackStart(toolbar, false, false, 0);
 
-            // 2. Main Content (Tree + Viewport + Side Panel)
-            var hPaned = new Paned(Orientation.Horizontal);
-            mainVBox.PackStart(hPaned, true, true, 0);
+            // 3. Main Content Area
+            var contentBox = new Box(Orientation.Horizontal, 0);
+            mainVBox.PackStart(contentBox, true, true, 0);
+
+            // Vertical Toolbar (Left of viewport)
+            _verticalToolbar = CreateVerticalToolbar();
+            contentBox.PackStart(_verticalToolbar, false, false, 0);
+
+            // Main Paned (Tree + Viewport + Side Panel)
+            _mainHPaned = new Paned(Orientation.Horizontal);
+            contentBox.PackStart(_mainHPaned, true, true, 0);
 
             // Left: Scene Tree View
-            var leftPanel = new Box(Orientation.Vertical, 0);
-            leftPanel.SetSizeRequest(250, -1);
-
-            _sceneTreeView = new SceneTreeView();
-            _sceneTreeView.SetSceneGraph(_sceneGraph);
-            _sceneTreeView.ObjectSelected += OnSceneObjectSelected;
-            _sceneTreeView.ObjectDoubleClicked += OnSceneObjectDoubleClicked;
-            _sceneTreeView.ObjectActionRequested += OnSceneObjectAction;
-            leftPanel.PackStart(_sceneTreeView, true, true, 0);
-
-            hPaned.Pack1(leftPanel, false, false);
+            _leftPanel = CreateSceneTreePanel();
+            _mainHPaned.Pack1(_leftPanel, false, false);
 
             // Center + Right: Viewport + Side Panel
-            var rightPaned = new Paned(Orientation.Horizontal);
-            hPaned.Pack2(rightPaned, true, false);
+            _rightPaned = new Paned(Orientation.Horizontal);
+            _mainHPaned.Pack2(_rightPaned, true, false);
 
             // 3D Viewport
             _viewport = new ThreeDView();
             _viewport.SetSceneGraph(_sceneGraph);
             _viewport.ObjectPicked += OnViewportObjectPicked;
-            rightPaned.Pack1(_viewport, true, false);
+            _rightPaned.Pack1(_viewport, true, false);
 
-            // 3. Status Bar (initialize before CreateSidePanel)
+            // 4. Status Bar (initialize before CreateSidePanel)
             _statusLabel = new Label("Ready");
 
-            // Side Panel
-            var sidePanel = CreateSidePanel();
-            rightPaned.Pack2(sidePanel, false, false);
-            rightPaned.Position = 900;
-            hPaned.Position = 250;
+            // Side Panel (Right)
+            _rightPanel = CreateSidePanel();
+            _rightPaned.Pack2(_rightPanel, false, false);
+
+            _rightPaned.Position = 850;
+            _mainHPaned.Position = 250;
 
             _statusLabel.Halign = Align.Start;
             var statusBox = new Box(Orientation.Horizontal, 5);
@@ -101,6 +121,662 @@ namespace Deep3DStudio
 
             this.ShowAll();
         }
+
+        #region Menu Bar
+
+        private Widget CreateMenuBar()
+        {
+            var menuBar = new MenuBar();
+
+            // File Menu
+            var fileMenu = new Menu();
+            var fileMenuItem = new MenuItem("_File");
+            fileMenuItem.Submenu = fileMenu;
+
+            var openImagesItem = new MenuItem("_Open Images...");
+            openImagesItem.Activated += OnAddImages;
+            fileMenu.Append(openImagesItem);
+
+            var importMeshItem = new MenuItem("_Import Mesh...");
+            importMeshItem.Activated += OnImportMesh;
+            fileMenu.Append(importMeshItem);
+
+            fileMenu.Append(new SeparatorMenuItem());
+
+            var exportMeshItem = new MenuItem("_Export Mesh...");
+            exportMeshItem.Activated += OnExportMesh;
+            fileMenu.Append(exportMeshItem);
+
+            fileMenu.Append(new SeparatorMenuItem());
+
+            var settingsItem = new MenuItem("_Settings...");
+            settingsItem.Activated += OnOpenSettings;
+            fileMenu.Append(settingsItem);
+
+            fileMenu.Append(new SeparatorMenuItem());
+
+            var exitItem = new MenuItem("E_xit");
+            exitItem.Activated += (s, e) => Application.Quit();
+            fileMenu.Append(exitItem);
+
+            menuBar.Append(fileMenuItem);
+
+            // Edit Menu
+            var editMenu = new Menu();
+            var editMenuItem = new MenuItem("_Edit");
+            editMenuItem.Submenu = editMenu;
+
+            var selectAllItem = new MenuItem("Select _All");
+            selectAllItem.Activated += (s, e) => _sceneGraph.SelectAll();
+            editMenu.Append(selectAllItem);
+
+            var deselectAllItem = new MenuItem("_Deselect All");
+            deselectAllItem.Activated += (s, e) => _sceneGraph.ClearSelection();
+            editMenu.Append(deselectAllItem);
+
+            editMenu.Append(new SeparatorMenuItem());
+
+            var deleteItem = new MenuItem("_Delete");
+            deleteItem.Activated += OnDeleteSelected;
+            editMenu.Append(deleteItem);
+
+            var duplicateItem = new MenuItem("D_uplicate");
+            duplicateItem.Activated += OnDuplicateSelected;
+            editMenu.Append(duplicateItem);
+
+            editMenu.Append(new SeparatorMenuItem());
+
+            // Transform submenu
+            var transformMenu = new Menu();
+            var transformMenuItem = new MenuItem("_Transform");
+            transformMenuItem.Submenu = transformMenu;
+
+            _translateMenuItem = new RadioMenuItem("_Move (W)");
+            _translateMenuItem.Active = true;
+            _translateMenuItem.Toggled += (s, e) => {
+                if (_translateMenuItem.Active) _viewport.SetGizmoMode(GizmoMode.Translate);
+            };
+            transformMenu.Append(_translateMenuItem);
+
+            _rotateMenuItem = new RadioMenuItem(_translateMenuItem, "_Rotate (E)");
+            _rotateMenuItem.Toggled += (s, e) => {
+                if (_rotateMenuItem.Active) _viewport.SetGizmoMode(GizmoMode.Rotate);
+            };
+            transformMenu.Append(_rotateMenuItem);
+
+            _scaleMenuItem = new RadioMenuItem(_translateMenuItem, "_Scale (R)");
+            _scaleMenuItem.Toggled += (s, e) => {
+                if (_scaleMenuItem.Active) _viewport.SetGizmoMode(GizmoMode.Scale);
+            };
+            transformMenu.Append(_scaleMenuItem);
+
+            transformMenu.Append(new SeparatorMenuItem());
+
+            var resetTransformItem = new MenuItem("Reset Transform");
+            resetTransformItem.Activated += OnResetTransform;
+            transformMenu.Append(resetTransformItem);
+
+            editMenu.Append(transformMenuItem);
+
+            // Mesh Operations submenu
+            var meshOpsMenu = new Menu();
+            var meshOpsMenuItem = new MenuItem("_Mesh Operations");
+            meshOpsMenuItem.Submenu = meshOpsMenu;
+
+            var decimateItem = new MenuItem("_Decimate (50%)");
+            decimateItem.Activated += OnDecimateClicked;
+            meshOpsMenu.Append(decimateItem);
+
+            var smoothItem = new MenuItem("_Smooth");
+            smoothItem.Activated += OnSmoothClicked;
+            meshOpsMenu.Append(smoothItem);
+
+            var optimizeItem = new MenuItem("_Optimize");
+            optimizeItem.Activated += OnOptimizeClicked;
+            meshOpsMenu.Append(optimizeItem);
+
+            var splitItem = new MenuItem("Split by _Connectivity");
+            splitItem.Activated += OnSplitClicked;
+            meshOpsMenu.Append(splitItem);
+
+            var flipNormalsItem = new MenuItem("_Flip Normals");
+            flipNormalsItem.Activated += OnFlipNormals;
+            meshOpsMenu.Append(flipNormalsItem);
+
+            meshOpsMenu.Append(new SeparatorMenuItem());
+
+            var mergeItem = new MenuItem("_Merge Selected");
+            mergeItem.Activated += OnMergeClicked;
+            meshOpsMenu.Append(mergeItem);
+
+            var alignItem = new MenuItem("_Align (ICP)");
+            alignItem.Activated += OnAlignClicked;
+            meshOpsMenu.Append(alignItem);
+
+            editMenu.Append(meshOpsMenuItem);
+
+            menuBar.Append(editMenuItem);
+
+            // View Menu
+            var viewMenu = new Menu();
+            var viewMenuItem = new MenuItem("_View");
+            viewMenuItem.Submenu = viewMenu;
+
+            // Display mode
+            var meshModeItem = new RadioMenuItem("Show _Mesh");
+            meshModeItem.Active = true;
+            meshModeItem.Toggled += (s, e) => {
+                if (meshModeItem.Active)
+                {
+                    AppSettings.Instance.ShowPointCloud = false;
+                    _viewport.QueueDraw();
+                }
+            };
+            viewMenu.Append(meshModeItem);
+
+            var pointsModeItem = new RadioMenuItem(meshModeItem, "Show _Points");
+            pointsModeItem.Toggled += (s, e) => {
+                if (pointsModeItem.Active)
+                {
+                    AppSettings.Instance.ShowPointCloud = true;
+                    _viewport.QueueDraw();
+                }
+            };
+            viewMenu.Append(pointsModeItem);
+
+            var wireframeItem = new CheckMenuItem("_Wireframe");
+            wireframeItem.Active = AppSettings.Instance.ShowWireframe;
+            wireframeItem.Toggled += (s, e) => {
+                AppSettings.Instance.ShowWireframe = wireframeItem.Active;
+                _viewport.QueueDraw();
+            };
+            viewMenu.Append(wireframeItem);
+
+            viewMenu.Append(new SeparatorMenuItem());
+
+            // Color mode
+            var rgbColorItem = new RadioMenuItem("_RGB Colors");
+            rgbColorItem.Active = AppSettings.Instance.PointCloudColor == PointCloudColorMode.RGB;
+            rgbColorItem.Toggled += (s, e) => {
+                if (rgbColorItem.Active)
+                {
+                    AppSettings.Instance.PointCloudColor = PointCloudColorMode.RGB;
+                    _viewport.QueueDraw();
+                }
+            };
+            viewMenu.Append(rgbColorItem);
+
+            var depthColorItem = new RadioMenuItem(rgbColorItem, "_Depth Colors");
+            depthColorItem.Active = AppSettings.Instance.PointCloudColor == PointCloudColorMode.DistanceMap;
+            depthColorItem.Toggled += (s, e) => {
+                if (depthColorItem.Active)
+                {
+                    AppSettings.Instance.PointCloudColor = PointCloudColorMode.DistanceMap;
+                    _viewport.QueueDraw();
+                }
+            };
+            viewMenu.Append(depthColorItem);
+
+            viewMenu.Append(new SeparatorMenuItem());
+
+            // Viewport elements
+            _showGridMenuItem = new CheckMenuItem("Show _Grid");
+            _showGridMenuItem.Active = _viewport.ShowGrid;
+            _showGridMenuItem.Toggled += (s, e) => {
+                _viewport.ShowGrid = _showGridMenuItem.Active;
+                _viewport.QueueDraw();
+            };
+            viewMenu.Append(_showGridMenuItem);
+
+            _showAxesMenuItem = new CheckMenuItem("Show _Axes");
+            _showAxesMenuItem.Active = _viewport.ShowAxes;
+            _showAxesMenuItem.Toggled += (s, e) => {
+                _viewport.ShowAxes = _showAxesMenuItem.Active;
+                _viewport.QueueDraw();
+            };
+            viewMenu.Append(_showAxesMenuItem);
+
+            _showCamerasMenuItem = new CheckMenuItem("Show _Cameras");
+            _showCamerasMenuItem.Active = _viewport.ShowCameras;
+            _showCamerasMenuItem.Toggled += (s, e) => {
+                _viewport.ShowCameras = _showCamerasMenuItem.Active;
+                _viewport.QueueDraw();
+            };
+            viewMenu.Append(_showCamerasMenuItem);
+
+            _showInfoMenuItem = new CheckMenuItem("Show _Info Overlay");
+            _showInfoMenuItem.Active = _viewport.ShowInfoText;
+            _showInfoMenuItem.Toggled += (s, e) => {
+                _viewport.ShowInfoText = _showInfoMenuItem.Active;
+                _viewport.QueueDraw();
+            };
+            viewMenu.Append(_showInfoMenuItem);
+
+            viewMenu.Append(new SeparatorMenuItem());
+
+            var focusItem = new MenuItem("_Focus on Selection (F)");
+            focusItem.Activated += (s, e) => _viewport.FocusOnSelection();
+            viewMenu.Append(focusItem);
+
+            var resetViewItem = new MenuItem("_Reset View");
+            resetViewItem.Activated += (s, e) => _viewport.FocusOnSelection();
+            viewMenu.Append(resetViewItem);
+
+            menuBar.Append(viewMenuItem);
+
+            // Window Menu
+            var windowMenu = new Menu();
+            var windowMenuItem = new MenuItem("_Window");
+            windowMenuItem.Submenu = windowMenu;
+
+            _showSceneTreeMenuItem = new CheckMenuItem("_Scene Tree");
+            _showSceneTreeMenuItem.Active = true;
+            _showSceneTreeMenuItem.Toggled += OnToggleSceneTree;
+            windowMenu.Append(_showSceneTreeMenuItem);
+
+            _showToolsPanelMenuItem = new CheckMenuItem("_Tools Panel");
+            _showToolsPanelMenuItem.Active = true;
+            _showToolsPanelMenuItem.Toggled += OnToggleToolsPanel;
+            windowMenu.Append(_showToolsPanelMenuItem);
+
+            _showVerticalToolbarMenuItem = new CheckMenuItem("_Vertical Toolbar");
+            _showVerticalToolbarMenuItem.Active = true;
+            _showVerticalToolbarMenuItem.Toggled += OnToggleVerticalToolbar;
+            windowMenu.Append(_showVerticalToolbarMenuItem);
+
+            windowMenu.Append(new SeparatorMenuItem());
+
+            var fullViewportItem = new MenuItem("_Full Viewport Mode");
+            fullViewportItem.Activated += OnFullViewportMode;
+            windowMenu.Append(fullViewportItem);
+
+            var restorePanelsItem = new MenuItem("_Restore All Panels");
+            restorePanelsItem.Activated += OnRestoreAllPanels;
+            windowMenu.Append(restorePanelsItem);
+
+            menuBar.Append(windowMenuItem);
+
+            // Help Menu
+            var helpMenu = new Menu();
+            var helpMenuItem = new MenuItem("_Help");
+            helpMenuItem.Submenu = helpMenu;
+
+            var aboutItem = new MenuItem("_About");
+            aboutItem.Activated += OnShowAbout;
+            helpMenu.Append(aboutItem);
+
+            menuBar.Append(helpMenuItem);
+
+            return menuBar;
+        }
+
+        #endregion
+
+        #region Vertical Toolbar
+
+        private Widget CreateVerticalToolbar()
+        {
+            var vbox = new Box(Orientation.Vertical, 2);
+            vbox.MarginStart = 2;
+            vbox.MarginEnd = 2;
+            vbox.MarginTop = 5;
+
+            int btnSize = 36;
+
+            // Transform tools section
+            var moveBtn = CreateIconButton("move", "Move (W)", btnSize, () => _viewport.SetGizmoMode(GizmoMode.Translate));
+            vbox.PackStart(moveBtn, false, false, 1);
+
+            var rotateBtn = CreateIconButton("rotate", "Rotate (E)", btnSize, () => _viewport.SetGizmoMode(GizmoMode.Rotate));
+            vbox.PackStart(rotateBtn, false, false, 1);
+
+            var scaleBtn = CreateIconButton("scale", "Scale (R)", btnSize, () => _viewport.SetGizmoMode(GizmoMode.Scale));
+            vbox.PackStart(scaleBtn, false, false, 1);
+
+            vbox.PackStart(new Separator(Orientation.Horizontal), false, false, 5);
+
+            // View tools
+            var focusBtn = CreateIconButton("focus", "Focus (F)", btnSize, () => _viewport.FocusOnSelection());
+            vbox.PackStart(focusBtn, false, false, 1);
+
+            var cropBtn = CreateIconButton("crop", "Crop Box", btnSize, () => _viewport.ToggleCropBox(true));
+            vbox.PackStart(cropBtn, false, false, 1);
+
+            vbox.PackStart(new Separator(Orientation.Horizontal), false, false, 5);
+
+            // Mesh operations
+            var decimateBtn = CreateIconButton("decimate", "Decimate", btnSize, () => OnDecimateClicked(null, EventArgs.Empty));
+            vbox.PackStart(decimateBtn, false, false, 1);
+
+            var smoothBtn = CreateIconButton("smooth", "Smooth", btnSize, () => OnSmoothClicked(null, EventArgs.Empty));
+            vbox.PackStart(smoothBtn, false, false, 1);
+
+            var optimizeBtn = CreateIconButton("optimize", "Optimize", btnSize, () => OnOptimizeClicked(null, EventArgs.Empty));
+            vbox.PackStart(optimizeBtn, false, false, 1);
+
+            var splitBtn = CreateIconButton("split", "Split", btnSize, () => OnSplitClicked(null, EventArgs.Empty));
+            vbox.PackStart(splitBtn, false, false, 1);
+
+            vbox.PackStart(new Separator(Orientation.Horizontal), false, false, 5);
+
+            // Merge/Align
+            var mergeBtn = CreateIconButton("merge", "Merge", btnSize, () => OnMergeClicked(null, EventArgs.Empty));
+            vbox.PackStart(mergeBtn, false, false, 1);
+
+            var alignBtn = CreateIconButton("align", "Align (ICP)", btnSize, () => OnAlignClicked(null, EventArgs.Empty));
+            vbox.PackStart(alignBtn, false, false, 1);
+
+            return vbox;
+        }
+
+        private Button CreateIconButton(string iconType, string tooltip, int size, Action onClick)
+        {
+            var btn = new Button();
+            btn.TooltipText = tooltip;
+            btn.SetSizeRequest(size, size);
+            btn.Relief = ReliefStyle.None;
+
+            // Create custom icon
+            var icon = CreateCustomIcon(iconType, size - 8);
+            btn.Add(icon);
+
+            btn.Clicked += (s, e) => onClick();
+
+            return btn;
+        }
+
+        private Widget CreateCustomIcon(string iconType, int size)
+        {
+            // Create a DrawingArea with custom drawing for each icon type
+            var drawingArea = new DrawingArea();
+            drawingArea.SetSizeRequest(size, size);
+            drawingArea.Drawn += (o, args) =>
+            {
+                var cr = args.Cr;
+                DrawIconContent(cr, iconType, size);
+            };
+            return drawingArea;
+        }
+
+        private void DrawIconContent(Cairo.Context cr, string iconType, int size)
+        {
+            double s = size;
+            double cx = s / 2;
+            double cy = s / 2;
+
+            cr.SetSourceRGB(0.8, 0.8, 0.8); // Light gray for icons
+
+            switch (iconType)
+            {
+                case "move":
+                    // Cross with arrows
+                    cr.LineWidth = 2;
+                    // Horizontal line
+                    cr.MoveTo(2, cy);
+                    cr.LineTo(s - 2, cy);
+                    cr.Stroke();
+                    // Vertical line
+                    cr.MoveTo(cx, 2);
+                    cr.LineTo(cx, s - 2);
+                    cr.Stroke();
+                    // Arrow heads
+                    cr.MoveTo(s - 2, cy);
+                    cr.LineTo(s - 6, cy - 3);
+                    cr.LineTo(s - 6, cy + 3);
+                    cr.ClosePath();
+                    cr.Fill();
+                    cr.MoveTo(cx, 2);
+                    cr.LineTo(cx - 3, 6);
+                    cr.LineTo(cx + 3, 6);
+                    cr.ClosePath();
+                    cr.Fill();
+                    break;
+
+                case "rotate":
+                    // Circular arrow
+                    cr.LineWidth = 2;
+                    cr.Arc(cx, cy, s / 3, 0.5, 5.5);
+                    cr.Stroke();
+                    // Arrow head
+                    double angle = 5.5;
+                    double ax = cx + Math.Cos(angle) * s / 3;
+                    double ay = cy + Math.Sin(angle) * s / 3;
+                    cr.MoveTo(ax, ay);
+                    cr.LineTo(ax + 4, ay - 2);
+                    cr.LineTo(ax + 2, ay + 4);
+                    cr.ClosePath();
+                    cr.Fill();
+                    break;
+
+                case "scale":
+                    // Box with diagonal arrow
+                    cr.LineWidth = 1.5;
+                    cr.Rectangle(4, 4, s / 2, s / 2);
+                    cr.Stroke();
+                    cr.MoveTo(s / 2, s / 2);
+                    cr.LineTo(s - 4, s - 4);
+                    cr.Stroke();
+                    // Arrow head
+                    cr.MoveTo(s - 4, s - 4);
+                    cr.LineTo(s - 8, s - 4);
+                    cr.LineTo(s - 4, s - 8);
+                    cr.ClosePath();
+                    cr.Fill();
+                    break;
+
+                case "focus":
+                    // Target/crosshair
+                    cr.LineWidth = 1.5;
+                    cr.Arc(cx, cy, s / 3, 0, 2 * Math.PI);
+                    cr.Stroke();
+                    cr.Arc(cx, cy, s / 6, 0, 2 * Math.PI);
+                    cr.Fill();
+                    cr.MoveTo(cx, 2);
+                    cr.LineTo(cx, s / 3);
+                    cr.Stroke();
+                    cr.MoveTo(cx, s - 2);
+                    cr.LineTo(cx, s - s / 3);
+                    cr.Stroke();
+                    cr.MoveTo(2, cy);
+                    cr.LineTo(s / 3, cy);
+                    cr.Stroke();
+                    cr.MoveTo(s - 2, cy);
+                    cr.LineTo(s - s / 3, cy);
+                    cr.Stroke();
+                    break;
+
+                case "crop":
+                    // Crop corners
+                    cr.LineWidth = 2;
+                    // Top-left
+                    cr.MoveTo(4, s / 3);
+                    cr.LineTo(4, 4);
+                    cr.LineTo(s / 3, 4);
+                    cr.Stroke();
+                    // Top-right
+                    cr.MoveTo(s - s / 3, 4);
+                    cr.LineTo(s - 4, 4);
+                    cr.LineTo(s - 4, s / 3);
+                    cr.Stroke();
+                    // Bottom-left
+                    cr.MoveTo(4, s - s / 3);
+                    cr.LineTo(4, s - 4);
+                    cr.LineTo(s / 3, s - 4);
+                    cr.Stroke();
+                    // Bottom-right
+                    cr.MoveTo(s - s / 3, s - 4);
+                    cr.LineTo(s - 4, s - 4);
+                    cr.LineTo(s - 4, s - s / 3);
+                    cr.Stroke();
+                    break;
+
+                case "decimate":
+                    // Triangle with down arrow (simplify)
+                    cr.LineWidth = 1.5;
+                    cr.MoveTo(cx, 3);
+                    cr.LineTo(s - 4, s - 6);
+                    cr.LineTo(4, s - 6);
+                    cr.ClosePath();
+                    cr.Stroke();
+                    // Down arrow
+                    cr.SetSourceRGB(0.9, 0.5, 0.3);
+                    cr.MoveTo(cx - 4, s - 10);
+                    cr.LineTo(cx + 4, s - 10);
+                    cr.LineTo(cx, s - 3);
+                    cr.ClosePath();
+                    cr.Fill();
+                    break;
+
+                case "smooth":
+                    // Wavy line becoming smooth
+                    cr.LineWidth = 2;
+                    cr.MoveTo(3, cy);
+                    cr.CurveTo(s / 4, cy - 6, s / 2, cy + 6, s - 3, cy);
+                    cr.Stroke();
+                    break;
+
+                case "optimize":
+                    // Checkmark in circle
+                    cr.LineWidth = 1.5;
+                    cr.Arc(cx, cy, s / 3, 0, 2 * Math.PI);
+                    cr.Stroke();
+                    cr.SetSourceRGB(0.3, 0.8, 0.3);
+                    cr.LineWidth = 2;
+                    cr.MoveTo(cx - 5, cy);
+                    cr.LineTo(cx - 1, cy + 4);
+                    cr.LineTo(cx + 5, cy - 4);
+                    cr.Stroke();
+                    break;
+
+                case "split":
+                    // Rectangle splitting into two
+                    cr.LineWidth = 1.5;
+                    cr.Rectangle(3, 4, s / 2 - 3, s - 8);
+                    cr.Stroke();
+                    cr.Rectangle(s / 2 + 1, 4, s / 2 - 4, s - 8);
+                    cr.Stroke();
+                    // Scissors/cut line
+                    cr.SetSourceRGB(0.9, 0.4, 0.4);
+                    cr.SetDash(new double[] { 2, 2 }, 0);
+                    cr.MoveTo(cx, 2);
+                    cr.LineTo(cx, s - 2);
+                    cr.Stroke();
+                    cr.SetDash(new double[] { }, 0);
+                    break;
+
+                case "merge":
+                    // Two shapes merging
+                    cr.LineWidth = 1.5;
+                    cr.SetSourceRGB(0.6, 0.8, 1.0);
+                    cr.Rectangle(3, 6, s / 2 - 2, s - 12);
+                    cr.Fill();
+                    cr.SetSourceRGB(1.0, 0.8, 0.6);
+                    cr.Rectangle(s / 2 - 2, 6, s / 2 - 2, s - 12);
+                    cr.Fill();
+                    cr.SetSourceRGB(0.8, 0.8, 0.8);
+                    cr.Rectangle(3, 6, s - 6, s - 12);
+                    cr.Stroke();
+                    // Arrow
+                    cr.SetSourceRGB(0.3, 0.7, 0.3);
+                    cr.MoveTo(s / 2 - 6, cy);
+                    cr.LineTo(s / 2 + 6, cy);
+                    cr.Stroke();
+                    break;
+
+                case "align":
+                    // Two shapes with alignment arrows
+                    cr.LineWidth = 1.5;
+                    cr.Rectangle(4, 4, 8, 10);
+                    cr.Stroke();
+                    cr.Rectangle(s - 12, s - 14, 8, 10);
+                    cr.Stroke();
+                    // Alignment arrows
+                    cr.SetSourceRGB(0.3, 0.6, 1.0);
+                    cr.MoveTo(12, 9);
+                    cr.LineTo(s - 12, s - 9);
+                    cr.Stroke();
+                    cr.MoveTo(s - 12, s - 9);
+                    cr.LineTo(s - 16, s - 6);
+                    cr.Stroke();
+                    cr.MoveTo(s - 12, s - 9);
+                    cr.LineTo(s - 9, s - 13);
+                    cr.Stroke();
+                    break;
+
+                default:
+                    // Default: simple square
+                    cr.Rectangle(4, 4, s - 8, s - 8);
+                    cr.Stroke();
+                    break;
+            }
+        }
+
+        #endregion
+
+        #region Panel Management
+
+        private Widget CreateSceneTreePanel()
+        {
+            var panel = new Box(Orientation.Vertical, 0);
+            panel.SetSizeRequest(250, -1);
+
+            _sceneTreeView = new SceneTreeView();
+            _sceneTreeView.SetSceneGraph(_sceneGraph);
+            _sceneTreeView.ObjectSelected += OnSceneObjectSelected;
+            _sceneTreeView.ObjectDoubleClicked += OnSceneObjectDoubleClicked;
+            _sceneTreeView.ObjectActionRequested += OnSceneObjectAction;
+            panel.PackStart(_sceneTreeView, true, true, 0);
+
+            return panel;
+        }
+
+        private void OnToggleSceneTree(object? sender, EventArgs e)
+        {
+            if (_showSceneTreeMenuItem != null)
+            {
+                _leftPanel.Visible = _showSceneTreeMenuItem.Active;
+            }
+        }
+
+        private void OnToggleToolsPanel(object? sender, EventArgs e)
+        {
+            if (_showToolsPanelMenuItem != null)
+            {
+                _rightPanel.Visible = _showToolsPanelMenuItem.Active;
+            }
+        }
+
+        private void OnToggleVerticalToolbar(object? sender, EventArgs e)
+        {
+            if (_showVerticalToolbarMenuItem != null)
+            {
+                _verticalToolbar.Visible = _showVerticalToolbarMenuItem.Active;
+            }
+        }
+
+        private void OnFullViewportMode(object? sender, EventArgs e)
+        {
+            _leftPanel.Visible = false;
+            _rightPanel.Visible = false;
+            _verticalToolbar.Visible = false;
+
+            if (_showSceneTreeMenuItem != null) _showSceneTreeMenuItem.Active = false;
+            if (_showToolsPanelMenuItem != null) _showToolsPanelMenuItem.Active = false;
+            if (_showVerticalToolbarMenuItem != null) _showVerticalToolbarMenuItem.Active = false;
+        }
+
+        private void OnRestoreAllPanels(object? sender, EventArgs e)
+        {
+            _leftPanel.Visible = true;
+            _rightPanel.Visible = true;
+            _verticalToolbar.Visible = true;
+
+            if (_showSceneTreeMenuItem != null) _showSceneTreeMenuItem.Active = true;
+            if (_showToolsPanelMenuItem != null) _showToolsPanelMenuItem.Active = true;
+            if (_showVerticalToolbarMenuItem != null) _showVerticalToolbarMenuItem.Active = true;
+        }
+
+        #endregion
 
         private Widget CreateToolbar()
         {
@@ -199,48 +875,6 @@ namespace Deep3DStudio
                 }
             };
             toolbar.Insert(_depthColorToggle, -1);
-
-            toolbar.Insert(new SeparatorToolItem(), -1);
-
-            // Transform Tool Buttons (Radio Group)
-            _translateBtn = new RadioToolButton(new GLib.SList(IntPtr.Zero));
-            _translateBtn.IconWidget = new Image(Stock.Fullscreen, IconSize.SmallToolbar);
-            _translateBtn.Label = "Move";
-            _translateBtn.TooltipText = "Move Tool (W)";
-            _translateBtn.Active = true;
-            _translateBtn.Toggled += (s, e) => {
-                if (_translateBtn.Active)
-                    _viewport.SetGizmoMode(GizmoMode.Translate);
-            };
-            toolbar.Insert(_translateBtn, -1);
-
-            _rotateBtn = new RadioToolButton(_translateBtn.Group);
-            _rotateBtn.IconWidget = new Image(Stock.Refresh, IconSize.SmallToolbar);
-            _rotateBtn.Label = "Rotate";
-            _rotateBtn.TooltipText = "Rotate Tool (E)";
-            _rotateBtn.Toggled += (s, e) => {
-                if (_rotateBtn.Active)
-                    _viewport.SetGizmoMode(GizmoMode.Rotate);
-            };
-            toolbar.Insert(_rotateBtn, -1);
-
-            _scaleBtn = new RadioToolButton(_translateBtn.Group);
-            _scaleBtn.IconWidget = new Image(Stock.ZoomFit, IconSize.SmallToolbar);
-            _scaleBtn.Label = "Scale";
-            _scaleBtn.TooltipText = "Scale Tool (R)";
-            _scaleBtn.Toggled += (s, e) => {
-                if (_scaleBtn.Active)
-                    _viewport.SetGizmoMode(GizmoMode.Scale);
-            };
-            toolbar.Insert(_scaleBtn, -1);
-
-            toolbar.Insert(new SeparatorToolItem(), -1);
-
-            // Focus button
-            var focusBtn = new ToolButton(Stock.Home, "Focus");
-            focusBtn.TooltipText = "Focus on Selection (F)";
-            focusBtn.Clicked += (s, e) => _viewport.FocusOnSelection();
-            toolbar.Insert(focusBtn, -1);
 
             toolbar.Insert(new SeparatorToolItem(), -1);
 
@@ -362,6 +996,105 @@ namespace Deep3DStudio
             return vbox;
         }
 
+        #region Menu Actions
+
+        private void OnImportMesh(object? sender, EventArgs e)
+        {
+            var fc = new FileChooserDialog("Import Mesh", this, FileChooserAction.Open,
+                "Cancel", ResponseType.Cancel, "Open", ResponseType.Accept);
+
+            var filter = new FileFilter();
+            filter.Name = "Mesh Files";
+            filter.AddPattern("*.obj");
+            filter.AddPattern("*.ply");
+            filter.AddPattern("*.stl");
+            fc.AddFilter(filter);
+
+            if (fc.Run() == (int)ResponseType.Accept)
+            {
+                _statusLabel.Text = $"Import from {fc.Filename} - Not yet implemented";
+            }
+            fc.Destroy();
+        }
+
+        private void OnExportMesh(object? sender, EventArgs e)
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count == 0)
+            {
+                ShowMessage("Please select a mesh to export.");
+                return;
+            }
+
+            var fc = new FileChooserDialog("Export Mesh", this, FileChooserAction.Save,
+                "Cancel", ResponseType.Cancel, "Save", ResponseType.Accept);
+
+            var filter = new FileFilter();
+            filter.Name = "OBJ Files";
+            filter.AddPattern("*.obj");
+            fc.AddFilter(filter);
+
+            if (fc.Run() == (int)ResponseType.Accept)
+            {
+                _statusLabel.Text = $"Export to {fc.Filename} - Not yet implemented";
+            }
+            fc.Destroy();
+        }
+
+        private void OnDeleteSelected(object? sender, EventArgs e)
+        {
+            foreach (var obj in _sceneGraph.SelectedObjects.ToList())
+            {
+                _sceneGraph.RemoveObject(obj);
+            }
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+        }
+
+        private void OnDuplicateSelected(object? sender, EventArgs e)
+        {
+            var toDuplicate = _sceneGraph.SelectedObjects.ToList();
+            foreach (var obj in toDuplicate)
+            {
+                var clone = obj.Clone();
+                clone.Position += new OpenTK.Mathematics.Vector3(0.5f, 0, 0);
+                _sceneGraph.AddObject(clone, obj.Parent);
+            }
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+        }
+
+        private void OnResetTransform(object? sender, EventArgs e)
+        {
+            foreach (var obj in _sceneGraph.SelectedObjects)
+            {
+                obj.Position = OpenTK.Mathematics.Vector3.Zero;
+                obj.Rotation = OpenTK.Mathematics.Vector3.Zero;
+                obj.Scale = OpenTK.Mathematics.Vector3.One;
+            }
+            _viewport.QueueDraw();
+        }
+
+        private void OnFlipNormals(object? sender, EventArgs e)
+        {
+            foreach (var meshObj in _sceneGraph.SelectedObjects.OfType<MeshObject>())
+            {
+                meshObj.MeshData = MeshOperations.FlipNormals(meshObj.MeshData);
+            }
+            _viewport.QueueDraw();
+            _statusLabel.Text = "Flipped normals";
+        }
+
+        private void OnShowAbout(object? sender, EventArgs e)
+        {
+            var dialog = new MessageDialog(this, DialogFlags.Modal, MessageType.Info, ButtonsType.Ok,
+                "Deep3D Studio\n\nA 3D reconstruction tool using Dust3r and NeRF.\n\nVersion 1.0");
+            dialog.Run();
+            dialog.Destroy();
+        }
+
+        #endregion
+
         #region Mesh Operation Handlers
 
         private void OnDecimateClicked(object? sender, EventArgs e)
@@ -439,10 +1172,8 @@ namespace Deep3DStudio
                 var parts = MeshOperations.SplitByConnectivity(meshObj.MeshData);
                 if (parts.Count > 1)
                 {
-                    // Remove original
                     _sceneGraph.RemoveObject(meshObj);
 
-                    // Add parts
                     for (int i = 0; i < parts.Count; i++)
                     {
                         var partObj = new MeshObject($"{meshObj.Name}_Part{i + 1}", parts[i]);
@@ -469,11 +1200,9 @@ namespace Deep3DStudio
             var meshDataList = selectedMeshes.Select(m => m.MeshData).ToList();
             var merged = MeshOperations.MergeWithWelding(meshDataList);
 
-            // Remove originals
             foreach (var m in selectedMeshes)
                 _sceneGraph.RemoveObject(m);
 
-            // Add merged
             var mergedObj = new MeshObject("Merged Mesh", merged);
             _sceneGraph.AddObject(mergedObj);
             _sceneGraph.Select(mergedObj);
@@ -526,11 +1255,9 @@ namespace Deep3DStudio
 
         private void OnSceneObjectDoubleClicked(object? sender, SceneObject obj)
         {
-            // Focus on double-clicked object
             _sceneGraph.Select(obj);
             _viewport.FocusOnSelection();
 
-            // If it's a camera, optionally show the image
             if (obj is CameraObject cam && !string.IsNullOrEmpty(cam.ImagePath))
             {
                 // Could show image preview here
@@ -578,18 +1305,12 @@ namespace Deep3DStudio
                     break;
 
                 case "flip_normals":
-                    if (args.obj is MeshObject meshObj)
-                    {
-                        meshObj.MeshData = MeshOperations.FlipNormals(meshObj.MeshData);
-                        _viewport.QueueDraw();
-                        _statusLabel.Text = "Flipped normals";
-                    }
+                    OnFlipNormals(null, EventArgs.Empty);
                     break;
 
                 case "view_from_camera":
                     if (args.obj is CameraObject cam)
                     {
-                        // TODO: Implement view from camera
                         _statusLabel.Text = $"View from {cam.Name}";
                     }
                     break;
@@ -631,7 +1352,7 @@ namespace Deep3DStudio
             previewDialog.Destroy();
         }
 
-        private void OnOpenSettings(object sender, EventArgs e)
+        private void OnOpenSettings(object? sender, EventArgs e)
         {
             var dlg = new SettingsDialog(this);
             if (dlg.Run() == (int)ResponseType.Ok)
@@ -653,9 +1374,10 @@ namespace Deep3DStudio
             _viewport.QueueDraw();
         }
 
-        private void OnAddImages(object sender, EventArgs e)
+        private void OnAddImages(object? sender, EventArgs e)
         {
-            var fc = new FileChooserDialog("Choose Images", this, FileChooserAction.Open, "Cancel", ResponseType.Cancel, "Open", ResponseType.Accept);
+            var fc = new FileChooserDialog("Choose Images", this, FileChooserAction.Open,
+                "Cancel", ResponseType.Cancel, "Open", ResponseType.Accept);
             fc.SelectMultiple = true;
 
             var filter = new FileFilter();
@@ -685,7 +1407,7 @@ namespace Deep3DStudio
             fc.Destroy();
         }
 
-        private async void OnRunInference(object sender, EventArgs e)
+        private async void OnRunInference(object? sender, EventArgs e)
         {
             if (_imagePaths.Count < 2)
             {
@@ -700,7 +1422,6 @@ namespace Deep3DStudio
 
             try
             {
-                // 1. Dust3r (Common)
                 _statusLabel.Text = "Estimating Geometry (Dust3r)...";
                 var result = await Task.Run(() => _inference.ReconstructScene(_imagePaths));
 
@@ -710,11 +1431,9 @@ namespace Deep3DStudio
                     return;
                 }
 
-                // Store result and populate depth data
                 _lastSceneResult = result;
                 PopulateDepthData(result);
 
-                // Clear old scene objects
                 _sceneGraph.Clear();
 
                 if (workflow == "Dust3r (Fast)")
@@ -727,16 +1446,14 @@ namespace Deep3DStudio
                          return mesher.GenerateMesh(grid, min, size, 0.5f);
                     });
 
-                    // Add mesh to scene graph
                     var meshObj = new MeshObject("Reconstructed Mesh", meshedResult);
                     _sceneGraph.AddObject(meshObj);
 
-                    // Add cameras to scene graph
                     AddCamerasToScene(result);
 
                     _statusLabel.Text = "Dust3r & Meshing Complete.";
                 }
-                else // NeRF
+                else
                 {
                     _statusLabel.Text = "Initializing NeRF Voxel Grid...";
                     var nerf = new VoxelGridNeRF();
@@ -753,20 +1470,16 @@ namespace Deep3DStudio
                          return nerf.GetMesh(GetMesher(AppSettings.Instance.MeshingAlgo));
                     });
 
-                    // Add mesh to scene graph
                     var meshObj = new MeshObject("NeRF Mesh", nerfMesh);
                     _sceneGraph.AddObject(meshObj);
 
-                    // Add cameras to scene graph
                     AddCamerasToScene(result);
 
                     _statusLabel.Text = "NeRF Complete.";
                 }
 
-                // Refresh tree view
                 _sceneTreeView.RefreshTree();
 
-                // Update statistics
                 var (meshes, pcs, cams, verts, tris) = _sceneGraph.GetStatistics();
                 _statusLabel.Text += $" | {meshes} meshes, {cams} cameras, {verts:N0} vertices";
             }
