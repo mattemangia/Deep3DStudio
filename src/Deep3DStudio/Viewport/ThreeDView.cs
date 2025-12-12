@@ -1365,8 +1365,8 @@ namespace Deep3DStudio.Viewport
             }
             else if (args.Event.Button == 2 || (args.Event.Button == 1 && (args.Event.State & Gdk.ModifierType.ShiftMask) != 0))
             {
-                // Pan with middle mouse or Shift+Left (Note: Shift+Left collides with multiple select, but panning usually requires drag)
-                // We'll prioritize panning if Shift is held and mouse moves
+                // Pan with middle mouse or Shift+Left.
+                // Prioritize panning over selection if Shift is held and drag initiates.
                 _isPanning = true;
                 _lastMousePos = new Point((int)args.Event.X, (int)args.Event.Y);
             }
@@ -1439,8 +1439,8 @@ namespace Deep3DStudio.Viewport
             }
             else if (_isDragging && !_isPanning)
             {
-                // Rotate view if not dragging a handle and not selecting
-                // But in Select mode, left drag should probably still rotate view unless box selecting (which isn't implemented)
+                // Rotate view if not dragging a handle and not selecting.
+                // In Select mode, left drag rotates the view (box selection is not implemented).
 
                 int deltaX = x - _lastMousePos.X;
                 int deltaY = y - _lastMousePos.Y;

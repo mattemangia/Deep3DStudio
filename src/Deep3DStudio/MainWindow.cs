@@ -1186,20 +1186,16 @@ namespace Deep3DStudio
         private void OnSetRealSizeClicked(object? sender, EventArgs e)
         {
             var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+
+            // If no selection, apply to all meshes in the scene
             if (selectedMeshes.Count == 0)
             {
-                // If nothing selected, maybe assume all meshes?
-                // For now, require selection.
-                // Or better: Use scene bounds if nothing selected.
-
                 var allMeshes = _sceneGraph.GetObjectsOfType<MeshObject>().ToList();
                 if (allMeshes.Count == 0)
                 {
                     ShowMessage("No meshes found to scale.");
                     return;
                 }
-
-                // Use all meshes
                 selectedMeshes = allMeshes;
             }
 
@@ -1228,35 +1224,17 @@ namespace Deep3DStudio
                 float factor = dlg.RealScaleFactor;
                 if (Math.Abs(factor - 1.0f) > 0.0001f)
                 {
-                    // Apply scale to selected objects
-                    // Note: We are scaling the transform, not the mesh data directly,
-                    // unless we want to "bake" it.
-                    // To ensure other software understands the size (export),
-                    // we should probably modify the MeshData vertices or ensure Export applies transform.
-                    // Let's modify the objects' scale property for non-destructive editing first,
-                    // BUT user said "other software needs to understand".
-                    // Usually export uses World Transform.
-                    // However, MeshObject.Scale is local.
-                    // Let's just ApplyTransform to vertices to be safe and permanent.
-
-                    // Center of scaling:
-                    var center = (min + max) * 0.5f;
+                    // Apply scale to selected objects.
+                    // We apply the transform directly to the mesh vertices ("baking" the scale)
+                    // to ensure that exported models retain the correct physical dimensions
+                    // regardless of the target software's handling of hierarchy transforms.
 
                     foreach (var meshObj in selectedMeshes)
                     {
-                        // To scale relative to the selection center, we translate to origin, scale, translate back
-                        // But simpler: just scale the mesh vertices in place.
-                        // Matrix4.CreateScale(factor)
-
-                        // We will just update the MeshData directly so it persists
                         var matrix = OpenTK.Mathematics.Matrix4.CreateScale(factor);
                         meshObj.MeshData.ApplyTransform(matrix);
 
-                        // Also update position if we want to keep relative positions?
-                        // If we scale vertices, we don't need to move the object position unless it's offset.
-                        // Actually, if we scale each mesh individually, they might drift apart if they are separate.
-                        // To scale the whole "Scene" correctly, we need to scale their positions too.
-
+                        // Update position to maintain relative distances between objects
                         meshObj.Position *= factor;
                         meshObj.UpdateBounds();
                     }
