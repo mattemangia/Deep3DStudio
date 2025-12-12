@@ -33,7 +33,6 @@ namespace Deep3DStudio.Meshing
             });
 
             // 2. Smooth the Vector Field
-            // This is the key "Poisson" benefit: filtering normals before reconstruction.
             // We apply a few passes of box blur to the vector field.
             int smoothingPasses = 2;
             for (int i = 0; i < smoothingPasses; i++)
@@ -43,7 +42,9 @@ namespace Deep3DStudio.Meshing
 
             // 3. Compute Divergence of the Vector Field
             // div V = dVx/dx + dVy/dy + dVz/dz
-            float[,,] divergence = new float[w, h, d];
+            // We negate the divergence because we are solving Negative Laplacian (-L) * phi = -div V
+            // -L is SPD, which is required for CG.
+            float[,,] negDivergence = new float[w, h, d];
             Parallel.For(1, w - 1, x =>
             {
                 for (int y = 1; y < h - 1; y++)
@@ -54,21 +55,18 @@ namespace Deep3DStudio.Meshing
                         float dv_dy = (vectorField[x, y + 1, z].Y - vectorField[x, y - 1, z].Y) * 0.5f;
                         float dv_dz = (vectorField[x, y, z + 1].Z - vectorField[x, y, z - 1].Z) * 0.5f;
 
-                        divergence[x, y, z] = dv_dx + dv_dy + dv_dz;
+                        negDivergence[x, y, z] = -(dv_dx + dv_dy + dv_dz);
                     }
                 }
             });
 
-            // 4. Solve Poisson Equation: Laplacian(Phi) = Divergence
-            // using Conjugate Gradient (Matrix Free)
-            float[,,] phi = SolvePoissonCG(divergence, maxIterations: 50);
+            // 4. Solve Poisson Equation: -Laplacian(Phi) = -Divergence
+            // using Conjugate Gradient (Matrix Free) with Negative Laplacian to ensure SPD matrix.
+            float[,,] phi = SolvePoissonCG(negDivergence, maxIterations: 200);
 
-            // 5. Generate Mesh from the reconstructed potential field
-            // The isoLevel might need adjustment since Phi scale is different.
-            // However, since we reconstructed from gradients of a 0-1 grid, the scale should be roughly preserved.
-            // We use the original isoLevel as a starting point.
+            // 5. Generate Mesh
 
-            // We need a dummy color grid for now
+            // Dummy color grid
             Vector3[,,] colorGrid = new Vector3[w, h, d];
             Parallel.For(0, w, x => {
                 for(int y=0; y<h; y++)
@@ -76,8 +74,7 @@ namespace Deep3DStudio.Meshing
                         colorGrid[x,y,z] = new Vector3(1, 1, 1);
             });
 
-            // Use the simplified Marching Cubes from GeometryUtils
-            return GeometryUtils.MarchingCubes(phi, colorGrid, origin, new Vector3(voxelSize), 0.1f); // Lower iso for smoothed field
+            return GeometryUtils.MarchingCubes(phi, colorGrid, origin, new Vector3(voxelSize), isoLevel);
         }
 
         private Vector3[,,] SmoothVectorField(Vector3[,,] input)
@@ -85,7 +82,7 @@ namespace Deep3DStudio.Meshing
             int w = input.GetLength(0);
             int h = input.GetLength(1);
             int d = input.GetLength(2);
-            Vector3[,,] output = new Vector3[w, h, d];
+            Vector3[,,] output = (Vector3[,,])input.Clone(); // Copy input to preserve boundaries
 
             Parallel.For(1, w - 1, x =>
             {
@@ -131,8 +128,14 @@ namespace Deep3DStudio.Meshing
             {
                 if (rsold < 1e-10) break;
 
-                float[,,] Ap = ApplyLaplacian(p);
-                double alpha = rsold / Math.Max(1e-20, DotProduct(p, Ap));
+                // Apply Negative Laplacian here
+                float[,,] Ap = ApplyNegativeLaplacian(p);
+
+                double pAp = DotProduct(p, Ap);
+                // Safety check to prevent division by zero or negative if numerical instability occurs
+                if (pAp <= 1e-20) break;
+
+                double alpha = rsold / pAp;
 
                 // x = x + alpha * p
                 // r = r - alpha * Ap
@@ -171,18 +174,17 @@ namespace Deep3DStudio.Meshing
             return x;
         }
 
-        private float[,,] ApplyLaplacian(float[,,] u)
+        private float[,,] ApplyNegativeLaplacian(float[,,] u)
         {
             int w = u.GetLength(0);
             int h = u.GetLength(1);
             int d = u.GetLength(2);
             float[,,] result = new float[w, h, d];
 
-            // 7-point stencil Laplacian
-            // L(u) = u(x+1) + u(x-1) + u(y+1) + u(y-1) + u(z+1) + u(z-1) - 6u(xyz)
-            // Note: We solve L(u) = div.
-            // Wait, standard Poisson is Delta u = f.
-            // Discrete Laplacian is usually sum(neighbors) - 6*center.
+            // Negative Laplacian (-L)
+            // L(u) = neighbors - 6*center
+            // -L(u) = 6*center - neighbors
+            // This operator is Positive Definite on the grid (with Dirichlet BCs implied by fixed 0 boundaries).
 
             Parallel.For(1, w - 1, x =>
             {
@@ -190,11 +192,11 @@ namespace Deep3DStudio.Meshing
                 {
                     for (int z = 1; z < d - 1; z++)
                     {
-                        float val = u[x + 1, y, z] + u[x - 1, y, z] +
-                                    u[x, y + 1, z] + u[x, y - 1, z] +
-                                    u[x, y, z + 1] + u[x, y, z - 1] -
-                                    6.0f * u[x, y, z];
-                        result[x, y, z] = val;
+                        float sumNeighbors = u[x + 1, y, z] + u[x - 1, y, z] +
+                                             u[x, y + 1, z] + u[x, y - 1, z] +
+                                             u[x, y, z + 1] + u[x, y, z - 1];
+
+                        result[x, y, z] = 6.0f * u[x, y, z] - sumNeighbors;
                     }
                 }
             });
@@ -207,12 +209,10 @@ namespace Deep3DStudio.Meshing
             double sum = 0;
             object lockObj = new object();
 
-            // Basic accumulation. For very large grids, reduce overhead or use ThreadLocal.
             int w = a.GetLength(0);
             int h = a.GetLength(1);
             int d = a.GetLength(2);
 
-            // Using local sums to reduce lock contention
             Parallel.For(0, w, () => 0.0, (x, state, localSum) =>
             {
                 for (int y = 0; y < h; y++)
