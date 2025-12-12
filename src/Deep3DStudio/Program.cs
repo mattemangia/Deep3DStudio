@@ -24,7 +24,7 @@ namespace Deep3DStudio
             try
             {
                 var iconSet = ApplicationIcon.CreateIconSet();
-                Gtk.Window.SetDefaultIconList(iconSet);
+                Gtk.Window.DefaultIconList = iconSet;
                 Console.WriteLine("Application icon set successfully.");
             }
             catch (Exception ex)

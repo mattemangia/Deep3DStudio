@@ -97,8 +97,8 @@ namespace Deep3DStudio.Viewport
             var fontDesc = new FontDescription
             {
                 Family = FontFamily,
-                Size = FontSize * Pango.Scale.PangoScale,
-                Weight = FontWeight
+                Size = (int)(FontSize * Pango.Scale.PangoScale),
+                Weight = (Pango.Weight)FontWeight
             };
             layout.FontDescription = fontDesc;
             layout.SetText(text);
@@ -179,8 +179,8 @@ namespace Deep3DStudio.Viewport
                 var fontDesc = new FontDescription
                 {
                     Family = FontFamily,
-                    Size = FontSize * Pango.Scale.PangoScale,
-                    Weight = FontWeight
+                    Size = (int)(FontSize * Pango.Scale.PangoScale),
+                    Weight = (Pango.Weight)FontWeight
                 };
                 layout.FontDescription = fontDesc;
                 layout.SetText(text);

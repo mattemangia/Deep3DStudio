@@ -9,6 +9,7 @@ using Deep3DStudio.Meshing;
 using Deep3DStudio.UI;
 using Deep3DStudio.Scene;
 using Deep3DStudio.IO;
+using Deep3DStudio.Texturing;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Linq;
@@ -16,7 +17,7 @@ using Action = System.Action;
 
 namespace Deep3DStudio
 {
-    public class MainWindow : Window
+    public class MainWindow : Gtk.Window
     {
         private ThreeDView _viewport;
         private Label _statusLabel;
@@ -55,7 +56,7 @@ namespace Deep3DStudio
         private RadioMenuItem? _rotateMenuItem;
         private RadioMenuItem? _scaleMenuItem;
 
-        public MainWindow() : base(WindowType.Toplevel)
+        public MainWindow() : base(Gtk.WindowType.Toplevel)
         {
             this.Title = "Deep3D Studio";
 
@@ -435,6 +436,16 @@ namespace Deep3DStudio
             scaleItem.Activated += OnSetRealSizeClicked;
             meshOpsMenu.Append(scaleItem);
 
+            meshOpsMenu.Append(new SeparatorMenuItem());
+
+            var cleanupItem = new MenuItem("_Cleanup Mesh...");
+            cleanupItem.Activated += OnMeshCleanupClicked;
+            meshOpsMenu.Append(cleanupItem);
+
+            var bakeItem = new MenuItem("_Bake Textures...");
+            bakeItem.Activated += OnBakeTexturesClicked;
+            meshOpsMenu.Append(bakeItem);
+
             editMenu.Append(meshOpsMenuItem);
 
             menuBar.Append(editMenuItem);
@@ -645,6 +656,14 @@ namespace Deep3DStudio
 
             var alignBtn = CreateIconButton("align", "Align (ICP)", btnSize, () => OnAlignClicked(null, EventArgs.Empty));
             vbox.PackStart(alignBtn, false, false, 1);
+
+            vbox.PackStart(new Separator(Orientation.Horizontal), false, false, 5);
+
+            var cleanupBtn = CreateIconButton("cleanup", "Cleanup Mesh", btnSize, () => OnMeshCleanupClicked(null, EventArgs.Empty));
+            vbox.PackStart(cleanupBtn, false, false, 1);
+
+            var bakeBtn = CreateIconButton("bake", "Bake Textures", btnSize, () => OnBakeTexturesClicked(null, EventArgs.Empty));
+            vbox.PackStart(bakeBtn, false, false, 1);
 
             return vbox;
         }
@@ -897,6 +916,40 @@ namespace Deep3DStudio
                     cr.MoveTo(s - 12, s - 9);
                     cr.LineTo(s - 9, s - 13);
                     cr.Stroke();
+                    break;
+
+                case "cleanup":
+                    // Broom icon
+                    cr.LineWidth = 2;
+                    // Handle
+                    cr.SetSourceRGB(0.6, 0.4, 0.2);
+                    cr.MoveTo(s - 4, 4);
+                    cr.LineTo(s / 2, s / 2);
+                    cr.Stroke();
+                    // Bristles
+                    cr.SetSourceRGB(0.9, 0.8, 0.4);
+                    cr.MoveTo(s / 2, s / 2);
+                    cr.LineTo(4, s - 8);
+                    cr.LineTo(8, s - 4);
+                    cr.ClosePath();
+                    cr.Fill();
+                    break;
+
+                case "bake":
+                    // Texture/image icon
+                    cr.LineWidth = 1.5;
+                    cr.SetSourceRGB(0.8, 0.8, 0.8);
+                    cr.Rectangle(4, 4, s - 8, s - 8);
+                    cr.Stroke();
+                    // Mountains/Sun
+                    cr.MoveTo(4, s - 8);
+                    cr.LineTo(s / 3, s / 2);
+                    cr.LineTo(s / 2, s - 6);
+                    cr.LineTo(2 * s / 3, s / 3);
+                    cr.LineTo(s - 4, s - 8);
+                    cr.Stroke();
+                    cr.Arc(s - 8, 8, 2, 0, 2 * Math.PI);
+                    cr.Fill();
                     break;
 
                 default:
@@ -1576,6 +1629,148 @@ namespace Deep3DStudio
             dlg.Destroy();
         }
 
+        private void OnMeshCleanupClicked(object? sender, EventArgs e)
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count == 0)
+            {
+                ShowMessage("Please select a mesh first.");
+                return;
+            }
+
+            // If multiple selected, ask to process first or all? For now process all.
+            int processed = 0;
+            foreach (var meshObj in selectedMeshes)
+            {
+                var dlg = new MeshCleanupDialog(this, meshObj.VertexCount, meshObj.TriangleCount);
+                if (dlg.Run() == (int)ResponseType.Ok)
+                {
+                    _statusLabel.Text = $"Cleaning mesh {meshObj.Name}...";
+                    while (Application.EventsPending()) Application.RunIteration();
+
+                    meshObj.MeshData = MeshCleaningTools.CleanupMesh(meshObj.MeshData, dlg.Options);
+                    meshObj.UpdateBounds();
+                    processed++;
+                }
+                dlg.Destroy();
+            }
+
+            if (processed > 0)
+            {
+                _viewport.QueueDraw();
+                _statusLabel.Text = $"Cleaned {processed} mesh(es)";
+                _sceneTreeView.RefreshTree();
+            }
+        }
+
+        private async void OnBakeTexturesClicked(object? sender, EventArgs e)
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count == 0)
+            {
+                ShowMessage("Please select a mesh to bake textures onto.");
+                return;
+            }
+
+            var meshObj = selectedMeshes[0]; // Process first one for now
+            var cameras = _sceneGraph.GetObjectsOfType<CameraObject>().ToList();
+
+            if (cameras.Count == 0)
+            {
+                ShowMessage("No cameras found in scene. Cannot bake textures from images.");
+                return;
+            }
+
+            var dlg = new TextureBakingDialog(this, cameras);
+            if (dlg.Run() == (int)ResponseType.Ok)
+            {
+                // Ask for output file if we are exporting
+                string exportPath = "";
+                if (dlg.ExportOptions.Format != TexturedMeshFormat.OBJ &&
+                    dlg.ExportOptions.Format != TexturedMeshFormat.GLTF &&
+                    dlg.ExportOptions.Format != TexturedMeshFormat.GLB &&
+                    dlg.ExportOptions.Format != TexturedMeshFormat.FBX_ASCII &&
+                    dlg.ExportOptions.Format != TexturedMeshFormat.PLY)
+                {
+                     // Should not happen if dialog returns valid format
+                }
+
+                var fc = new FileChooserDialog("Export Textured Mesh", this, FileChooserAction.Save,
+                    "Cancel", ResponseType.Cancel, "Save", ResponseType.Accept);
+
+                string ext = dlg.ExportOptions.Format switch
+                {
+                    TexturedMeshFormat.OBJ => ".obj",
+                    TexturedMeshFormat.GLTF => ".gltf",
+                    TexturedMeshFormat.GLB => ".glb",
+                    TexturedMeshFormat.FBX_ASCII => ".fbx",
+                    TexturedMeshFormat.PLY => ".ply",
+                    _ => ".obj"
+                };
+
+                fc.CurrentName = meshObj.Name + ext;
+
+                if (fc.Run() == (int)ResponseType.Accept)
+                {
+                    exportPath = fc.Filename;
+                }
+                fc.Destroy();
+
+                if (string.IsNullOrEmpty(exportPath)) return;
+
+                _statusLabel.Text = "Baking textures... This may take a while.";
+                while (Application.EventsPending()) Application.RunIteration();
+
+                try
+                {
+                    var baker = new TextureBaker();
+                    // Copy settings
+                    baker.TextureSize = dlg.BakerSettings.TextureSize;
+                    baker.IslandMargin = dlg.BakerSettings.IslandMargin;
+                    baker.BlendMode = dlg.BakerSettings.BlendMode;
+                    baker.MinViewAngleCosine = dlg.BakerSettings.MinViewAngleCosine;
+                    baker.BlendSeams = dlg.BakerSettings.BlendSeams;
+                    baker.DilationPasses = dlg.BakerSettings.DilationPasses;
+
+                    var uvData = await Task.Run(() => baker.GenerateUVs(meshObj.MeshData, dlg.UVMethod));
+
+                    BakedTextureResult? baked = null;
+
+                    if (dlg.BakeFromCameras)
+                    {
+                         baked = await Task.Run(() => baker.BakeTextures(meshObj.MeshData, uvData, dlg.SelectedCameras));
+                    }
+                    else
+                    {
+                        var tex = await Task.Run(() => baker.BakeVertexColorsToTexture(meshObj.MeshData, uvData));
+                        baked = new BakedTextureResult
+                        {
+                            DiffuseMap = tex,
+                            TextureSize = baker.TextureSize,
+                            WeightMap = new float[baker.TextureSize, baker.TextureSize]
+                        };
+                    }
+
+                    _statusLabel.Text = "Exporting textured mesh...";
+                    while (Application.EventsPending()) Application.RunIteration();
+
+                    await Task.Run(() => TexturedMeshExporter.Export(exportPath, meshObj.MeshData, uvData, baked, dlg.ExportOptions));
+
+                    baked?.Dispose();
+
+                    _statusLabel.Text = $"Exported textured mesh to {exportPath}";
+                    ShowMessage($"Baking and Export Complete!\nSaved to: {exportPath}");
+                }
+                catch (Exception ex)
+                {
+                    ShowMessage($"Error during baking: {ex.Message}");
+                    Console.WriteLine(ex);
+                    _statusLabel.Text = "Baking failed.";
+                }
+            }
+            dlg.Destroy();
+        }
+
         #endregion
 
         #region Scene Event Handlers
@@ -1647,6 +1842,14 @@ namespace Deep3DStudio
 
                 case "flip_normals":
                     OnFlipNormals(null, EventArgs.Empty);
+                    break;
+
+                case "cleanup_mesh":
+                    OnMeshCleanupClicked(null, EventArgs.Empty);
+                    break;
+
+                case "bake_textures":
+                    OnBakeTexturesClicked(null, EventArgs.Empty);
                     break;
 
                 case "view_from_camera":
