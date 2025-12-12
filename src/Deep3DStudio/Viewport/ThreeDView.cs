@@ -739,6 +739,8 @@ namespace Deep3DStudio.Viewport
 
         private void DrawPointCloud(MeshData mesh, bool isSelected)
         {
+            if (mesh.Vertices.Count == 0) return;
+
             var settings = IniSettings.Instance;
             GL.PointSize(isSelected ? 5.0f : 3.0f);
 
@@ -748,10 +750,12 @@ namespace Deep3DStudio.Viewport
             }
             else
             {
+                bool hasColors = mesh.Colors.Count >= mesh.Vertices.Count;
+
                 GL.Begin(PrimitiveType.Points);
                 for (int i = 0; i < mesh.Vertices.Count; i++)
                 {
-                    var c = mesh.Colors[i];
+                    Vector3 c = hasColors ? mesh.Colors[i] : new Vector3(1, 1, 1);
                     if (isSelected)
                     {
                         GL.Color3(Math.Min(1f, c.X + 0.3f), Math.Min(1f, c.Y + 0.3f), c.Z);
@@ -798,13 +802,25 @@ namespace Deep3DStudio.Viewport
 
         private void DrawPointCloudObject(PointCloudObject pc)
         {
+            if (pc.Points.Count == 0) return;
+
             GL.PointSize(pc.PointSize);
             GL.Begin(PrimitiveType.Points);
 
+            bool hasColors = pc.Colors.Count >= pc.Points.Count;
+
             for (int i = 0; i < pc.Points.Count; i++)
             {
-                var c = pc.Colors[i];
-                GL.Color3(c.X, c.Y, c.Z);
+                if (hasColors)
+                {
+                    var c = pc.Colors[i];
+                    GL.Color3(c.X, c.Y, c.Z);
+                }
+                else
+                {
+                    // Default white color if no colors available
+                    GL.Color3(1.0f, 1.0f, 1.0f);
+                }
                 GL.Vertex3(pc.Points[i]);
             }
 
