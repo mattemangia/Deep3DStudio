@@ -2481,14 +2481,26 @@ namespace Deep3DStudio
 
         private void PopulateDepthData(SceneResult result)
         {
-            if (result.Poses.Count == 0) return;
+            if (result.Poses.Count == 0 || result.Meshes.Count == 0) return;
 
-            for (int i = 0; i < result.Poses.Count && i < result.Meshes.Count; i++)
+            // SfM produces one combined mesh with all points, so use the same mesh for all cameras
+            // Dust3r might produce per-camera meshes, so handle both cases
+            var combinedMesh = result.Meshes[0];
+            if (result.Meshes.Count > 1)
+            {
+                // Combine all meshes if there are multiple
+                combinedMesh = new MeshData();
+                foreach (var m in result.Meshes)
+                {
+                    combinedMesh.Vertices.AddRange(m.Vertices);
+                    combinedMesh.Colors.AddRange(m.Colors);
+                }
+            }
+
+            for (int i = 0; i < result.Poses.Count; i++)
             {
                 var pose = result.Poses[i];
-                var mesh = result.Meshes[i];
-
-                var depthMap = ExtractDepthMap(mesh, pose.Width, pose.Height, pose.WorldToCamera);
+                var depthMap = ExtractDepthMap(combinedMesh, pose.Width, pose.Height, pose.WorldToCamera);
                 _imageBrowser.SetDepthData(i, depthMap);
             }
 
