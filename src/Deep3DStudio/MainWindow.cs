@@ -6,8 +6,10 @@ using Deep3DStudio.Model;
 using Deep3DStudio.Configuration;
 using Deep3DStudio.Meshing;
 using Deep3DStudio.UI;
+using Deep3DStudio.Scene;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using System.Linq;
 
 namespace Deep3DStudio
 {
@@ -18,7 +20,11 @@ namespace Deep3DStudio
         private Model.Dust3rInference _inference;
         private List<string> _imagePaths = new List<string>();
         private ImageBrowserPanel _imageBrowser;
-        private SceneResult? _lastSceneResult; // Store last reconstruction for depth visualization
+        private SceneResult? _lastSceneResult;
+
+        // Scene Management
+        private SceneGraph _sceneGraph;
+        private SceneTreeView _sceneTreeView;
 
         // UI References for updates
         private ComboBoxText _workflowCombo;
@@ -28,11 +34,19 @@ namespace Deep3DStudio
         private ToggleToolButton _rgbColorToggle;
         private ToggleToolButton _depthColorToggle;
 
+        // Gizmo toolbar buttons
+        private RadioToolButton? _translateBtn;
+        private RadioToolButton? _rotateBtn;
+        private RadioToolButton? _scaleBtn;
+
         public MainWindow() : base(WindowType.Toplevel)
         {
-            this.Title = "Deep3D Studio - Dust3r & NeRF";
-            this.SetDefaultSize(1200, 800);
+            this.Title = "Deep3D Studio - Enhanced";
+            this.SetDefaultSize(1400, 900);
             this.DeleteEvent += (o, args) => Application.Quit();
+
+            // Initialize Scene Graph
+            _sceneGraph = new SceneGraph();
 
             var mainVBox = new Box(Orientation.Vertical, 0);
             this.Add(mainVBox);
@@ -41,21 +55,42 @@ namespace Deep3DStudio
             var toolbar = CreateToolbar();
             mainVBox.PackStart(toolbar, false, false, 0);
 
-            // 2. Main Content (Viewport + Side Panel)
+            // 2. Main Content (Tree + Viewport + Side Panel)
             var hPaned = new Paned(Orientation.Horizontal);
             mainVBox.PackStart(hPaned, true, true, 0);
 
+            // Left: Scene Tree View
+            var leftPanel = new Box(Orientation.Vertical, 0);
+            leftPanel.SetSizeRequest(250, -1);
+
+            _sceneTreeView = new SceneTreeView();
+            _sceneTreeView.SetSceneGraph(_sceneGraph);
+            _sceneTreeView.ObjectSelected += OnSceneObjectSelected;
+            _sceneTreeView.ObjectDoubleClicked += OnSceneObjectDoubleClicked;
+            _sceneTreeView.ObjectActionRequested += OnSceneObjectAction;
+            leftPanel.PackStart(_sceneTreeView, true, true, 0);
+
+            hPaned.Pack1(leftPanel, false, false);
+
+            // Center + Right: Viewport + Side Panel
+            var rightPaned = new Paned(Orientation.Horizontal);
+            hPaned.Pack2(rightPaned, true, false);
+
             // 3D Viewport
             _viewport = new ThreeDView();
-            hPaned.Pack1(_viewport, true, false);
+            _viewport.SetSceneGraph(_sceneGraph);
+            _viewport.ObjectPicked += OnViewportObjectPicked;
+            rightPaned.Pack1(_viewport, true, false);
 
-            // 3. Status Bar (initialize before CreateSidePanel which uses _statusLabel)
+            // 3. Status Bar (initialize before CreateSidePanel)
             _statusLabel = new Label("Ready");
 
             // Side Panel
             var sidePanel = CreateSidePanel();
-            hPaned.Pack2(sidePanel, false, false);
-            hPaned.Position = 900;
+            rightPaned.Pack2(sidePanel, false, false);
+            rightPaned.Position = 900;
+            hPaned.Position = 250;
+
             _statusLabel.Halign = Align.Start;
             var statusBox = new Box(Orientation.Horizontal, 5);
             statusBox.PackStart(_statusLabel, true, true, 5);
@@ -74,7 +109,6 @@ namespace Deep3DStudio
             int iconSize = 24;
 
             // Open Files
-            // ToolButton(Widget icon, string label)
             var openBtn = new ToolButton(AppIconFactory.GenerateIcon("open", iconSize), "Open Images");
             openBtn.TooltipText = "Load input images for reconstruction";
             openBtn.Clicked += OnAddImages;
@@ -91,9 +125,6 @@ namespace Deep3DStudio
             toolbar.Insert(new SeparatorToolItem(), -1);
 
             // View Toggles
-            // ToggleToolButton constructors are weird in GtkSharp?
-            // Usually: new ToggleToolButton() -> then set IconWidget and Label.
-
             _meshToggle = new ToggleToolButton();
             _meshToggle.IconWidget = AppIconFactory.GenerateIcon("mesh", iconSize);
             _meshToggle.Label = "Mesh";
@@ -145,7 +176,7 @@ namespace Deep3DStudio
                 }
                 else if (!_depthColorToggle.Active)
                 {
-                    _rgbColorToggle.Active = true; // Keep one active
+                    _rgbColorToggle.Active = true;
                 }
             };
             toolbar.Insert(_rgbColorToggle, -1);
@@ -164,10 +195,52 @@ namespace Deep3DStudio
                 }
                 else if (!_rgbColorToggle.Active)
                 {
-                    _depthColorToggle.Active = true; // Keep one active
+                    _depthColorToggle.Active = true;
                 }
             };
             toolbar.Insert(_depthColorToggle, -1);
+
+            toolbar.Insert(new SeparatorToolItem(), -1);
+
+            // Transform Tool Buttons (Radio Group)
+            _translateBtn = new RadioToolButton(new GLib.SList(IntPtr.Zero));
+            _translateBtn.IconWidget = new Image(Stock.Fullscreen, IconSize.SmallToolbar);
+            _translateBtn.Label = "Move";
+            _translateBtn.TooltipText = "Move Tool (W)";
+            _translateBtn.Active = true;
+            _translateBtn.Toggled += (s, e) => {
+                if (_translateBtn.Active)
+                    _viewport.SetGizmoMode(GizmoMode.Translate);
+            };
+            toolbar.Insert(_translateBtn, -1);
+
+            _rotateBtn = new RadioToolButton(_translateBtn.Group);
+            _rotateBtn.IconWidget = new Image(Stock.Refresh, IconSize.SmallToolbar);
+            _rotateBtn.Label = "Rotate";
+            _rotateBtn.TooltipText = "Rotate Tool (E)";
+            _rotateBtn.Toggled += (s, e) => {
+                if (_rotateBtn.Active)
+                    _viewport.SetGizmoMode(GizmoMode.Rotate);
+            };
+            toolbar.Insert(_rotateBtn, -1);
+
+            _scaleBtn = new RadioToolButton(_translateBtn.Group);
+            _scaleBtn.IconWidget = new Image(Stock.ZoomFit, IconSize.SmallToolbar);
+            _scaleBtn.Label = "Scale";
+            _scaleBtn.TooltipText = "Scale Tool (R)";
+            _scaleBtn.Toggled += (s, e) => {
+                if (_scaleBtn.Active)
+                    _viewport.SetGizmoMode(GizmoMode.Scale);
+            };
+            toolbar.Insert(_scaleBtn, -1);
+
+            toolbar.Insert(new SeparatorToolItem(), -1);
+
+            // Focus button
+            var focusBtn = new ToolButton(Stock.Home, "Focus");
+            focusBtn.TooltipText = "Focus on Selection (F)";
+            focusBtn.Clicked += (s, e) => _viewport.FocusOnSelection();
+            toolbar.Insert(focusBtn, -1);
 
             toolbar.Insert(new SeparatorToolItem(), -1);
 
@@ -198,12 +271,62 @@ namespace Deep3DStudio
             vbox.Margin = 10;
             vbox.SetSizeRequest(280, -1);
 
-            var label = new Label("Mesh Tools");
-            label.Attributes = new Pango.AttrList();
-            label.Attributes.Insert(new Pango.AttrWeight(Pango.Weight.Bold));
-            vbox.PackStart(label, false, false, 5);
+            // Mesh Operations Section
+            var meshOpsLabel = new Label("Mesh Operations");
+            meshOpsLabel.Attributes = new Pango.AttrList();
+            meshOpsLabel.Attributes.Insert(new Pango.AttrWeight(Pango.Weight.Bold));
+            vbox.PackStart(meshOpsLabel, false, false, 5);
+
+            // Decimate button
+            var decimateBtn = new Button("Decimate (50%)");
+            decimateBtn.TooltipText = "Reduce mesh vertex count";
+            decimateBtn.Clicked += OnDecimateClicked;
+            vbox.PackStart(decimateBtn, false, false, 2);
+
+            // Smooth button
+            var smoothBtn = new Button("Smooth");
+            smoothBtn.TooltipText = "Apply Laplacian smoothing";
+            smoothBtn.Clicked += OnSmoothClicked;
+            vbox.PackStart(smoothBtn, false, false, 2);
+
+            // Optimize button
+            var optimizeBtn = new Button("Optimize");
+            optimizeBtn.TooltipText = "Remove duplicate vertices";
+            optimizeBtn.Clicked += OnOptimizeClicked;
+            vbox.PackStart(optimizeBtn, false, false, 2);
+
+            // Split button
+            var splitBtn = new Button("Split by Connectivity");
+            splitBtn.TooltipText = "Split mesh into connected parts";
+            splitBtn.Clicked += OnSplitClicked;
+            vbox.PackStart(splitBtn, false, false, 2);
+
+            vbox.PackStart(new Separator(Orientation.Horizontal), false, false, 5);
+
+            // Merge/Align Section
+            var alignLabel = new Label("Merge & Align");
+            alignLabel.Attributes = new Pango.AttrList();
+            alignLabel.Attributes.Insert(new Pango.AttrWeight(Pango.Weight.Bold));
+            vbox.PackStart(alignLabel, false, false, 5);
+
+            var mergeBtn = new Button("Merge Selected");
+            mergeBtn.TooltipText = "Merge selected meshes into one";
+            mergeBtn.Clicked += OnMergeClicked;
+            vbox.PackStart(mergeBtn, false, false, 2);
+
+            var alignBtn = new Button("Align (ICP)");
+            alignBtn.TooltipText = "Align selected to first using ICP";
+            alignBtn.Clicked += OnAlignClicked;
+            vbox.PackStart(alignBtn, false, false, 2);
+
+            vbox.PackStart(new Separator(Orientation.Horizontal), false, false, 5);
 
             // Tools with 3D handles
+            var toolsLabel = new Label("Crop Tools");
+            toolsLabel.Attributes = new Pango.AttrList();
+            toolsLabel.Attributes.Insert(new Pango.AttrWeight(Pango.Weight.Bold));
+            vbox.PackStart(toolsLabel, false, false, 5);
+
             var cropBtn = new Button("Toggle Crop Box");
             cropBtn.Clicked += (s, e) => {
                  _viewport.ToggleCropBox(true);
@@ -239,6 +362,268 @@ namespace Deep3DStudio
             return vbox;
         }
 
+        #region Mesh Operation Handlers
+
+        private void OnDecimateClicked(object? sender, EventArgs e)
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count == 0)
+            {
+                ShowMessage("Please select a mesh first.");
+                return;
+            }
+
+            foreach (var meshObj in selectedMeshes)
+            {
+                meshObj.MeshData = MeshOperations.Decimate(meshObj.MeshData, 0.5f);
+                meshObj.UpdateBounds();
+            }
+
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Decimated {selectedMeshes.Count} mesh(es)";
+        }
+
+        private void OnSmoothClicked(object? sender, EventArgs e)
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count == 0)
+            {
+                ShowMessage("Please select a mesh first.");
+                return;
+            }
+
+            foreach (var meshObj in selectedMeshes)
+            {
+                meshObj.MeshData = MeshOperations.SmoothTaubin(meshObj.MeshData, 2);
+                meshObj.UpdateBounds();
+            }
+
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Smoothed {selectedMeshes.Count} mesh(es)";
+        }
+
+        private void OnOptimizeClicked(object? sender, EventArgs e)
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count == 0)
+            {
+                ShowMessage("Please select a mesh first.");
+                return;
+            }
+
+            int totalRemoved = 0;
+            foreach (var meshObj in selectedMeshes)
+            {
+                int before = meshObj.VertexCount;
+                meshObj.MeshData = MeshOperations.Optimize(meshObj.MeshData);
+                meshObj.UpdateBounds();
+                totalRemoved += before - meshObj.VertexCount;
+            }
+
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Optimized: removed {totalRemoved} duplicate vertices";
+        }
+
+        private void OnSplitClicked(object? sender, EventArgs e)
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count == 0)
+            {
+                ShowMessage("Please select a mesh first.");
+                return;
+            }
+
+            int partsCreated = 0;
+            foreach (var meshObj in selectedMeshes)
+            {
+                var parts = MeshOperations.SplitByConnectivity(meshObj.MeshData);
+                if (parts.Count > 1)
+                {
+                    // Remove original
+                    _sceneGraph.RemoveObject(meshObj);
+
+                    // Add parts
+                    for (int i = 0; i < parts.Count; i++)
+                    {
+                        var partObj = new MeshObject($"{meshObj.Name}_Part{i + 1}", parts[i]);
+                        _sceneGraph.AddObject(partObj);
+                        partsCreated++;
+                    }
+                }
+            }
+
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Split into {partsCreated} parts";
+        }
+
+        private void OnMergeClicked(object? sender, EventArgs e)
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count < 2)
+            {
+                ShowMessage("Please select at least 2 meshes to merge.");
+                return;
+            }
+
+            var meshDataList = selectedMeshes.Select(m => m.MeshData).ToList();
+            var merged = MeshOperations.MergeWithWelding(meshDataList);
+
+            // Remove originals
+            foreach (var m in selectedMeshes)
+                _sceneGraph.RemoveObject(m);
+
+            // Add merged
+            var mergedObj = new MeshObject("Merged Mesh", merged);
+            _sceneGraph.AddObject(mergedObj);
+            _sceneGraph.Select(mergedObj);
+
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Merged {selectedMeshes.Count} meshes";
+        }
+
+        private void OnAlignClicked(object? sender, EventArgs e)
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count < 2)
+            {
+                ShowMessage("Please select at least 2 meshes to align.");
+                return;
+            }
+
+            var target = selectedMeshes[0];
+
+            for (int i = 1; i < selectedMeshes.Count; i++)
+            {
+                var source = selectedMeshes[i];
+                var transform = MeshOperations.AlignICP(source.MeshData, target.MeshData);
+                source.MeshData.ApplyTransform(transform);
+                source.UpdateBounds();
+            }
+
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Aligned {selectedMeshes.Count - 1} mesh(es) to target";
+        }
+
+        #endregion
+
+        #region Scene Event Handlers
+
+        private void OnSceneObjectSelected(object? sender, SceneObject obj)
+        {
+            _statusLabel.Text = $"Selected: {obj.Name}";
+
+            if (obj is MeshObject mesh)
+            {
+                _statusLabel.Text += $" ({mesh.VertexCount:N0} vertices, {mesh.TriangleCount:N0} triangles)";
+            }
+            else if (obj is CameraObject cam)
+            {
+                _statusLabel.Text += $" ({cam.ImageWidth}x{cam.ImageHeight})";
+            }
+        }
+
+        private void OnSceneObjectDoubleClicked(object? sender, SceneObject obj)
+        {
+            // Focus on double-clicked object
+            _sceneGraph.Select(obj);
+            _viewport.FocusOnSelection();
+
+            // If it's a camera, optionally show the image
+            if (obj is CameraObject cam && !string.IsNullOrEmpty(cam.ImagePath))
+            {
+                // Could show image preview here
+            }
+        }
+
+        private void OnSceneObjectAction(object? sender, (SceneObject obj, string action) args)
+        {
+            switch (args.action)
+            {
+                case "refresh_viewport":
+                    _viewport.QueueDraw();
+                    break;
+
+                case "focus":
+                    if (args.obj != null)
+                    {
+                        _sceneGraph.Select(args.obj);
+                        _viewport.FocusOnSelection();
+                    }
+                    break;
+
+                case "decimate":
+                    OnDecimateClicked(null, EventArgs.Empty);
+                    break;
+
+                case "optimize":
+                    OnOptimizeClicked(null, EventArgs.Empty);
+                    break;
+
+                case "smooth":
+                    OnSmoothClicked(null, EventArgs.Empty);
+                    break;
+
+                case "split_connectivity":
+                    OnSplitClicked(null, EventArgs.Empty);
+                    break;
+
+                case "merge_meshes":
+                    OnMergeClicked(null, EventArgs.Empty);
+                    break;
+
+                case "align_meshes":
+                    OnAlignClicked(null, EventArgs.Empty);
+                    break;
+
+                case "flip_normals":
+                    if (args.obj is MeshObject meshObj)
+                    {
+                        meshObj.MeshData = MeshOperations.FlipNormals(meshObj.MeshData);
+                        _viewport.QueueDraw();
+                        _statusLabel.Text = "Flipped normals";
+                    }
+                    break;
+
+                case "view_from_camera":
+                    if (args.obj is CameraObject cam)
+                    {
+                        // TODO: Implement view from camera
+                        _statusLabel.Text = $"View from {cam.Name}";
+                    }
+                    break;
+
+                case "show_camera_image":
+                    if (args.obj is CameraObject camImg && !string.IsNullOrEmpty(camImg.ImagePath))
+                    {
+                        var entry = new ImageEntry { FilePath = camImg.ImagePath };
+                        var previewDialog = new ImagePreviewDialog(this, entry);
+                        previewDialog.Run();
+                        previewDialog.Destroy();
+                    }
+                    break;
+
+                case "add_group":
+                    var group = new GroupObject("New Group");
+                    _sceneGraph.AddObject(group);
+                    _sceneTreeView.RefreshTree();
+                    break;
+            }
+        }
+
+        private void OnViewportObjectPicked(object? sender, SceneObject? obj)
+        {
+            if (obj != null)
+            {
+                _sceneTreeView.SelectObject(obj);
+            }
+        }
+
+        #endregion
+
+        #region Other Event Handlers
+
         private void OnImageDoubleClicked(object? sender, ImageEntry entry)
         {
             var previewDialog = new ImagePreviewDialog(this, entry);
@@ -273,7 +658,6 @@ namespace Deep3DStudio
             var fc = new FileChooserDialog("Choose Images", this, FileChooserAction.Open, "Cancel", ResponseType.Cancel, "Open", ResponseType.Accept);
             fc.SelectMultiple = true;
 
-            // Add image file filter
             var filter = new FileFilter();
             filter.Name = "Image Files";
             filter.AddPattern("*.jpg");
@@ -305,9 +689,7 @@ namespace Deep3DStudio
         {
             if (_imagePaths.Count < 2)
             {
-                var md = new MessageDialog(this, DialogFlags.Modal, MessageType.Info, ButtonsType.Ok, "Please add at least 2 images.");
-                md.Run();
-                md.Destroy();
+                ShowMessage("Please add at least 2 images.");
                 return;
             }
 
@@ -328,23 +710,30 @@ namespace Deep3DStudio
                     return;
                 }
 
-                // Store result and populate depth data for image browser
+                // Store result and populate depth data
                 _lastSceneResult = result;
                 PopulateDepthData(result);
+
+                // Clear old scene objects
+                _sceneGraph.Clear();
 
                 if (workflow == "Dust3r (Fast)")
                 {
                     _statusLabel.Text = $"Meshing using {AppSettings.Instance.MeshingAlgo}...";
 
                     var meshedResult = await Task.Run(() => {
-                         // 1. Voxelize
                          var (grid, min, size) = VoxelizePoints(result.Meshes);
-                         // 2. Mesh
                          IMesher mesher = GetMesher(AppSettings.Instance.MeshingAlgo);
                          return mesher.GenerateMesh(grid, min, size, 0.5f);
                     });
 
-                    _viewport.SetMeshes(new List<MeshData> { meshedResult });
+                    // Add mesh to scene graph
+                    var meshObj = new MeshObject("Reconstructed Mesh", meshedResult);
+                    _sceneGraph.AddObject(meshObj);
+
+                    // Add cameras to scene graph
+                    AddCamerasToScene(result);
+
                     _statusLabel.Text = "Dust3r & Meshing Complete.";
                 }
                 else // NeRF
@@ -364,9 +753,22 @@ namespace Deep3DStudio
                          return nerf.GetMesh(GetMesher(AppSettings.Instance.MeshingAlgo));
                     });
 
-                    _viewport.SetMeshes(new List<MeshData> { nerfMesh });
+                    // Add mesh to scene graph
+                    var meshObj = new MeshObject("NeRF Mesh", nerfMesh);
+                    _sceneGraph.AddObject(meshObj);
+
+                    // Add cameras to scene graph
+                    AddCamerasToScene(result);
+
                     _statusLabel.Text = "NeRF Complete.";
                 }
+
+                // Refresh tree view
+                _sceneTreeView.RefreshTree();
+
+                // Update statistics
+                var (meshes, pcs, cams, verts, tris) = _sceneGraph.GetStatistics();
+                _statusLabel.Text += $" | {meshes} meshes, {cams} cameras, {verts:N0} vertices";
             }
             catch (Exception ex)
             {
@@ -375,9 +777,30 @@ namespace Deep3DStudio
             }
         }
 
-        /// <summary>
-        /// Populates depth data for all images in the browser from the reconstruction result.
-        /// </summary>
+        private void AddCamerasToScene(SceneResult result)
+        {
+            var camerasGroup = new GroupObject("Cameras");
+            _sceneGraph.AddObject(camerasGroup);
+
+            for (int i = 0; i < result.Poses.Count; i++)
+            {
+                var pose = result.Poses[i];
+                var camObj = new CameraObject($"Camera {i + 1}", pose);
+                _sceneGraph.AddObject(camObj, camerasGroup);
+            }
+        }
+
+        #endregion
+
+        #region Helper Methods
+
+        private void ShowMessage(string message)
+        {
+            var md = new MessageDialog(this, DialogFlags.Modal, MessageType.Info, ButtonsType.Ok, message);
+            md.Run();
+            md.Destroy();
+        }
+
         private void PopulateDepthData(SceneResult result)
         {
             if (result.Poses.Count == 0) return;
@@ -387,14 +810,10 @@ namespace Deep3DStudio
                 var pose = result.Poses[i];
                 var mesh = result.Meshes[i];
 
-                // Extract depth map for this view
                 var depthMap = ExtractDepthMap(mesh, pose.Width, pose.Height, pose.WorldToCamera);
-
-                // Set on image browser (by index matching order added)
                 _imageBrowser.SetDepthData(i, depthMap);
             }
 
-            // Refresh display to show depth is now available
             _imageBrowser.QueueDraw();
         }
 
@@ -409,21 +828,14 @@ namespace Deep3DStudio
             }
         }
 
-        /// <summary>
-        /// Extracts depth map from a mesh for a given image size.
-        /// Uses the PixelToVertexIndex mapping if available.
-        /// </summary>
         private float[,] ExtractDepthMap(MeshData mesh, int width, int height, OpenTK.Mathematics.Matrix4 worldToCamera)
         {
             float[,] depthMap = new float[width, height];
 
-            // Initialize with max value (no depth)
             for (int y = 0; y < height; y++)
                 for (int x = 0; x < width; x++)
                     depthMap[x, y] = float.MaxValue;
 
-            // If we have pixel-to-vertex mapping, use it directly
-            // PixelToVertexIndex is a 1D array with index = y * width + x
             if (mesh.PixelToVertexIndex != null && mesh.PixelToVertexIndex.Length == width * height)
             {
                 for (int y = 0; y < height; y++)
@@ -435,22 +847,17 @@ namespace Deep3DStudio
                         if (vertIdx >= 0 && vertIdx < mesh.Vertices.Count)
                         {
                             var v = mesh.Vertices[vertIdx];
-                            // Transform to camera space
                             var vCam = OpenTK.Mathematics.Vector3.TransformPosition(v, worldToCamera);
-                            depthMap[x, y] = -vCam.Z; // Depth is positive distance along camera Z
+                            depthMap[x, y] = -vCam.Z;
                         }
                     }
                 }
             }
             else
             {
-                // Fallback: project all vertices and rasterize
                 foreach (var v in mesh.Vertices)
                 {
                     var vCam = OpenTK.Mathematics.Vector3.TransformPosition(v, worldToCamera);
-
-                    // Simple orthographic projection for depth visualization
-                    // Scale to image coordinates (assumes normalized coordinates)
                     int px = (int)((v.X + 1) * 0.5f * width);
                     int py = (int)((1 - (v.Y + 1) * 0.5f) * height);
 
@@ -512,5 +919,7 @@ namespace Deep3DStudio
 
             return (smooth, min, voxelSize);
         }
+
+        #endregion
     }
 }

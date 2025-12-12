@@ -1,13 +1,31 @@
 using System;
+using System.Diagnostics;
 using Gtk;
 using OpenTK.Graphics.OpenGL;
 using OpenTK.Mathematics;
 using System.Runtime.InteropServices;
 using System.Collections.Generic;
+using System.Linq;
 using Deep3DStudio.Configuration;
+using Deep3DStudio.Scene;
+using Deep3DStudio.Model;
 
 namespace Deep3DStudio.Viewport
 {
+    /// <summary>
+    /// Gizmo mode for object manipulation
+    /// </summary>
+    public enum GizmoMode
+    {
+        None,
+        Translate,
+        Rotate,
+        Scale
+    }
+
+    /// <summary>
+    /// Enhanced 3D viewport with scene graph support, camera visualization, and transform gizmos
+    /// </summary>
     public class ThreeDView : GLArea
     {
         private bool _loaded;
@@ -20,22 +38,55 @@ namespace Deep3DStudio.Viewport
         private bool _isDragging;
         private bool _isPanning;
 
+        // Scene Graph
+        private SceneGraph? _sceneGraph;
+        private List<MeshData> _meshes = new List<MeshData>(); // Legacy support
+
         // Tool State
         private bool _showCropBox = false;
         private float _cropSize = 2.0f;
-        private int _selectedHandle = -1; // -1 none, 0-7 corners
-        private Vector3[] _cropCorners;
+        private int _selectedHandle = -1;
+        private Vector3[] _cropCorners = new Vector3[8];
 
-        // Meshes
-        private List<Model.MeshData> _meshes;
+        // Gizmo State
+        private GizmoMode _gizmoMode = GizmoMode.Translate;
+        private int _activeGizmoAxis = -1; // -1=none, 0=X, 1=Y, 2=Z
+        private bool _isDraggingGizmo = false;
+        private Vector3 _gizmoStartPos;
+        private Vector3 _gizmoDragStart;
+        private float _gizmoSize = 1.0f;
+
+        // Viewport Info
+        private Stopwatch _frameTimer = new Stopwatch();
+        private int _frameCount = 0;
+        private float _fps = 0;
+        private DateTime _lastFpsUpdate = DateTime.Now;
+
+        // Display Options
+        public bool ShowGrid { get; set; } = true;
+        public bool ShowAxes { get; set; } = true;
+        public bool ShowGizmo { get; set; } = true;
+        public bool ShowCameras { get; set; } = true;
+        public bool ShowInfoText { get; set; } = true;
+        public float CameraFrustumScale { get; set; } = 0.3f;
+
+        // Selection
+        public event EventHandler<SceneObject?>? ObjectPicked;
+        public event EventHandler? SelectionChanged;
+
+        // Matrices for picking
+        private Matrix4 _viewMatrix;
+        private Matrix4 _projectionMatrix;
 
         public ThreeDView()
         {
             this.HasFocus = true;
+            this.CanFocus = true;
             this.AddEvents((int)Gdk.EventMask.ButtonPressMask |
                            (int)Gdk.EventMask.ButtonReleaseMask |
                            (int)Gdk.EventMask.PointerMotionMask |
-                           (int)Gdk.EventMask.ScrollMask);
+                           (int)Gdk.EventMask.ScrollMask |
+                           (int)Gdk.EventMask.KeyPressMask);
 
             this.Realized += OnRealized;
             this.Render += OnRender;
@@ -45,9 +96,30 @@ namespace Deep3DStudio.Viewport
             this.ButtonReleaseEvent += OnButtonRelease;
             this.MotionNotifyEvent += OnMotionNotify;
             this.ScrollEvent += OnScroll;
+            this.KeyPressEvent += OnKeyPress;
 
             UpdateCropCorners();
+            _frameTimer.Start();
         }
+
+        #region Public Methods
+
+        public void SetSceneGraph(SceneGraph sceneGraph)
+        {
+            _sceneGraph = sceneGraph;
+            _sceneGraph.SelectionChanged += (s, e) => this.QueueDraw();
+            _sceneGraph.SceneChanged += (s, e) => this.QueueDraw();
+            AutoCenter();
+            this.QueueDraw();
+        }
+
+        public void SetGizmoMode(GizmoMode mode)
+        {
+            _gizmoMode = mode;
+            this.QueueDraw();
+        }
+
+        public GizmoMode GetGizmoMode() => _gizmoMode;
 
         public void ToggleCropBox(bool show)
         {
@@ -55,29 +127,51 @@ namespace Deep3DStudio.Viewport
             this.QueueDraw();
         }
 
-        public void SetMeshes(List<Model.MeshData> meshes)
+        /// <summary>
+        /// Legacy method for setting meshes directly
+        /// </summary>
+        public void SetMeshes(List<MeshData> meshes)
         {
             _meshes = meshes;
+            AutoCenter();
+            this.QueueDraw();
+        }
 
-            // Auto-center view on mesh centroid
-            if (_meshes.Count > 0 && _meshes[0].Vertices.Count > 0)
+        /// <summary>
+        /// Focuses the view on selected objects or entire scene
+        /// </summary>
+        public void FocusOnSelection()
+        {
+            Vector3 min, max;
+
+            if (_sceneGraph != null && _sceneGraph.SelectedObjects.Count > 0)
             {
-                Vector3 center = Vector3.Zero;
-                int count = 0;
-                foreach(var m in _meshes)
-                {
-                    foreach(var p in m.Vertices)
-                    {
-                        center += p;
-                        count++;
-                    }
-                }
-                if (count > 0) center /= count;
+                min = new Vector3(float.MaxValue);
+                max = new Vector3(float.MinValue);
 
-                _panX = -center.X;
-                _panY = -center.Y;
-                _zoom = -5.0f;
+                foreach (var obj in _sceneGraph.SelectedObjects)
+                {
+                    var (objMin, objMax) = obj.GetWorldBounds();
+                    min = Vector3.ComponentMin(min, objMin);
+                    max = Vector3.ComponentMax(max, objMax);
+                }
             }
+            else if (_sceneGraph != null)
+            {
+                (min, max) = _sceneGraph.GetSceneBounds();
+            }
+            else
+            {
+                return;
+            }
+
+            var center = (min + max) * 0.5f;
+            var size = (max - min).Length;
+
+            _panX = -center.X;
+            _panY = -center.Y;
+            _zoom = -size * 1.5f;
+
             this.QueueDraw();
         }
 
@@ -88,11 +182,53 @@ namespace Deep3DStudio.Viewport
             Vector3 min = new Vector3(-_cropSize, -_cropSize, -_cropSize);
             Vector3 max = new Vector3(_cropSize, _cropSize, _cropSize);
 
-            foreach(var mesh in _meshes)
+            foreach (var mesh in _meshes)
             {
-                Model.GeometryUtils.CropMesh(mesh, min, max);
+                GeometryUtils.CropMesh(mesh, min, max);
             }
             this.QueueDraw();
+        }
+
+        #endregion
+
+        #region Private Methods
+
+        private void AutoCenter()
+        {
+            Vector3 center = Vector3.Zero;
+            int count = 0;
+
+            if (_sceneGraph != null)
+            {
+                foreach (var obj in _sceneGraph.GetVisibleObjects())
+                {
+                    if (obj is MeshObject mesh && mesh.MeshData != null)
+                    {
+                        center += mesh.GetCentroid();
+                        count++;
+                    }
+                }
+            }
+
+            if (count == 0 && _meshes.Count > 0)
+            {
+                foreach (var m in _meshes)
+                {
+                    foreach (var p in m.Vertices)
+                    {
+                        center += p;
+                        count++;
+                    }
+                }
+            }
+
+            if (count > 0)
+            {
+                center /= count;
+                _panX = -center.X;
+                _panY = -center.Y;
+                _zoom = -5.0f;
+            }
         }
 
         private void UpdateCropCorners()
@@ -101,19 +237,39 @@ namespace Deep3DStudio.Viewport
             _cropCorners = new Vector3[8];
             int idx = 0;
             float[] v = { -s, s };
-            foreach(var x in v)
-                foreach(var y in v)
-                    foreach(var z in v)
+            foreach (var x in v)
+                foreach (var y in v)
+                    foreach (var z in v)
                         _cropCorners[idx++] = new Vector3(x, y, z);
         }
+
+        private void UpdateFPS()
+        {
+            _frameCount++;
+            var now = DateTime.Now;
+            var elapsed = (now - _lastFpsUpdate).TotalSeconds;
+            if (elapsed >= 1.0)
+            {
+                _fps = (float)(_frameCount / elapsed);
+                _frameCount = 0;
+                _lastFpsUpdate = now;
+            }
+        }
+
+        #endregion
+
+        #region GL Events
 
         private void OnRealized(object sender, EventArgs e)
         {
             this.MakeCurrent();
-            try {
+            try
+            {
                 GL.LoadBindings(new GdkBindingsContext());
                 _loaded = true;
-            } catch (Exception ex) {
+            }
+            catch (Exception ex)
+            {
                 Console.WriteLine("Failed to load bindings: " + ex.Message);
                 _loaded = false;
                 return;
@@ -124,9 +280,9 @@ namespace Deep3DStudio.Viewport
                 GL.Enable(EnableCap.DepthTest);
                 GL.Enable(EnableCap.Blend);
                 GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-                GL.ClearColor(0.15f, 0.15f, 0.15f, 1.0f); // Dark background
-                // Point size for Point Cloud
+                GL.ClearColor(0.12f, 0.12f, 0.14f, 1.0f);
                 GL.PointSize(3.0f);
+                GL.LineWidth(1.0f);
             }
         }
 
@@ -139,6 +295,7 @@ namespace Deep3DStudio.Viewport
         {
             if (!_loaded) return;
 
+            UpdateFPS();
             this.MakeCurrent();
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
@@ -147,73 +304,251 @@ namespace Deep3DStudio.Viewport
             if (h == 0) h = 1;
             GL.Viewport(0, 0, w, h);
 
-            Matrix4 projection = Matrix4.CreatePerspectiveFieldOfView(MathHelper.DegreesToRadians(45f), (float)w / h, 0.1f, 100f);
+            // Setup matrices
+            _projectionMatrix = Matrix4.CreatePerspectiveFieldOfView(
+                MathHelper.DegreesToRadians(45f), (float)w / h, 0.1f, 1000f);
             GL.MatrixMode(MatrixMode.Projection);
-            GL.LoadMatrix(ref projection);
+            GL.LoadMatrix(ref _projectionMatrix);
 
             // Apply Coordinate System Transformation
             Matrix4 coordTransform = Matrix4.Identity;
             var settings = AppSettings.Instance;
 
-            // Base view transform (Camera)
-            Matrix4 view = Matrix4.CreateTranslation(_panX, _panY, _zoom) *
-                           Matrix4.CreateRotationX(MathHelper.DegreesToRadians(_rotationX)) *
-                           Matrix4.CreateRotationY(MathHelper.DegreesToRadians(_rotationY));
-
-            // Apply coordinate system adjustment to the modelview
-            // Assuming default is Right-Handed Y-Up (OpenGL Standard)
-
             if (settings.CoordSystem == CoordinateSystem.RightHanded_Z_Up)
             {
-                // Rotate -90 X to make Z up
                 coordTransform = Matrix4.CreateRotationX(MathHelper.DegreesToRadians(-90));
             }
-            // Add other transforms if needed.
 
+            _viewMatrix = Matrix4.CreateTranslation(_panX, _panY, _zoom) *
+                          Matrix4.CreateRotationX(MathHelper.DegreesToRadians(_rotationX)) *
+                          Matrix4.CreateRotationY(MathHelper.DegreesToRadians(_rotationY));
+
+            var finalView = coordTransform * _viewMatrix;
             GL.MatrixMode(MatrixMode.Modelview);
-            var finalView = coordTransform * view;
             GL.LoadMatrix(ref finalView);
 
-            DrawGrid();
-            DrawAxes();
+            // Draw scene elements
+            if (ShowGrid) DrawGrid();
+            if (ShowAxes) DrawAxesEnhanced();
 
-            if (_meshes != null)
+            // Draw scene graph objects
+            if (_sceneGraph != null)
             {
-                // Wireframe Mode
-                if (settings.ShowWireframe)
-                {
-                    GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Line);
-                }
-                else
-                {
-                    GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
-                }
-
-                foreach(var mesh in _meshes)
-                {
-                    if (settings.ShowPointCloud)
-                    {
-                        DrawPointCloud(mesh);
-                    }
-                    else
-                    {
-                        DrawMesh(mesh);
-                    }
-                }
-
-                // Restore Polygon Mode
-                GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
+                DrawSceneGraph();
+            }
+            else if (_meshes != null)
+            {
+                // Legacy mesh rendering
+                DrawLegacyMeshes();
             }
 
+            // Draw cameras
+            if (ShowCameras && _sceneGraph != null)
+            {
+                DrawCameras();
+            }
+
+            // Draw gizmo for selected objects
+            if (ShowGizmo && _sceneGraph != null && _sceneGraph.SelectedObjects.Count > 0)
+            {
+                DrawGizmo();
+            }
+
+            // Draw crop box
             if (_showCropBox)
             {
                 DrawCropBox();
             }
+
+            // Draw info overlay (2D)
+            if (ShowInfoText)
+            {
+                DrawInfoOverlay(w, h);
+            }
         }
 
-        private void DrawPointCloud(Model.MeshData mesh)
+        #endregion
+
+        #region Drawing Methods
+
+        private void DrawGrid()
+        {
+            GL.Begin(PrimitiveType.Lines);
+
+            int size = 10;
+            float step = 1.0f;
+
+            // Major grid lines
+            GL.Color4(0.35f, 0.35f, 0.35f, 0.5f);
+            for (float i = -size; i <= size; i += step * 5)
+            {
+                GL.Vertex3(i, 0, -size);
+                GL.Vertex3(i, 0, size);
+                GL.Vertex3(-size, 0, i);
+                GL.Vertex3(size, 0, i);
+            }
+
+            // Minor grid lines
+            GL.Color4(0.25f, 0.25f, 0.25f, 0.3f);
+            for (float i = -size; i <= size; i += step)
+            {
+                if (Math.Abs(i % (step * 5)) < 0.001f) continue;
+                GL.Vertex3(i, 0, -size);
+                GL.Vertex3(i, 0, size);
+                GL.Vertex3(-size, 0, i);
+                GL.Vertex3(size, 0, i);
+            }
+
+            GL.End();
+        }
+
+        private void DrawAxesEnhanced()
+        {
+            float axisLength = 1.5f;
+            float arrowSize = 0.1f;
+
+            GL.LineWidth(2.5f);
+            GL.Begin(PrimitiveType.Lines);
+
+            // X Axis - Red
+            GL.Color3(0.9f, 0.2f, 0.2f);
+            GL.Vertex3(0, 0, 0);
+            GL.Vertex3(axisLength, 0, 0);
+
+            // Y Axis - Green
+            GL.Color3(0.2f, 0.9f, 0.2f);
+            GL.Vertex3(0, 0, 0);
+            GL.Vertex3(0, axisLength, 0);
+
+            // Z Axis - Blue
+            GL.Color3(0.2f, 0.4f, 0.9f);
+            GL.Vertex3(0, 0, 0);
+            GL.Vertex3(0, 0, axisLength);
+
+            GL.End();
+
+            // Draw arrow heads
+            DrawArrowHead(new Vector3(axisLength, 0, 0), new Vector3(1, 0, 0), arrowSize, new Vector3(0.9f, 0.2f, 0.2f));
+            DrawArrowHead(new Vector3(0, axisLength, 0), new Vector3(0, 1, 0), arrowSize, new Vector3(0.2f, 0.9f, 0.2f));
+            DrawArrowHead(new Vector3(0, 0, axisLength), new Vector3(0, 0, 1), arrowSize, new Vector3(0.2f, 0.4f, 0.9f));
+
+            GL.LineWidth(1.0f);
+        }
+
+        private void DrawArrowHead(Vector3 tip, Vector3 direction, float size, Vector3 color)
+        {
+            direction = direction.Normalized();
+
+            // Find perpendicular vectors
+            Vector3 up = Math.Abs(direction.Y) < 0.9f ? Vector3.UnitY : Vector3.UnitX;
+            Vector3 right = Vector3.Cross(direction, up).Normalized();
+            up = Vector3.Cross(right, direction).Normalized();
+
+            Vector3 base1 = tip - direction * size + right * size * 0.3f;
+            Vector3 base2 = tip - direction * size - right * size * 0.3f;
+            Vector3 base3 = tip - direction * size + up * size * 0.3f;
+            Vector3 base4 = tip - direction * size - up * size * 0.3f;
+
+            GL.Color3(color.X, color.Y, color.Z);
+            GL.Begin(PrimitiveType.Triangles);
+
+            GL.Vertex3(tip); GL.Vertex3(base1); GL.Vertex3(base3);
+            GL.Vertex3(tip); GL.Vertex3(base3); GL.Vertex3(base2);
+            GL.Vertex3(tip); GL.Vertex3(base2); GL.Vertex3(base4);
+            GL.Vertex3(tip); GL.Vertex3(base4); GL.Vertex3(base1);
+
+            GL.End();
+        }
+
+        private void DrawSceneGraph()
+        {
+            if (_sceneGraph == null) return;
+
+            var settings = AppSettings.Instance;
+
+            foreach (var obj in _sceneGraph.GetVisibleObjects())
+            {
+                GL.PushMatrix();
+
+                var transform = obj.GetWorldTransform();
+                GL.MultMatrix(ref transform);
+
+                if (obj is MeshObject meshObj)
+                {
+                    bool isSelected = obj.Selected;
+
+                    if (settings.ShowWireframe || meshObj.ShowWireframe)
+                    {
+                        GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Line);
+                    }
+                    else
+                    {
+                        GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
+                    }
+
+                    if (settings.ShowPointCloud || meshObj.ShowAsPointCloud)
+                    {
+                        DrawPointCloud(meshObj.MeshData, isSelected);
+                    }
+                    else
+                    {
+                        DrawMesh(meshObj.MeshData, isSelected);
+                    }
+
+                    // Draw selection outline
+                    if (isSelected)
+                    {
+                        DrawSelectionOutline(obj);
+                    }
+
+                    GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
+                }
+                else if (obj is PointCloudObject pcObj)
+                {
+                    DrawPointCloudObject(pcObj);
+
+                    if (obj.Selected)
+                    {
+                        DrawSelectionOutline(obj);
+                    }
+                }
+
+                GL.PopMatrix();
+            }
+        }
+
+        private void DrawLegacyMeshes()
         {
             var settings = AppSettings.Instance;
+
+            if (settings.ShowWireframe)
+            {
+                GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Line);
+            }
+            else
+            {
+                GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
+            }
+
+            foreach (var mesh in _meshes)
+            {
+                if (settings.ShowPointCloud)
+                {
+                    DrawPointCloud(mesh, false);
+                }
+                else
+                {
+                    DrawMesh(mesh, false);
+                }
+            }
+
+            GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
+        }
+
+        private void DrawPointCloud(MeshData mesh, bool isSelected)
+        {
+            var settings = AppSettings.Instance;
+            GL.PointSize(isSelected ? 5.0f : 3.0f);
 
             if (settings.PointCloudColor == PointCloudColorMode.DistanceMap)
             {
@@ -221,27 +556,32 @@ namespace Deep3DStudio.Viewport
             }
             else
             {
-                // RGB mode - use original colors
                 GL.Begin(PrimitiveType.Points);
-                for(int i=0; i<mesh.Vertices.Count; i++)
+                for (int i = 0; i < mesh.Vertices.Count; i++)
                 {
                     var c = mesh.Colors[i];
-                    GL.Color3(c.X, c.Y, c.Z);
+                    if (isSelected)
+                    {
+                        GL.Color3(Math.Min(1f, c.X + 0.3f), Math.Min(1f, c.Y + 0.3f), c.Z);
+                    }
+                    else
+                    {
+                        GL.Color3(c.X, c.Y, c.Z);
+                    }
                     GL.Vertex3(mesh.Vertices[i]);
                 }
                 GL.End();
             }
         }
 
-        private void DrawPointCloudDepthMap(Model.MeshData mesh)
+        private void DrawPointCloudDepthMap(MeshData mesh)
         {
             if (mesh.Vertices.Count == 0) return;
 
-            // Calculate min/max distance from origin for normalization
             float minDist = float.MaxValue;
             float maxDist = float.MinValue;
 
-            foreach(var v in mesh.Vertices)
+            foreach (var v in mesh.Vertices)
             {
                 float dist = v.Length;
                 if (dist < minDist) minDist = dist;
@@ -249,16 +589,14 @@ namespace Deep3DStudio.Viewport
             }
 
             float range = maxDist - minDist;
-            if (range < 0.0001f) range = 1.0f; // Avoid division by zero
+            if (range < 0.0001f) range = 1.0f;
 
             GL.Begin(PrimitiveType.Points);
-            for(int i=0; i<mesh.Vertices.Count; i++)
+            for (int i = 0; i < mesh.Vertices.Count; i++)
             {
                 var v = mesh.Vertices[i];
                 float dist = v.Length;
-                float t = (dist - minDist) / range; // Normalize to [0, 1]
-
-                // Apply turbo colormap
+                float t = (dist - minDist) / range;
                 Vector3 color = TurboColormap(t);
                 GL.Color3(color.X, color.Y, color.Z);
                 GL.Vertex3(v);
@@ -266,34 +604,43 @@ namespace Deep3DStudio.Viewport
             GL.End();
         }
 
+        private void DrawPointCloudObject(PointCloudObject pc)
+        {
+            GL.PointSize(pc.PointSize);
+            GL.Begin(PrimitiveType.Points);
+
+            for (int i = 0; i < pc.Points.Count; i++)
+            {
+                var c = pc.Colors[i];
+                GL.Color3(c.X, c.Y, c.Z);
+                GL.Vertex3(pc.Points[i]);
+            }
+
+            GL.End();
+        }
+
         private static Vector3 TurboColormap(float t)
         {
-            // Turbo colormap approximation: blue -> cyan -> green -> yellow -> red
             t = Math.Max(0f, Math.Min(1f, t));
-
             float r, g, b;
 
             if (t < 0.25f)
             {
-                // Blue to Cyan
                 float s = t / 0.25f;
                 r = 0.0f; g = s; b = 1.0f;
             }
             else if (t < 0.5f)
             {
-                // Cyan to Green
                 float s = (t - 0.25f) / 0.25f;
                 r = 0.0f; g = 1.0f; b = 1.0f - s;
             }
             else if (t < 0.75f)
             {
-                // Green to Yellow
                 float s = (t - 0.5f) / 0.25f;
                 r = s; g = 1.0f; b = 0.0f;
             }
             else
             {
-                // Yellow to Red
                 float s = (t - 0.75f) / 0.25f;
                 r = 1.0f; g = 1.0f - s; b = 0.0f;
             }
@@ -301,91 +648,353 @@ namespace Deep3DStudio.Viewport
             return new Vector3(r, g, b);
         }
 
-        private void DrawMesh(Model.MeshData mesh)
+        private void DrawMesh(MeshData mesh, bool isSelected)
         {
             GL.Begin(PrimitiveType.Triangles);
-            for(int i=0; i<mesh.Indices.Count; i++)
+            for (int i = 0; i < mesh.Indices.Count; i++)
             {
                 int idx = mesh.Indices[i];
                 if (idx < mesh.Vertices.Count)
                 {
                     var c = mesh.Colors[idx];
-                    GL.Color3(c.X, c.Y, c.Z);
+                    if (isSelected)
+                    {
+                        GL.Color3(Math.Min(1f, c.X + 0.2f), Math.Min(1f, c.Y + 0.2f), c.Z);
+                    }
+                    else
+                    {
+                        GL.Color3(c.X, c.Y, c.Z);
+                    }
                     GL.Vertex3(mesh.Vertices[idx]);
                 }
             }
             GL.End();
         }
 
-        private void DrawGrid()
+        private void DrawSelectionOutline(SceneObject obj)
         {
-            GL.Begin(PrimitiveType.Lines);
-            GL.Color4(0.5f, 0.5f, 0.5f, 0.3f);
+            var (min, max) = (obj.BoundsMin, obj.BoundsMax);
 
-            int size = 10;
-            float step = 1.0f;
-
-            for (float i = -size; i <= size; i += step)
-            {
-                GL.Vertex3(i, 0, -size);
-                GL.Vertex3(i, 0, size);
-                GL.Vertex3(-size, 0, i);
-                GL.Vertex3(size, 0, i);
-            }
-            GL.End();
-        }
-
-        private void DrawAxes()
-        {
             GL.LineWidth(2.0f);
+            GL.Color4(1.0f, 0.6f, 0.0f, 0.8f);
+
             GL.Begin(PrimitiveType.Lines);
 
-            // X Axis - Red
-            GL.Color3(1.0f, 0.0f, 0.0f);
-            GL.Vertex3(0, 0, 0);
-            GL.Vertex3(1, 0, 0);
+            // Bottom face
+            GL.Vertex3(min.X, min.Y, min.Z); GL.Vertex3(max.X, min.Y, min.Z);
+            GL.Vertex3(max.X, min.Y, min.Z); GL.Vertex3(max.X, min.Y, max.Z);
+            GL.Vertex3(max.X, min.Y, max.Z); GL.Vertex3(min.X, min.Y, max.Z);
+            GL.Vertex3(min.X, min.Y, max.Z); GL.Vertex3(min.X, min.Y, min.Z);
 
-            // Y Axis - Green
-            GL.Color3(0.0f, 1.0f, 0.0f);
-            GL.Vertex3(0, 0, 0);
-            GL.Vertex3(0, 1, 0);
+            // Top face
+            GL.Vertex3(min.X, max.Y, min.Z); GL.Vertex3(max.X, max.Y, min.Z);
+            GL.Vertex3(max.X, max.Y, min.Z); GL.Vertex3(max.X, max.Y, max.Z);
+            GL.Vertex3(max.X, max.Y, max.Z); GL.Vertex3(min.X, max.Y, max.Z);
+            GL.Vertex3(min.X, max.Y, max.Z); GL.Vertex3(min.X, max.Y, min.Z);
 
-            // Z Axis - Blue
-            GL.Color3(0.0f, 0.0f, 1.0f);
-            GL.Vertex3(0, 0, 0);
-            GL.Vertex3(0, 0, 1);
+            // Vertical edges
+            GL.Vertex3(min.X, min.Y, min.Z); GL.Vertex3(min.X, max.Y, min.Z);
+            GL.Vertex3(max.X, min.Y, min.Z); GL.Vertex3(max.X, max.Y, min.Z);
+            GL.Vertex3(max.X, min.Y, max.Z); GL.Vertex3(max.X, max.Y, max.Z);
+            GL.Vertex3(min.X, min.Y, max.Z); GL.Vertex3(min.X, max.Y, max.Z);
 
             GL.End();
             GL.LineWidth(1.0f);
+        }
+
+        private void DrawCameras()
+        {
+            if (_sceneGraph == null) return;
+
+            foreach (var cam in _sceneGraph.GetObjectsOfType<CameraObject>())
+            {
+                if (!cam.Visible || !cam.ShowFrustum) continue;
+
+                DrawCameraFrustum(cam);
+            }
+        }
+
+        private void DrawCameraFrustum(CameraObject cam)
+        {
+            Vector3 pos = cam.Position;
+            if (cam.Pose != null)
+            {
+                pos = cam.Pose.CameraToWorld.ExtractTranslation();
+            }
+
+            var corners = cam.GetFrustumCorners(CameraFrustumScale);
+            var color = cam.Selected ? new Vector3(1f, 1f, 0f) : cam.FrustumColor;
+
+            GL.LineWidth(cam.Selected ? 2.5f : 1.5f);
+            GL.Color3(color.X, color.Y, color.Z);
+
+            GL.Begin(PrimitiveType.Lines);
+
+            // Lines from camera origin to frustum corners
+            for (int i = 0; i < 4; i++)
+            {
+                GL.Vertex3(pos);
+                GL.Vertex3(corners[i]);
+            }
+
+            // Frustum rectangle
+            GL.Vertex3(corners[0]); GL.Vertex3(corners[1]);
+            GL.Vertex3(corners[1]); GL.Vertex3(corners[2]);
+            GL.Vertex3(corners[2]); GL.Vertex3(corners[3]);
+            GL.Vertex3(corners[3]); GL.Vertex3(corners[0]);
+
+            // Cross on image plane
+            GL.Vertex3(corners[0]); GL.Vertex3(corners[2]);
+            GL.Vertex3(corners[1]); GL.Vertex3(corners[3]);
+
+            GL.End();
+
+            // Draw camera body
+            GL.Color3(color.X * 0.8f, color.Y * 0.8f, color.Z * 0.8f);
+            float camSize = CameraFrustumScale * 0.15f;
+
+            GL.Begin(PrimitiveType.Triangles);
+
+            // Simple pyramid shape for camera body
+            Vector3 up = cam.GetUpDirection() * camSize;
+            Vector3 right = Vector3.Cross(cam.GetViewDirection(), up).Normalized() * camSize;
+
+            Vector3 c1 = pos + up + right;
+            Vector3 c2 = pos + up - right;
+            Vector3 c3 = pos - up - right;
+            Vector3 c4 = pos - up + right;
+            Vector3 tip = pos - cam.GetViewDirection() * camSize * 1.5f;
+
+            // Front face
+            GL.Vertex3(c1); GL.Vertex3(c2); GL.Vertex3(c3);
+            GL.Vertex3(c1); GL.Vertex3(c3); GL.Vertex3(c4);
+
+            // Side faces
+            GL.Vertex3(tip); GL.Vertex3(c1); GL.Vertex3(c2);
+            GL.Vertex3(tip); GL.Vertex3(c2); GL.Vertex3(c3);
+            GL.Vertex3(tip); GL.Vertex3(c3); GL.Vertex3(c4);
+            GL.Vertex3(tip); GL.Vertex3(c4); GL.Vertex3(c1);
+
+            GL.End();
+
+            GL.LineWidth(1.0f);
+        }
+
+        private void DrawGizmo()
+        {
+            if (_sceneGraph == null || _sceneGraph.SelectedObjects.Count == 0) return;
+
+            // Calculate gizmo center (centroid of selected objects)
+            Vector3 center = Vector3.Zero;
+            foreach (var obj in _sceneGraph.SelectedObjects)
+            {
+                center += obj.Position;
+            }
+            center /= _sceneGraph.SelectedObjects.Count;
+
+            // Calculate gizmo size based on distance to camera
+            float distToCamera = Math.Abs(_zoom);
+            _gizmoSize = distToCamera * 0.15f;
+
+            GL.Disable(EnableCap.DepthTest);
+
+            switch (_gizmoMode)
+            {
+                case GizmoMode.Translate:
+                    DrawTranslateGizmo(center);
+                    break;
+                case GizmoMode.Rotate:
+                    DrawRotateGizmo(center);
+                    break;
+                case GizmoMode.Scale:
+                    DrawScaleGizmo(center);
+                    break;
+            }
+
+            GL.Enable(EnableCap.DepthTest);
+        }
+
+        private void DrawTranslateGizmo(Vector3 center)
+        {
+            float len = _gizmoSize;
+            float arrowSize = len * 0.15f;
+
+            GL.LineWidth(3.0f);
+            GL.Begin(PrimitiveType.Lines);
+
+            // X axis (red)
+            GL.Color3(_activeGizmoAxis == 0 ? 1.0f : 0.8f, _activeGizmoAxis == 0 ? 1.0f : 0.2f, 0.2f);
+            GL.Vertex3(center);
+            GL.Vertex3(center + new Vector3(len, 0, 0));
+
+            // Y axis (green)
+            GL.Color3(0.2f, _activeGizmoAxis == 1 ? 1.0f : 0.8f, _activeGizmoAxis == 1 ? 1.0f : 0.2f);
+            GL.Vertex3(center);
+            GL.Vertex3(center + new Vector3(0, len, 0));
+
+            // Z axis (blue)
+            GL.Color3(0.2f, _activeGizmoAxis == 2 ? 1.0f : 0.4f, _activeGizmoAxis == 2 ? 1.0f : 0.9f);
+            GL.Vertex3(center);
+            GL.Vertex3(center + new Vector3(0, 0, len));
+
+            GL.End();
+
+            // Arrow heads
+            DrawArrowHead(center + new Vector3(len, 0, 0), Vector3.UnitX, arrowSize,
+                new Vector3(_activeGizmoAxis == 0 ? 1.0f : 0.8f, 0.2f, 0.2f));
+            DrawArrowHead(center + new Vector3(0, len, 0), Vector3.UnitY, arrowSize,
+                new Vector3(0.2f, _activeGizmoAxis == 1 ? 1.0f : 0.8f, 0.2f));
+            DrawArrowHead(center + new Vector3(0, 0, len), Vector3.UnitZ, arrowSize,
+                new Vector3(0.2f, 0.4f, _activeGizmoAxis == 2 ? 1.0f : 0.9f));
+
+            GL.LineWidth(1.0f);
+        }
+
+        private void DrawRotateGizmo(Vector3 center)
+        {
+            float radius = _gizmoSize;
+            int segments = 48;
+
+            GL.LineWidth(3.0f);
+
+            // X rotation circle (YZ plane) - red
+            GL.Color3(_activeGizmoAxis == 0 ? 1.0f : 0.8f, _activeGizmoAxis == 0 ? 1.0f : 0.2f, 0.2f);
+            GL.Begin(PrimitiveType.LineLoop);
+            for (int i = 0; i < segments; i++)
+            {
+                float angle = (float)i / segments * MathF.PI * 2;
+                GL.Vertex3(center.X, center.Y + MathF.Cos(angle) * radius, center.Z + MathF.Sin(angle) * radius);
+            }
+            GL.End();
+
+            // Y rotation circle (XZ plane) - green
+            GL.Color3(0.2f, _activeGizmoAxis == 1 ? 1.0f : 0.8f, _activeGizmoAxis == 1 ? 1.0f : 0.2f);
+            GL.Begin(PrimitiveType.LineLoop);
+            for (int i = 0; i < segments; i++)
+            {
+                float angle = (float)i / segments * MathF.PI * 2;
+                GL.Vertex3(center.X + MathF.Cos(angle) * radius, center.Y, center.Z + MathF.Sin(angle) * radius);
+            }
+            GL.End();
+
+            // Z rotation circle (XY plane) - blue
+            GL.Color3(0.2f, _activeGizmoAxis == 2 ? 1.0f : 0.4f, _activeGizmoAxis == 2 ? 1.0f : 0.9f);
+            GL.Begin(PrimitiveType.LineLoop);
+            for (int i = 0; i < segments; i++)
+            {
+                float angle = (float)i / segments * MathF.PI * 2;
+                GL.Vertex3(center.X + MathF.Cos(angle) * radius, center.Y + MathF.Sin(angle) * radius, center.Z);
+            }
+            GL.End();
+
+            GL.LineWidth(1.0f);
+        }
+
+        private void DrawScaleGizmo(Vector3 center)
+        {
+            float len = _gizmoSize;
+            float boxSize = len * 0.1f;
+
+            GL.LineWidth(3.0f);
+            GL.Begin(PrimitiveType.Lines);
+
+            // X axis
+            GL.Color3(_activeGizmoAxis == 0 ? 1.0f : 0.8f, _activeGizmoAxis == 0 ? 1.0f : 0.2f, 0.2f);
+            GL.Vertex3(center);
+            GL.Vertex3(center + new Vector3(len, 0, 0));
+
+            // Y axis
+            GL.Color3(0.2f, _activeGizmoAxis == 1 ? 1.0f : 0.8f, _activeGizmoAxis == 1 ? 1.0f : 0.2f);
+            GL.Vertex3(center);
+            GL.Vertex3(center + new Vector3(0, len, 0));
+
+            // Z axis
+            GL.Color3(0.2f, _activeGizmoAxis == 2 ? 1.0f : 0.4f, _activeGizmoAxis == 2 ? 1.0f : 0.9f);
+            GL.Vertex3(center);
+            GL.Vertex3(center + new Vector3(0, 0, len));
+
+            GL.End();
+
+            // Draw boxes at ends
+            DrawBox(center + new Vector3(len, 0, 0), boxSize, new Vector3(0.8f, 0.2f, 0.2f));
+            DrawBox(center + new Vector3(0, len, 0), boxSize, new Vector3(0.2f, 0.8f, 0.2f));
+            DrawBox(center + new Vector3(0, 0, len), boxSize, new Vector3(0.2f, 0.4f, 0.9f));
+
+            GL.LineWidth(1.0f);
+        }
+
+        private void DrawBox(Vector3 center, float size, Vector3 color)
+        {
+            float h = size * 0.5f;
+            GL.Color3(color.X, color.Y, color.Z);
+
+            GL.Begin(PrimitiveType.Quads);
+
+            // Front
+            GL.Vertex3(center.X - h, center.Y - h, center.Z + h);
+            GL.Vertex3(center.X + h, center.Y - h, center.Z + h);
+            GL.Vertex3(center.X + h, center.Y + h, center.Z + h);
+            GL.Vertex3(center.X - h, center.Y + h, center.Z + h);
+
+            // Back
+            GL.Vertex3(center.X - h, center.Y - h, center.Z - h);
+            GL.Vertex3(center.X - h, center.Y + h, center.Z - h);
+            GL.Vertex3(center.X + h, center.Y + h, center.Z - h);
+            GL.Vertex3(center.X + h, center.Y - h, center.Z - h);
+
+            // Top
+            GL.Vertex3(center.X - h, center.Y + h, center.Z - h);
+            GL.Vertex3(center.X - h, center.Y + h, center.Z + h);
+            GL.Vertex3(center.X + h, center.Y + h, center.Z + h);
+            GL.Vertex3(center.X + h, center.Y + h, center.Z - h);
+
+            // Bottom
+            GL.Vertex3(center.X - h, center.Y - h, center.Z - h);
+            GL.Vertex3(center.X + h, center.Y - h, center.Z - h);
+            GL.Vertex3(center.X + h, center.Y - h, center.Z + h);
+            GL.Vertex3(center.X - h, center.Y - h, center.Z + h);
+
+            // Right
+            GL.Vertex3(center.X + h, center.Y - h, center.Z - h);
+            GL.Vertex3(center.X + h, center.Y + h, center.Z - h);
+            GL.Vertex3(center.X + h, center.Y + h, center.Z + h);
+            GL.Vertex3(center.X + h, center.Y - h, center.Z + h);
+
+            // Left
+            GL.Vertex3(center.X - h, center.Y - h, center.Z - h);
+            GL.Vertex3(center.X - h, center.Y - h, center.Z + h);
+            GL.Vertex3(center.X - h, center.Y + h, center.Z + h);
+            GL.Vertex3(center.X - h, center.Y + h, center.Z - h);
+
+            GL.End();
         }
 
         private void DrawCropBox()
         {
             float s = _cropSize;
 
-            // Draw Box Lines
             GL.Color4(1.0f, 1.0f, 0.0f, 0.8f);
             GL.LineWidth(1.0f);
 
             float[] v = { -s, s };
-            foreach(var x in v)
-                foreach(var y in v)
+            foreach (var x in v)
+                foreach (var y in v)
                 {
                     GL.Begin(PrimitiveType.Lines);
                     GL.Vertex3(x, y, -s);
                     GL.Vertex3(x, y, s);
                     GL.End();
                 }
-            foreach(var x in v)
-                foreach(var z in v)
+            foreach (var x in v)
+                foreach (var z in v)
                 {
                     GL.Begin(PrimitiveType.Lines);
                     GL.Vertex3(x, -s, z);
                     GL.Vertex3(x, s, z);
                     GL.End();
                 }
-            foreach(var y in v)
-                foreach(var z in v)
+            foreach (var y in v)
+                foreach (var z in v)
                 {
                     GL.Begin(PrimitiveType.Lines);
                     GL.Vertex3(-s, y, z);
@@ -396,13 +1005,88 @@ namespace Deep3DStudio.Viewport
             // Draw Handles
             GL.PointSize(10.0f);
             GL.Begin(PrimitiveType.Points);
-            for(int i=0; i<8; i++) {
-                if (i == _selectedHandle) GL.Color4(1.0f, 0.0f, 0.0f, 1.0f); // Selected: Red
-                else GL.Color4(1.0f, 0.5f, 0.0f, 1.0f); // Normal: Orange
+            for (int i = 0; i < 8; i++)
+            {
+                if (i == _selectedHandle) GL.Color4(1.0f, 0.0f, 0.0f, 1.0f);
+                else GL.Color4(1.0f, 0.5f, 0.0f, 1.0f);
                 GL.Vertex3(_cropCorners[i]);
             }
             GL.End();
         }
+
+        private void DrawInfoOverlay(int width, int height)
+        {
+            // Setup 2D projection
+            GL.MatrixMode(MatrixMode.Projection);
+            GL.PushMatrix();
+            GL.LoadIdentity();
+            GL.Ortho(0, width, height, 0, -1, 1);
+
+            GL.MatrixMode(MatrixMode.Modelview);
+            GL.PushMatrix();
+            GL.LoadIdentity();
+
+            GL.Disable(EnableCap.DepthTest);
+
+            // Draw info background
+            GL.Color4(0.0f, 0.0f, 0.0f, 0.5f);
+            GL.Begin(PrimitiveType.Quads);
+            GL.Vertex2(5, 5);
+            GL.Vertex2(200, 5);
+            GL.Vertex2(200, 80);
+            GL.Vertex2(5, 80);
+            GL.End();
+
+            // Draw text using simple bitmap approach (placeholder - actual text rendering needs font support)
+            // In GTK, we'd use Pango for text rendering, but for GL we need a different approach
+            // For now, we'll draw colored rectangles to indicate status
+
+            // FPS indicator bar
+            float fpsRatio = Math.Min(1.0f, _fps / 60.0f);
+            GL.Color3(1.0f - fpsRatio, fpsRatio, 0.0f);
+            GL.Begin(PrimitiveType.Quads);
+            GL.Vertex2(10, 15);
+            GL.Vertex2(10 + fpsRatio * 100, 15);
+            GL.Vertex2(10 + fpsRatio * 100, 25);
+            GL.Vertex2(10, 25);
+            GL.End();
+
+            // Objects indicator
+            int objCount = _sceneGraph?.GetVisibleObjects().Count() ?? _meshes.Count;
+            float objRatio = Math.Min(1.0f, objCount / 20.0f);
+            GL.Color3(0.3f, 0.6f, 1.0f);
+            GL.Begin(PrimitiveType.Quads);
+            GL.Vertex2(10, 35);
+            GL.Vertex2(10 + objRatio * 100, 35);
+            GL.Vertex2(10 + objRatio * 100, 45);
+            GL.Vertex2(10, 45);
+            GL.End();
+
+            // Selection indicator
+            int selCount = _sceneGraph?.SelectedObjects.Count ?? 0;
+            if (selCount > 0)
+            {
+                GL.Color3(1.0f, 0.6f, 0.0f);
+                GL.Begin(PrimitiveType.Quads);
+                GL.Vertex2(10, 55);
+                GL.Vertex2(10 + Math.Min(selCount * 20, 100), 55);
+                GL.Vertex2(10 + Math.Min(selCount * 20, 100), 65);
+                GL.Vertex2(10, 65);
+                GL.End();
+            }
+
+            GL.Enable(EnableCap.DepthTest);
+
+            // Restore matrices
+            GL.PopMatrix();
+            GL.MatrixMode(MatrixMode.Projection);
+            GL.PopMatrix();
+            GL.MatrixMode(MatrixMode.Modelview);
+        }
+
+        #endregion
+
+        #region Picking & Interaction
 
         private Vector2 Project(Vector3 pos, Matrix4 view, Matrix4 projection, int width, int height)
         {
@@ -415,14 +1099,15 @@ namespace Deep3DStudio.Viewport
             vec /= vec.W;
 
             float x = (vec.X + 1.0f) * 0.5f * width;
-            float y = (1.0f - vec.Y) * 0.5f * height; // Flip Y for window coords
+            float y = (1.0f - vec.Y) * 0.5f * height;
 
             return new Vector2(x, y);
         }
 
         private void CheckHandleSelection(int mouseX, int mouseY)
         {
-            if (!_showCropBox) {
+            if (!_showCropBox)
+            {
                 _selectedHandle = -1;
                 return;
             }
@@ -431,39 +1116,145 @@ namespace Deep3DStudio.Viewport
             int h = this.Allocation.Height;
             if (h == 0) h = 1;
 
-            Matrix4 projection = Matrix4.CreatePerspectiveFieldOfView(MathHelper.DegreesToRadians(45f), (float)w / h, 0.1f, 100f);
-            Matrix4 view = Matrix4.CreateTranslation(_panX, _panY, _zoom) *
-                           Matrix4.CreateRotationX(MathHelper.DegreesToRadians(_rotationX)) *
-                           Matrix4.CreateRotationY(MathHelper.DegreesToRadians(_rotationY));
-
-            float minDist = 15.0f; // Pixel distance threshold
+            float minDist = 15.0f;
             int bestIdx = -1;
 
-            for(int i=0; i<8; i++) {
-                Vector2 screenPos = Project(_cropCorners[i], view, projection, w, h);
+            for (int i = 0; i < 8; i++)
+            {
+                Vector2 screenPos = Project(_cropCorners[i], _viewMatrix, _projectionMatrix, w, h);
                 float d = (screenPos - new Vector2(mouseX, mouseY)).Length;
-                if (d < minDist) {
+                if (d < minDist)
+                {
                     minDist = d;
                     bestIdx = i;
                 }
             }
 
-            if (_selectedHandle != bestIdx) {
+            if (_selectedHandle != bestIdx)
+            {
                 _selectedHandle = bestIdx;
                 this.QueueDraw();
             }
         }
 
+        private int CheckGizmoSelection(int mouseX, int mouseY)
+        {
+            if (_sceneGraph == null || _sceneGraph.SelectedObjects.Count == 0)
+                return -1;
+
+            Vector3 center = Vector3.Zero;
+            foreach (var obj in _sceneGraph.SelectedObjects)
+                center += obj.Position;
+            center /= _sceneGraph.SelectedObjects.Count;
+
+            int w = this.Allocation.Width;
+            int h = this.Allocation.Height;
+
+            Vector2 screenCenter = Project(center, _viewMatrix, _projectionMatrix, w, h);
+            Vector2 screenX = Project(center + new Vector3(_gizmoSize, 0, 0), _viewMatrix, _projectionMatrix, w, h);
+            Vector2 screenY = Project(center + new Vector3(0, _gizmoSize, 0), _viewMatrix, _projectionMatrix, w, h);
+            Vector2 screenZ = Project(center + new Vector3(0, 0, _gizmoSize), _viewMatrix, _projectionMatrix, w, h);
+
+            Vector2 mouse = new Vector2(mouseX, mouseY);
+            float threshold = 15.0f;
+
+            // Check distance to each axis line
+            float distX = DistanceToLineSegment(mouse, screenCenter, screenX);
+            float distY = DistanceToLineSegment(mouse, screenCenter, screenY);
+            float distZ = DistanceToLineSegment(mouse, screenCenter, screenZ);
+
+            if (distX < threshold && distX < distY && distX < distZ) return 0;
+            if (distY < threshold && distY < distX && distY < distZ) return 1;
+            if (distZ < threshold && distZ < distX && distZ < distY) return 2;
+
+            return -1;
+        }
+
+        private float DistanceToLineSegment(Vector2 point, Vector2 lineStart, Vector2 lineEnd)
+        {
+            Vector2 line = lineEnd - lineStart;
+            float len = line.Length;
+            if (len < 0.001f) return (point - lineStart).Length;
+
+            float t = Math.Max(0, Math.Min(1, Vector2.Dot(point - lineStart, line) / (len * len)));
+            Vector2 projection = lineStart + t * line;
+            return (point - projection).Length;
+        }
+
+        private SceneObject? PickObject(int mouseX, int mouseY)
+        {
+            if (_sceneGraph == null) return null;
+
+            int w = this.Allocation.Width;
+            int h = this.Allocation.Height;
+            Vector2 mouse = new Vector2(mouseX, mouseY);
+
+            SceneObject? closest = null;
+            float minDist = float.MaxValue;
+
+            foreach (var obj in _sceneGraph.GetVisibleObjects())
+            {
+                var (boundsMin, boundsMax) = obj.GetWorldBounds();
+                var center = (boundsMin + boundsMax) * 0.5f;
+                var screenPos = Project(center, _viewMatrix, _projectionMatrix, w, h);
+                float dist = (screenPos - mouse).Length;
+
+                // Simple distance check to center
+                if (dist < 50 && dist < minDist)
+                {
+                    minDist = dist;
+                    closest = obj;
+                }
+            }
+
+            return closest;
+        }
+
+        #endregion
+
+        #region Input Events
+
         private void OnButtonPress(object o, ButtonPressEventArgs args)
         {
+            this.GrabFocus();
+
             if (args.Event.Button == 1) // Left click
             {
+                // Check gizmo first
+                int gizmoAxis = CheckGizmoSelection((int)args.Event.X, (int)args.Event.Y);
+                if (gizmoAxis >= 0 && _sceneGraph?.SelectedObjects.Count > 0)
+                {
+                    _activeGizmoAxis = gizmoAxis;
+                    _isDraggingGizmo = true;
+                    _gizmoDragStart = new Vector3((float)args.Event.X, (float)args.Event.Y, 0);
+
+                    foreach (var obj in _sceneGraph.SelectedObjects)
+                        _gizmoStartPos = obj.Position;
+
+                    this.QueueDraw();
+                    return;
+                }
+
+                // Check crop box handles
                 if (_selectedHandle != -1)
                 {
-                     _isDragging = true;
+                    _isDragging = true;
                 }
                 else
                 {
+                    // Object picking
+                    var picked = PickObject((int)args.Event.X, (int)args.Event.Y);
+                    if (picked != null && _sceneGraph != null)
+                    {
+                        bool addToSelection = (args.Event.State & Gdk.ModifierType.ControlMask) != 0;
+                        _sceneGraph.Select(picked, addToSelection);
+                        ObjectPicked?.Invoke(this, picked);
+                    }
+                    else if (_sceneGraph != null)
+                    {
+                        _sceneGraph.ClearSelection();
+                    }
+
                     _isDragging = true;
                 }
                 _lastMousePos = new Point((int)args.Event.X, (int)args.Event.Y);
@@ -481,6 +1272,9 @@ namespace Deep3DStudio.Viewport
             {
                 _isDragging = false;
                 _isPanning = false;
+                _isDraggingGizmo = false;
+                _activeGizmoAxis = -1;
+                this.QueueDraw();
             }
             else if (args.Event.Button == 2)
             {
@@ -493,19 +1287,57 @@ namespace Deep3DStudio.Viewport
             int x = (int)args.Event.X;
             int y = (int)args.Event.Y;
 
-            if (!_isDragging)
+            if (!_isDragging && !_isPanning && !_isDraggingGizmo)
             {
                 CheckHandleSelection(x, y);
+                int gizmoAxis = CheckGizmoSelection(x, y);
+                if (_activeGizmoAxis != gizmoAxis)
+                {
+                    _activeGizmoAxis = gizmoAxis;
+                    this.QueueDraw();
+                }
             }
 
-            if (_isDragging && !_isPanning)
+            if (_isDraggingGizmo && _sceneGraph != null)
+            {
+                int deltaX = x - (int)_gizmoDragStart.X;
+                int deltaY = y - (int)_gizmoDragStart.Y;
+
+                float sensitivity = 0.01f * Math.Abs(_zoom / 5.0f);
+
+                Vector3 delta = Vector3.Zero;
+                switch (_activeGizmoAxis)
+                {
+                    case 0: delta.X = deltaX * sensitivity; break;
+                    case 1: delta.Y = -deltaY * sensitivity; break;
+                    case 2: delta.Z = deltaX * sensitivity; break;
+                }
+
+                foreach (var obj in _sceneGraph.SelectedObjects)
+                {
+                    switch (_gizmoMode)
+                    {
+                        case GizmoMode.Translate:
+                            obj.Position = _gizmoStartPos + delta;
+                            break;
+                        case GizmoMode.Rotate:
+                            obj.Rotation += delta * 50;
+                            break;
+                        case GizmoMode.Scale:
+                            obj.Scale = Vector3.One + delta;
+                            break;
+                    }
+                }
+
+                this.QueueDraw();
+            }
+            else if (_isDragging && !_isPanning)
             {
                 int deltaX = x - _lastMousePos.X;
                 int deltaY = y - _lastMousePos.Y;
 
                 if (_selectedHandle != -1)
                 {
-                    // Dragging handle resizes box
                     _cropSize += deltaX * 0.01f;
                     if (_cropSize < 0.1f) _cropSize = 0.1f;
                     UpdateCropCorners();
@@ -547,9 +1379,48 @@ namespace Deep3DStudio.Viewport
             this.QueueDraw();
         }
 
-        struct Point {
-             public int X, Y;
-             public Point(int x, int y) { X = x; Y = y; }
+        private void OnKeyPress(object o, KeyPressEventArgs args)
+        {
+            switch (args.Event.Key)
+            {
+                case Gdk.Key.w:
+                case Gdk.Key.W:
+                    SetGizmoMode(GizmoMode.Translate);
+                    break;
+                case Gdk.Key.e:
+                case Gdk.Key.E:
+                    SetGizmoMode(GizmoMode.Rotate);
+                    break;
+                case Gdk.Key.r:
+                case Gdk.Key.R:
+                    SetGizmoMode(GizmoMode.Scale);
+                    break;
+                case Gdk.Key.f:
+                case Gdk.Key.F:
+                    FocusOnSelection();
+                    break;
+                case Gdk.Key.Delete:
+                    if (_sceneGraph != null)
+                    {
+                        foreach (var obj in _sceneGraph.SelectedObjects.ToList())
+                        {
+                            _sceneGraph.RemoveObject(obj);
+                        }
+                    }
+                    break;
+                case Gdk.Key.Escape:
+                    _sceneGraph?.ClearSelection();
+                    break;
+            }
+            this.QueueDraw();
+        }
+
+        #endregion
+
+        struct Point
+        {
+            public int X, Y;
+            public Point(int x, int y) { X = x; Y = y; }
         }
 
         private class GdkBindingsContext : OpenTK.IBindingsContext
@@ -566,7 +1437,6 @@ namespace Deep3DStudio.Viewport
             [DllImport("kernel32.dll", EntryPoint = "GetModuleHandle", CharSet = CharSet.Ansi)]
             private static extern IntPtr GetModuleHandle(string lpModuleName);
 
-            // Mac Support
             private const string LibDL = "libdl.dylib";
             [DllImport(LibDL)]
             private static extern IntPtr dlopen(string fileName, int flags);
@@ -577,12 +1447,10 @@ namespace Deep3DStudio.Viewport
 
             public IntPtr GetProcAddress(string procName)
             {
-                try {
+                try
+                {
                     if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                     {
-                        // On Windows, wglGetProcAddress returns null for standard OpenGL 1.1 functions
-                        // We must first try wglGetProcAddress, if that fails, use GetProcAddress from opengl32.dll module
-
                         IntPtr ptr = wglGetProcAddress(procName);
                         if (ptr == IntPtr.Zero)
                         {
@@ -607,7 +1475,7 @@ namespace Deep3DStudio.Viewport
                     }
                     else
                     {
-                         return GetProcAddressLinux(procName);
+                        return GetProcAddressLinux(procName);
                     }
                 }
                 catch
