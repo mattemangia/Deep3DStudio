@@ -315,7 +315,6 @@ namespace Deep3DStudio.Viewport
 
             // Apply Coordinate System Transformation
             Matrix4 coordTransform = Matrix4.Identity;
-            var settings = AppSettings.Instance;
 
             if (settings.CoordSystem == CoordinateSystem.RightHanded_Z_Up)
             {
