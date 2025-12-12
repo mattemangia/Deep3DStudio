@@ -835,6 +835,8 @@ namespace Deep3DStudio.Viewport
 
         private void DrawMesh(MeshData mesh, bool isSelected)
         {
+            if (mesh.Vertices.Count == 0 || mesh.Indices.Count == 0) return;
+
             bool useTexture = IniSettings.Instance.ShowTexture && mesh.Texture != null;
 
             if (useTexture)
@@ -856,6 +858,8 @@ namespace Deep3DStudio.Viewport
                 }
             }
 
+            bool hasColors = mesh.Colors.Count >= mesh.Vertices.Count;
+
             GL.Begin(PrimitiveType.Triangles);
             for (int i = 0; i < mesh.Indices.Count; i++)
             {
@@ -869,7 +873,7 @@ namespace Deep3DStudio.Viewport
                     }
                     else
                     {
-                        var c = mesh.Colors[idx];
+                        Vector3 c = hasColors && idx < mesh.Colors.Count ? mesh.Colors[idx] : new Vector3(0.7f, 0.7f, 0.7f);
                         if (isSelected)
                         {
                             GL.Color3(Math.Min(1f, c.X + 0.2f), Math.Min(1f, c.Y + 0.2f), c.Z);
