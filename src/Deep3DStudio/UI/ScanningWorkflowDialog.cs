@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Deep3DStudio.Model;
 using Gtk;
 using SkiaSharp;
 
@@ -779,7 +780,7 @@ namespace Deep3DStudio.UI
             // Get image dimensions
             try
             {
-                using var bitmap = SKBitmap.Decode(filePath);
+                using var bitmap = ImageDecoder.DecodeBitmap(filePath);
                 if (bitmap != null)
                 {
                     Width = bitmap.Width;

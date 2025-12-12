@@ -1,9 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using Gtk;
-using Gdk;
 using Cairo;
+using Deep3DStudio.Model;
+using Gdk;
+using Gtk;
 using SkiaSharp;
 
 namespace Deep3DStudio.UI
@@ -147,7 +148,7 @@ namespace Deep3DStudio.UI
             // Load and create thumbnail
             try
             {
-                using var bitmap = SKBitmap.Decode(filePath) ?? throw new InvalidOperationException("Unable to decode image.");
+                using var bitmap = ImageDecoder.DecodeBitmap(filePath);
                 using var rgba = bitmap.Copy(SKColorType.Rgba8888)
                     ?? throw new InvalidOperationException("Unable to convert image to RGBA8888.");
 

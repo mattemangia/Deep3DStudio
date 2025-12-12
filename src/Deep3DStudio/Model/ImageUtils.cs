@@ -9,7 +9,7 @@ namespace Deep3DStudio.Model
     {
         public static (DenseTensor<float> tensor, int[] shape) LoadAndPreprocessImage(string filePath, int size = 512)
         {
-            using var decoded = SKBitmap.Decode(filePath) ?? throw new FileNotFoundException($"Unable to decode image: {filePath}");
+            using var decoded = ImageDecoder.DecodeBitmap(filePath);
 
             int newWidth = decoded.Width;
             int newHeight = decoded.Height;
@@ -48,7 +48,7 @@ namespace Deep3DStudio.Model
 
         public static SKColor[] ExtractColors(string filePath, int width, int height)
         {
-            using var decoded = SKBitmap.Decode(filePath) ?? throw new FileNotFoundException($"Unable to decode image: {filePath}");
+            using var decoded = ImageDecoder.DecodeBitmap(filePath);
             using var resized = ResizeBitmap(decoded, width, height);
 
             var colors = new SKColor[width * height];

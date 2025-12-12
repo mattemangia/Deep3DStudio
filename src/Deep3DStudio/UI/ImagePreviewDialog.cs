@@ -1,7 +1,8 @@
 using System;
 using System.Runtime.InteropServices;
-using Gtk;
+using Deep3DStudio.Model;
 using Gdk;
+using Gtk;
 using SkiaSharp;
 
 namespace Deep3DStudio.UI
@@ -88,7 +89,7 @@ namespace Deep3DStudio.UI
             // Load full RGB image
             try
             {
-                using var bitmap = SKBitmap.Decode(_entry.FilePath) ?? throw new InvalidOperationException("Unable to decode image.");
+                using var bitmap = ImageDecoder.DecodeBitmap(_entry.FilePath);
                 using var rgba = bitmap.Copy(SKColorType.Rgba8888)
                     ?? throw new InvalidOperationException("Unable to convert image to RGBA8888.");
 
