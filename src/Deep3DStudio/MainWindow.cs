@@ -2334,6 +2334,22 @@ namespace Deep3DStudio
                     _statusLabel.Text = "Estimating Geometry (Feature Matching SfM)...";
                     var sfm = new Deep3DStudio.Model.SfM.SfMInference();
                     result = await Task.Run(() => sfm.ReconstructScene(_imagePaths));
+
+                    // Densify the sparse SfM point cloud
+                    if (result.Meshes.Count > 0)
+                    {
+                        _statusLabel.Text = "Densifying Point Cloud...";
+                        // Wait for UI to update
+                        while (Application.EventsPending()) Application.RunIteration();
+
+                        var denseMesh = await Task.Run(() => GenerateDensePointCloud(result));
+                        if (denseMesh.Vertices.Count > 0)
+                        {
+                            Console.WriteLine($"Densification: Replaced {result.Meshes[0].Vertices.Count} sparse points with {denseMesh.Vertices.Count} dense points.");
+                            result.Meshes.Clear();
+                            result.Meshes.Add(denseMesh);
+                        }
+                    }
                 }
 
                 if (result.Meshes.Count == 0)
@@ -2542,6 +2558,7 @@ namespace Deep3DStudio
 
             if (mesh.PixelToVertexIndex != null && mesh.PixelToVertexIndex.Length == width * height)
             {
+                // Dense mesh logic (Dust3r)
                 for (int y = 0; y < height; y++)
                 {
                     for (int x = 0; x < width; x++)
@@ -2552,77 +2569,228 @@ namespace Deep3DStudio
                         {
                             var v = mesh.Vertices[vertIdx];
                             var vCam = OpenTK.Mathematics.Vector3.TransformPosition(v, worldToCamera);
-                            depthMap[x, y] = -vCam.Z;
+                            depthMap[x, y] = Math.Abs(vCam.Z);
                         }
                     }
                 }
             }
             else
             {
-                // Estimate camera intrinsics (same as SfM uses)
-                // Focal length ~ 0.85 * max(width, height), principal point at center
+                // Sparse Point Cloud Logic (SfM)
+                // Estimate camera intrinsics
                 float focal = Math.Max(width, height) * 0.85f;
                 float cx = width / 2.0f;
                 float cy = height / 2.0f;
 
                 int projectedCount = 0;
-                int behindCamera = 0;
-                int outOfBounds = 0;
-
-                // Debug: check first few points
-                int debugCount = 0;
+                int splatRadius = 3; // Splatting to densify sparse points
 
                 foreach (var v in mesh.Vertices)
                 {
                     // Transform to camera space
                     var vCam = OpenTK.Mathematics.Vector3.TransformPosition(v, worldToCamera);
-
-                    // Debug first 5 points
-                    if (debugCount < 5)
-                    {
-                        Console.WriteLine($"    Point {debugCount}: world({v.X:F2},{v.Y:F2},{v.Z:F2}) -> cam({vCam.X:F2},{vCam.Y:F2},{vCam.Z:F2})");
-                        debugCount++;
-                    }
-
-                    // OpenCV camera looks down +Z axis, so Z should be positive for points in front
-                    // Try both conventions
                     float depth = Math.Abs(vCam.Z);
-                    if (depth < 0.01f)
-                    {
-                        behindCamera++;
-                        continue;
-                    }
 
-                    // Project to image plane using pinhole camera model
-                    // OpenCV: u = fx * X/Z + cx, v = fy * Y/Z + cy
-                    int px = (int)(focal * vCam.X / vCam.Z + cx);
-                    int py = (int)(focal * vCam.Y / vCam.Z + cy);
+                    // Check if point is roughly in front (ignoring very close clipping)
+                    if (depth < 0.1f) continue;
 
-                    // Try alternative if Z is negative (OpenGL convention)
-                    if (vCam.Z < 0)
+                    // Project to image plane
+                    // Handle both +Z and -Z conventions by checking sign
+                    int px, py;
+
+                    if (vCam.Z < 0) // OpenGL style (-Z fwd)
                     {
                         px = (int)(-focal * vCam.X / vCam.Z + cx);
                         py = (int)(-focal * vCam.Y / vCam.Z + cy);
                     }
-
-                    if (px >= 0 && px < width && py >= 0 && py < height)
+                    else // OpenCV style (+Z fwd)
                     {
-                        if (depthMap[px, py] < 0 || depth < depthMap[px, py])
-                        {
-                            depthMap[px, py] = depth;
-                            projectedCount++;
-                        }
+                        px = (int)(focal * vCam.X / vCam.Z + cx);
+                        py = (int)(focal * vCam.Y / vCam.Z + cy);
                     }
-                    else
+
+                    // Splatting loop
+                    for (int dy = -splatRadius; dy <= splatRadius; dy++)
                     {
-                        outOfBounds++;
+                        for (int dx = -splatRadius; dx <= splatRadius; dx++)
+                        {
+                            // Circular kernel
+                            if (dx*dx + dy*dy > splatRadius*splatRadius) continue;
+
+                            int nx = px + dx;
+                            int ny = py + dy;
+
+                            if (nx >= 0 && nx < width && ny >= 0 && ny < height)
+                            {
+                                // Z-Buffer test (keeping smallest depth)
+                                if (depthMap[nx, ny] < 0 || depth < depthMap[nx, ny])
+                                {
+                                    depthMap[nx, ny] = depth;
+                                    projectedCount++;
+                                }
+                            }
+                        }
                     }
                 }
 
-                Console.WriteLine($"  Depth map: {projectedCount} projected, {behindCamera} behind, {outOfBounds} out of bounds");
+                // Fill gaps to make it look solid
+                FillDepthMapGaps(depthMap, width, height);
+                Console.WriteLine($"  Depth map generated (Sparse -> Dense).");
             }
 
             return depthMap;
+        }
+
+        private void FillDepthMapGaps(float[,] depthMap, int width, int height)
+        {
+            // Simple multi-pass dilation/diffusion
+            int passes = 4;
+            for (int p = 0; p < passes; p++)
+            {
+                // Copy current state
+                float[,] nextMap = (float[,])depthMap.Clone();
+                bool changed = false;
+
+                // Parallelization for speed
+                Parallel.For(0, height, y =>
+                {
+                    for (int x = 0; x < width; x++)
+                    {
+                        if (depthMap[x, y] < 0) // If invalid pixel
+                        {
+                            // Search neighbors (3x3)
+                            float sum = 0;
+                            int count = 0;
+
+                            for (int dy = -1; dy <= 1; dy++)
+                            {
+                                int ny = y + dy;
+                                if (ny < 0 || ny >= height) continue;
+
+                                for (int dx = -1; dx <= 1; dx++)
+                                {
+                                    int nx = x + dx;
+                                    if (nx < 0 || nx >= width) continue;
+
+                                    float val = depthMap[nx, ny];
+                                    if (val > 0)
+                                    {
+                                        sum += val;
+                                        count++;
+                                    }
+                                }
+                            }
+
+                            if (count >= 2) // If surrounded by enough valid pixels
+                            {
+                                nextMap[x, y] = sum / count; // Average depth
+                                changed = true;
+                            }
+                        }
+                    }
+                });
+
+                if (!changed) break;
+
+                // Update main map
+                depthMap = nextMap;
+                // Note: Reassigning the parameter reference 'depthMap' doesn't change the caller's reference
+                // BUT we need to output it.
+                // Wait, 'depthMap' here is a reference to the array object.
+                // 'nextMap' is a NEW array object.
+                // Reassigning 'depthMap = nextMap' only changes the local variable.
+                // I must copy back or use the array directly.
+
+                // Copy back
+                 Parallel.For(0, height, y =>
+                 {
+                     for (int x = 0; x < width; x++)
+                         depthMap[x, y] = nextMap[x, y];
+                 });
+            }
+        }
+
+        private MeshData GenerateDensePointCloud(SceneResult result)
+        {
+            var denseMesh = new MeshData();
+            var lockObj = new object();
+
+            // Use the sparse mesh to generate depth maps first
+            if (result.Meshes.Count == 0) return denseMesh;
+            var sparseMesh = result.Meshes[0];
+
+            Parallel.ForEach(result.Poses, pose =>
+            {
+                // 1. Regenerate Depth Map (Filled)
+                var depthMap = ExtractDepthMap(sparseMesh, pose.Width, pose.Height, pose.WorldToCamera);
+
+                // 2. Load Image for Colors
+                if (!System.IO.File.Exists(pose.ImagePath)) return;
+
+                using var img = SkiaSharp.SKBitmap.Decode(pose.ImagePath);
+                if (img == null) return;
+
+                float scaleX = (float)img.Width / pose.Width;
+                float scaleY = (float)img.Height / pose.Height;
+
+                // 3. Back-project
+                float focal = Math.Max(pose.Width, pose.Height) * 0.85f;
+                float cx = pose.Width / 2.0f;
+                float cy = pose.Height / 2.0f;
+
+                var localVerts = new List<OpenTK.Mathematics.Vector3>();
+                var localColors = new List<OpenTK.Mathematics.Vector3>();
+
+                // Stride to manage density (e.g., every 3rd pixel)
+                int stride = 3;
+
+                for(int y = 0; y < pose.Height; y+=stride)
+                {
+                    for(int x = 0; x < pose.Width; x+=stride)
+                    {
+                        float d = depthMap[x, y];
+                        if (d <= 0) continue; // Invalid
+
+                        // Back-project using same intrinsics/convention as ExtractDepthMap
+                        // Assuming Z = -d (OpenGL convention used in ExtractDepthMap)
+                        // X = (u - cx) * d / f
+                        // Y = (v - cy) * d / f
+
+                        float z_cam = -d;
+                        float x_cam = (x - cx) * d / focal;
+                        float y_cam = (y - cy) * d / focal;
+
+                        var pCam = new OpenTK.Mathematics.Vector3(x_cam, y_cam, z_cam);
+                        var pWorld = OpenTK.Mathematics.Vector3.TransformPosition(pCam, pose.CameraToWorld);
+
+                        // Color sampling
+                        int imgX = (int)(x * scaleX);
+                        int imgY = (int)(y * scaleY);
+                        imgX = Math.Clamp(imgX, 0, img.Width - 1);
+                        imgY = Math.Clamp(imgY, 0, img.Height - 1);
+
+                        var color = img.GetPixel(imgX, imgY);
+
+                        localVerts.Add(pWorld);
+                        localColors.Add(new OpenTK.Mathematics.Vector3(color.Red/255f, color.Green/255f, color.Blue/255f));
+                    }
+                }
+
+                lock(lockObj)
+                {
+                    denseMesh.Vertices.AddRange(localVerts);
+                    denseMesh.Colors.AddRange(localColors);
+                }
+            });
+
+            // Random shuffle to avoid striping artifacts if we render limit?
+            // Not needed for full render.
+
+            // Basic Voxel Grid filter to remove duplicates/overlapping points
+            // This is important because multiple cameras see the same surface
+            // We reuse the Voxelize logic's grid approach but for points
+
+            return denseMesh;
         }
 
         private (float[,,], OpenTK.Mathematics.Vector3, float) VoxelizePoints(List<MeshData> meshes, int maxRes = 200)
