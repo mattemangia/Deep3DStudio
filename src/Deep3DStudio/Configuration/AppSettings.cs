@@ -51,6 +51,15 @@ namespace Deep3DStudio.Configuration
         public bool ShowWireframe { get; set; } = false;
         public PointCloudColorMode PointCloudColor { get; set; } = PointCloudColorMode.RGB;
 
+        // Viewport Colors (stored as RGB floats 0-1)
+        public float ViewportBgR { get; set; } = 0.12f;
+        public float ViewportBgG { get; set; } = 0.12f;
+        public float ViewportBgB { get; set; } = 0.14f;
+
+        public float GridColorR { get; set; } = 0.35f;
+        public float GridColorG { get; set; } = 0.35f;
+        public float GridColorB { get; set; } = 0.35f;
+
         private AppSettings() { }
 
         public static AppSettings Instance

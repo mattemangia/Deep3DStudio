@@ -280,7 +280,6 @@ namespace Deep3DStudio.Viewport
                 GL.Enable(EnableCap.DepthTest);
                 GL.Enable(EnableCap.Blend);
                 GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-                GL.ClearColor(0.12f, 0.12f, 0.14f, 1.0f);
                 GL.PointSize(3.0f);
                 GL.LineWidth(1.0f);
             }
@@ -297,6 +296,10 @@ namespace Deep3DStudio.Viewport
 
             UpdateFPS();
             this.MakeCurrent();
+
+            // Apply background color from settings (each frame so changes are reflected)
+            var settings = AppSettings.Instance;
+            GL.ClearColor(settings.ViewportBgR, settings.ViewportBgG, settings.ViewportBgB, 1.0f);
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
             int w = this.Allocation.Width;
@@ -377,9 +380,10 @@ namespace Deep3DStudio.Viewport
 
             int size = 10;
             float step = 1.0f;
+            var s = AppSettings.Instance;
 
-            // Major grid lines
-            GL.Color4(0.35f, 0.35f, 0.35f, 0.5f);
+            // Major grid lines (use grid color from settings)
+            GL.Color4(s.GridColorR, s.GridColorG, s.GridColorB, 0.5f);
             for (float i = -size; i <= size; i += step * 5)
             {
                 GL.Vertex3(i, 0, -size);
@@ -388,8 +392,8 @@ namespace Deep3DStudio.Viewport
                 GL.Vertex3(size, 0, i);
             }
 
-            // Minor grid lines
-            GL.Color4(0.25f, 0.25f, 0.25f, 0.3f);
+            // Minor grid lines (dimmer version of grid color)
+            GL.Color4(s.GridColorR * 0.7f, s.GridColorG * 0.7f, s.GridColorB * 0.7f, 0.3f);
             for (float i = -size; i <= size; i += step)
             {
                 if (Math.Abs(i % (step * 5)) < 0.001f) continue;
