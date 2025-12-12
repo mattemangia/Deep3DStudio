@@ -63,6 +63,12 @@ namespace Deep3DStudio.Viewport
         private float _fps = 0;
         private DateTime _lastFpsUpdate = DateTime.Now;
 
+        // Modern GL State (Fallback if Legacy fails)
+        private Shader? _shader;
+        private int _gridVao, _gridVbo;
+        private int _axesVao, _axesVbo;
+        private bool _useModernGL = false;
+
         // Display Options
         public bool ShowGrid { get; set; } = true;
         public bool ShowAxes { get; set; } = true;
@@ -96,9 +102,9 @@ namespace Deep3DStudio.Viewport
         {
             this.HasDepthBuffer = true;
             this.HasStencilBuffer = false;
-            // Requesting version 2.1 ensures we get a context compatible with
-            // the fixed-function pipeline (GL.Begin/End) used in this codebase.
-            this.SetRequiredVersion(2, 1);
+            // Requesting version 3.3 (Compatibility Profile) to satisfy GDK requirements
+            // while maintaining support for fixed-function pipeline commands.
+            this.SetRequiredVersion(3, 3);
 
             this.HasFocus = true;
             this.CanFocus = true;
@@ -297,6 +303,15 @@ namespace Deep3DStudio.Viewport
 
             if (_loaded)
             {
+                // Check if we got a Core Profile (no GL.Begin support)
+                string version = GL.GetString(StringName.Version);
+                Console.WriteLine($"GL Version: {version}");
+
+                // Heuristic: If version >= 3.2 and we suspect Core profile (or just to be safe), init modern GL
+                // Note: On some drivers, Compatibility profile is available even in 4.x
+                // We will try to init modern GL resources for grid/axes just in case.
+                InitModernGL();
+
                 GL.Enable(EnableCap.DepthTest);
                 GL.Enable(EnableCap.Blend);
                 GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
@@ -305,6 +320,107 @@ namespace Deep3DStudio.Viewport
 
                 // Ensure initial frame is drawn immediately
                 this.QueueDraw();
+            }
+        }
+
+        private void InitModernGL()
+        {
+            try
+            {
+                string vs = @"
+                    #version 330 core
+                    layout (location = 0) in vec3 aPos;
+                    layout (location = 1) in vec3 aColor;
+                    uniform mat4 model;
+                    uniform mat4 view;
+                    uniform mat4 projection;
+                    out vec3 vertexColor;
+                    void main() {
+                        gl_Position = projection * view * model * vec4(aPos, 1.0);
+                        vertexColor = aColor;
+                    }";
+
+                string fs = @"
+                    #version 330 core
+                    in vec3 vertexColor;
+                    out vec4 FragColor;
+                    void main() {
+                        FragColor = vec4(vertexColor, 1.0);
+                    }";
+
+                _shader = new Shader(vs, fs);
+
+                // Initialize Grid Buffers
+                List<float> gridVerts = new List<float>();
+                int size = 10;
+                float step = 1.0f;
+                var s = AppSettings.Instance;
+
+                for (float i = -size; i <= size; i += step)
+                {
+                    // Z-lines
+                    gridVerts.Add(i); gridVerts.Add(0); gridVerts.Add(-size);
+                    gridVerts.Add(s.GridColorR); gridVerts.Add(s.GridColorG); gridVerts.Add(s.GridColorB);
+
+                    gridVerts.Add(i); gridVerts.Add(0); gridVerts.Add(size);
+                    gridVerts.Add(s.GridColorR); gridVerts.Add(s.GridColorG); gridVerts.Add(s.GridColorB);
+
+                    // X-lines
+                    gridVerts.Add(-size); gridVerts.Add(0); gridVerts.Add(i);
+                    gridVerts.Add(s.GridColorR); gridVerts.Add(s.GridColorG); gridVerts.Add(s.GridColorB);
+
+                    gridVerts.Add(size); gridVerts.Add(0); gridVerts.Add(i);
+                    gridVerts.Add(s.GridColorR); gridVerts.Add(s.GridColorG); gridVerts.Add(s.GridColorB);
+                }
+
+                _gridVao = GL.GenVertexArray();
+                _gridVbo = GL.GenBuffer();
+
+                GL.BindVertexArray(_gridVao);
+                GL.BindBuffer(BufferTarget.ArrayBuffer, _gridVbo);
+                GL.BufferData(BufferTarget.ArrayBuffer, gridVerts.Count * sizeof(float), gridVerts.ToArray(), BufferUsageHint.StaticDraw);
+
+                // Position
+                GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 0);
+                GL.EnableVertexAttribArray(0);
+
+                // Color
+                GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 3 * sizeof(float));
+                GL.EnableVertexAttribArray(1);
+
+                // Axes Buffers
+                float[] axesVerts = {
+                    // X (Red)
+                    0,0,0, 1,0,0,
+                    1.5f,0,0, 1,0,0,
+                    // Y (Green)
+                    0,0,0, 0,1,0,
+                    0,1.5f,0, 0,1,0,
+                    // Z (Blue)
+                    0,0,0, 0,0,1,
+                    0,0,1.5f, 0,0,1
+                };
+
+                _axesVao = GL.GenVertexArray();
+                _axesVbo = GL.GenBuffer();
+
+                GL.BindVertexArray(_axesVao);
+                GL.BindBuffer(BufferTarget.ArrayBuffer, _axesVbo);
+                GL.BufferData(BufferTarget.ArrayBuffer, axesVerts.Length * sizeof(float), axesVerts, BufferUsageHint.StaticDraw);
+
+                GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 0);
+                GL.EnableVertexAttribArray(0);
+
+                GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 3 * sizeof(float));
+                GL.EnableVertexAttribArray(1);
+
+                _useModernGL = true;
+                Console.WriteLine("Modern GL initialized successfully.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Modern GL Init failed: {ex.Message}. Falling back to Legacy.");
+                _useModernGL = false;
             }
         }
 
@@ -353,8 +469,36 @@ namespace Deep3DStudio.Viewport
             GL.LoadMatrix(ref finalView);
 
             // Draw scene elements
-            if (ShowGrid) DrawGrid();
-            if (ShowAxes) DrawAxesEnhanced();
+            if (_useModernGL && _shader != null)
+            {
+                _shader.Use();
+                _shader.SetMatrix4("projection", _projectionMatrix);
+                _shader.SetMatrix4("view", finalView); // finalView is coordTransform * _viewMatrix
+                _shader.SetMatrix4("model", Matrix4.Identity);
+
+                if (ShowGrid)
+                {
+                    GL.BindVertexArray(_gridVao);
+                    GL.DrawArrays(PrimitiveType.Lines, 0, 84); // Approx count
+                }
+                if (ShowAxes)
+                {
+                    GL.LineWidth(2.5f);
+                    GL.BindVertexArray(_axesVao);
+                    GL.DrawArrays(PrimitiveType.Lines, 0, 6);
+                    GL.LineWidth(1.0f);
+                }
+
+                // Note: For now, meshes and other objects still use legacy GL.
+                // If the context is strictly Core, they won't render.
+                // But Grid/Axes verify the context is working.
+                GL.UseProgram(0);
+            }
+            else
+            {
+                if (ShowGrid) DrawGrid();
+                if (ShowAxes) DrawAxesEnhanced();
+            }
 
             // Draw scene graph objects
             if (_sceneGraph != null)
