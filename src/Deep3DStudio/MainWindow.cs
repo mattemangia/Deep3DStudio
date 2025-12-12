@@ -1960,18 +1960,41 @@ namespace Deep3DStudio
             }
 
             string workflow = _workflowCombo.ActiveText;
-            _statusLabel.Text = $"Running {workflow} on {IniSettings.Instance.Device}...";
+            var settings = IniSettings.Instance;
+            _statusLabel.Text = $"Running {workflow} on {settings.Device}...";
 
             while (Application.EventsPending()) Application.RunIteration();
 
             try
             {
-                _statusLabel.Text = "Estimating Geometry (Dust3r)...";
-                var result = await Task.Run(() => _inference.ReconstructScene(_imagePaths));
+                SceneResult result = new SceneResult();
+
+                // Determine which reconstruction method to use
+                // 1. If reconstruction method is Dust3r and model exists, use it.
+                // 2. If reconstruction method is FeatureMatching or Dust3r model missing, use SfM.
+
+                bool useDust3r = settings.ReconstructionMethod == ReconstructionMethod.Dust3r;
+                if (useDust3r && !_inference.IsLoaded)
+                {
+                    Console.WriteLine("Dust3r model not found, falling back to Feature Matching SfM.");
+                    useDust3r = false;
+                }
+
+                if (useDust3r)
+                {
+                    _statusLabel.Text = "Estimating Geometry (Dust3r)...";
+                    result = await Task.Run(() => _inference.ReconstructScene(_imagePaths));
+                }
+                else
+                {
+                    _statusLabel.Text = "Estimating Geometry (Feature Matching SfM)...";
+                    var sfm = new Deep3DStudio.Model.SfM.SfMInference();
+                    result = await Task.Run(() => sfm.ReconstructScene(_imagePaths));
+                }
 
                 if (result.Meshes.Count == 0)
                 {
-                    _statusLabel.Text = "Dust3r Inference failed.";
+                    _statusLabel.Text = "Reconstruction failed. No meshes generated.";
                     return;
                 }
 

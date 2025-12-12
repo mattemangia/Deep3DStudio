@@ -10,6 +10,7 @@ namespace Deep3DStudio.Configuration
         private ComboBoxText _meshingCombo;
         private ComboBoxText _coordCombo;
         private ComboBoxText _bboxCombo;
+        private ComboBoxText _reconCombo;
         private ColorButton _bgColorButton;
         private ColorButton _gridColorButton;
 
@@ -49,6 +50,14 @@ namespace Deep3DStudio.Configuration
                 _meshingCombo.AppendText(name);
             _meshingCombo.Active = (int)IniSettings.Instance.MeshingAlgo;
             generalBox.PackStart(_meshingCombo, false, false, 0);
+
+            // Reconstruction Method
+            generalBox.PackStart(new Label("Reconstruction Method:") { Halign = Align.Start }, false, false, 0);
+            _reconCombo = new ComboBoxText();
+            foreach (var name in Enum.GetNames(typeof(ReconstructionMethod)))
+                _reconCombo.AppendText(name);
+            _reconCombo.Active = (int)IniSettings.Instance.ReconstructionMethod;
+            generalBox.PackStart(_reconCombo, false, false, 0);
 
             // Coordinate System
             generalBox.PackStart(new Label("Coordinate System:") { Halign = Align.Start }, false, false, 0);
@@ -196,6 +205,7 @@ namespace Deep3DStudio.Configuration
         {
             _deviceCombo.Active = (int)IniSettings.Instance.Device;
             _meshingCombo.Active = (int)IniSettings.Instance.MeshingAlgo;
+            _reconCombo.Active = (int)IniSettings.Instance.ReconstructionMethod;
             _coordCombo.Active = (int)IniSettings.Instance.CoordSystem;
             _bboxCombo.Active = (int)IniSettings.Instance.BoundingBoxStyle;
 
@@ -230,6 +240,7 @@ namespace Deep3DStudio.Configuration
             // General settings
             settings.Device = (ComputeDevice)_deviceCombo.Active;
             settings.MeshingAlgo = (MeshingAlgorithm)_meshingCombo.Active;
+            settings.ReconstructionMethod = (ReconstructionMethod)_reconCombo.Active;
             settings.CoordSystem = (CoordinateSystem)_coordCombo.Active;
             settings.BoundingBoxStyle = (BoundingBoxMode)_bboxCombo.Active;
 
