@@ -20,7 +20,8 @@ namespace Deep3DStudio.Viewport
         None,
         Translate,
         Rotate,
-        Scale
+        Scale,
+        Select // Added Select mode
     }
 
     /// <summary>
@@ -49,7 +50,7 @@ namespace Deep3DStudio.Viewport
         private Vector3[] _cropCorners = new Vector3[8];
 
         // Gizmo State
-        private GizmoMode _gizmoMode = GizmoMode.Translate;
+        private GizmoMode _gizmoMode = GizmoMode.Select; // Default to Select
         private int _activeGizmoAxis = -1; // -1=none, 0=X, 1=Y, 2=Z
         private bool _isDraggingGizmo = false;
         private Vector3 _gizmoStartPos;
@@ -77,6 +78,19 @@ namespace Deep3DStudio.Viewport
         // Matrices for picking
         private Matrix4 _viewMatrix;
         private Matrix4 _projectionMatrix;
+
+        // Color Palette for Selection
+        private static readonly Vector3[] ColorPalette = new Vector3[]
+        {
+            new Vector3(1.0f, 0.0f, 0.0f),
+            new Vector3(0.0f, 1.0f, 0.0f),
+            new Vector3(0.0f, 0.0f, 1.0f),
+            new Vector3(1.0f, 1.0f, 0.0f),
+            new Vector3(1.0f, 0.0f, 1.0f),
+            new Vector3(0.0f, 1.0f, 1.0f),
+            new Vector3(1.0f, 0.5f, 0.0f),
+            new Vector3(0.5f, 0.0f, 1.0f)
+        };
 
         public ThreeDView()
         {
@@ -351,7 +365,8 @@ namespace Deep3DStudio.Viewport
             }
 
             // Draw gizmo for selected objects
-            if (ShowGizmo && _sceneGraph != null && _sceneGraph.SelectedObjects.Count > 0)
+            // Hide transform gizmos when in Select Mode
+            if (ShowGizmo && _sceneGraph != null && _sceneGraph.SelectedObjects.Count > 0 && _gizmoMode != GizmoMode.Select)
             {
                 DrawGizmo();
             }
@@ -662,6 +677,9 @@ namespace Deep3DStudio.Viewport
                     var c = mesh.Colors[idx];
                     if (isSelected)
                     {
+                        // Add tint to selection if we want to visualize it on the mesh itself,
+                        // but the bounding box is usually enough.
+                        // Keeping existing behavior:
                         GL.Color3(Math.Min(1f, c.X + 0.2f), Math.Min(1f, c.Y + 0.2f), c.Z);
                     }
                     else
@@ -679,30 +697,86 @@ namespace Deep3DStudio.Viewport
             var (min, max) = (obj.BoundsMin, obj.BoundsMax);
 
             GL.LineWidth(2.0f);
-            GL.Color4(1.0f, 0.6f, 0.0f, 0.8f);
+
+            // Assign color based on Object ID
+            var color = ColorPalette[obj.Id % ColorPalette.Length];
+            GL.Color4(color.X, color.Y, color.Z, 0.8f);
+
+            var mode = AppSettings.Instance.BoundingBoxStyle;
 
             GL.Begin(PrimitiveType.Lines);
 
-            // Bottom face
-            GL.Vertex3(min.X, min.Y, min.Z); GL.Vertex3(max.X, min.Y, min.Z);
-            GL.Vertex3(max.X, min.Y, min.Z); GL.Vertex3(max.X, min.Y, max.Z);
-            GL.Vertex3(max.X, min.Y, max.Z); GL.Vertex3(min.X, min.Y, max.Z);
-            GL.Vertex3(min.X, min.Y, max.Z); GL.Vertex3(min.X, min.Y, min.Z);
+            if (mode == BoundingBoxMode.Full)
+            {
+                // Bottom face
+                GL.Vertex3(min.X, min.Y, min.Z); GL.Vertex3(max.X, min.Y, min.Z);
+                GL.Vertex3(max.X, min.Y, min.Z); GL.Vertex3(max.X, min.Y, max.Z);
+                GL.Vertex3(max.X, min.Y, max.Z); GL.Vertex3(min.X, min.Y, max.Z);
+                GL.Vertex3(min.X, min.Y, max.Z); GL.Vertex3(min.X, min.Y, min.Z);
 
-            // Top face
-            GL.Vertex3(min.X, max.Y, min.Z); GL.Vertex3(max.X, max.Y, min.Z);
-            GL.Vertex3(max.X, max.Y, min.Z); GL.Vertex3(max.X, max.Y, max.Z);
-            GL.Vertex3(max.X, max.Y, max.Z); GL.Vertex3(min.X, max.Y, max.Z);
-            GL.Vertex3(min.X, max.Y, max.Z); GL.Vertex3(min.X, max.Y, min.Z);
+                // Top face
+                GL.Vertex3(min.X, max.Y, min.Z); GL.Vertex3(max.X, max.Y, min.Z);
+                GL.Vertex3(max.X, max.Y, min.Z); GL.Vertex3(max.X, max.Y, max.Z);
+                GL.Vertex3(max.X, max.Y, max.Z); GL.Vertex3(min.X, max.Y, max.Z);
+                GL.Vertex3(min.X, max.Y, max.Z); GL.Vertex3(min.X, max.Y, min.Z);
 
-            // Vertical edges
-            GL.Vertex3(min.X, min.Y, min.Z); GL.Vertex3(min.X, max.Y, min.Z);
-            GL.Vertex3(max.X, min.Y, min.Z); GL.Vertex3(max.X, max.Y, min.Z);
-            GL.Vertex3(max.X, min.Y, max.Z); GL.Vertex3(max.X, max.Y, max.Z);
-            GL.Vertex3(min.X, min.Y, max.Z); GL.Vertex3(min.X, max.Y, max.Z);
+                // Vertical edges
+                GL.Vertex3(min.X, min.Y, min.Z); GL.Vertex3(min.X, max.Y, min.Z);
+                GL.Vertex3(max.X, min.Y, min.Z); GL.Vertex3(max.X, max.Y, min.Z);
+                GL.Vertex3(max.X, min.Y, max.Z); GL.Vertex3(max.X, max.Y, max.Z);
+                GL.Vertex3(min.X, min.Y, max.Z); GL.Vertex3(min.X, max.Y, max.Z);
+            }
+            else // Corners
+            {
+                float cornerSize = Math.Min(Math.Min(max.X - min.X, max.Y - min.Y), max.Z - min.Z) * 0.2f;
+                DrawCornerBox(min, max, cornerSize);
+            }
 
             GL.End();
             GL.LineWidth(1.0f);
+        }
+
+        private void DrawCornerBox(Vector3 min, Vector3 max, float s)
+        {
+            // Bottom-Left-Front
+            GL.Vertex3(min.X, min.Y, min.Z); GL.Vertex3(min.X + s, min.Y, min.Z);
+            GL.Vertex3(min.X, min.Y, min.Z); GL.Vertex3(min.X, min.Y + s, min.Z);
+            GL.Vertex3(min.X, min.Y, min.Z); GL.Vertex3(min.X, min.Y, min.Z + s);
+
+            // Bottom-Right-Front
+            GL.Vertex3(max.X, min.Y, min.Z); GL.Vertex3(max.X - s, min.Y, min.Z);
+            GL.Vertex3(max.X, min.Y, min.Z); GL.Vertex3(max.X, min.Y + s, min.Z);
+            GL.Vertex3(max.X, min.Y, min.Z); GL.Vertex3(max.X, min.Y, min.Z + s);
+
+            // Bottom-Left-Back
+            GL.Vertex3(min.X, min.Y, max.Z); GL.Vertex3(min.X + s, min.Y, max.Z);
+            GL.Vertex3(min.X, min.Y, max.Z); GL.Vertex3(min.X, min.Y + s, max.Z);
+            GL.Vertex3(min.X, min.Y, max.Z); GL.Vertex3(min.X, min.Y, max.Z - s);
+
+            // Bottom-Right-Back
+            GL.Vertex3(max.X, min.Y, max.Z); GL.Vertex3(max.X - s, min.Y, max.Z);
+            GL.Vertex3(max.X, min.Y, max.Z); GL.Vertex3(max.X, min.Y + s, max.Z);
+            GL.Vertex3(max.X, min.Y, max.Z); GL.Vertex3(max.X, min.Y, max.Z - s);
+
+            // Top-Left-Front
+            GL.Vertex3(min.X, max.Y, min.Z); GL.Vertex3(min.X + s, max.Y, min.Z);
+            GL.Vertex3(min.X, max.Y, min.Z); GL.Vertex3(min.X, max.Y - s, min.Z);
+            GL.Vertex3(min.X, max.Y, min.Z); GL.Vertex3(min.X, max.Y, min.Z + s);
+
+            // Top-Right-Front
+            GL.Vertex3(max.X, max.Y, min.Z); GL.Vertex3(max.X - s, max.Y, min.Z);
+            GL.Vertex3(max.X, max.Y, min.Z); GL.Vertex3(max.X, max.Y - s, min.Z);
+            GL.Vertex3(max.X, max.Y, min.Z); GL.Vertex3(max.X, max.Y, min.Z + s);
+
+            // Top-Left-Back
+            GL.Vertex3(min.X, max.Y, max.Z); GL.Vertex3(min.X + s, max.Y, max.Z);
+            GL.Vertex3(min.X, max.Y, max.Z); GL.Vertex3(min.X, max.Y - s, max.Z);
+            GL.Vertex3(min.X, max.Y, max.Z); GL.Vertex3(min.X, max.Y, max.Z - s);
+
+            // Top-Right-Back
+            GL.Vertex3(max.X, max.Y, max.Z); GL.Vertex3(max.X - s, max.Y, max.Z);
+            GL.Vertex3(max.X, max.Y, max.Z); GL.Vertex3(max.X, max.Y - s, max.Z);
+            GL.Vertex3(max.X, max.Y, max.Z); GL.Vertex3(max.X, max.Y, max.Z - s);
         }
 
         private void DrawCameras()
@@ -1142,7 +1216,7 @@ namespace Deep3DStudio.Viewport
 
         private int CheckGizmoSelection(int mouseX, int mouseY)
         {
-            if (_sceneGraph == null || _sceneGraph.SelectedObjects.Count == 0)
+            if (_sceneGraph == null || _sceneGraph.SelectedObjects.Count == 0 || _gizmoMode == GizmoMode.Select)
                 return -1;
 
             Vector3 center = Vector3.Zero;
@@ -1203,6 +1277,7 @@ namespace Deep3DStudio.Viewport
                 float dist = (screenPos - mouse).Length;
 
                 // Simple distance check to center
+                // A better approach would be ray-AABB intersection
                 if (dist < 50 && dist < minDist)
                 {
                     minDist = dist;
@@ -1245,16 +1320,33 @@ namespace Deep3DStudio.Viewport
                 }
                 else
                 {
-                    // Object picking
+                    // Object picking - Always allow picking in Select mode or if no gizmo was hit
                     var picked = PickObject((int)args.Event.X, (int)args.Event.Y);
+
+                    // Allow Shift for multiple selection
+                    bool multipleSelection = (args.Event.State & Gdk.ModifierType.ShiftMask) != 0 ||
+                                             (args.Event.State & Gdk.ModifierType.ControlMask) != 0;
+
                     if (picked != null && _sceneGraph != null)
                     {
-                        bool addToSelection = (args.Event.State & Gdk.ModifierType.ControlMask) != 0;
-                        _sceneGraph.Select(picked, addToSelection);
+                        if (multipleSelection)
+                        {
+                            // Toggle selection
+                            if (picked.Selected)
+                                _sceneGraph.Deselect(picked);
+                            else
+                                _sceneGraph.Select(picked, true);
+                        }
+                        else
+                        {
+                            _sceneGraph.Select(picked, false);
+                        }
+
                         ObjectPicked?.Invoke(this, picked);
                     }
-                    else if (_sceneGraph != null)
+                    else if (_sceneGraph != null && !multipleSelection)
                     {
+                        // Deselect all if clicked on empty space without shift
                         _sceneGraph.ClearSelection();
                     }
 
@@ -1264,6 +1356,8 @@ namespace Deep3DStudio.Viewport
             }
             else if (args.Event.Button == 2 || (args.Event.Button == 1 && (args.Event.State & Gdk.ModifierType.ShiftMask) != 0))
             {
+                // Pan with middle mouse or Shift+Left (Note: Shift+Left collides with multiple select, but panning usually requires drag)
+                // We'll prioritize panning if Shift is held and mouse moves
                 _isPanning = true;
                 _lastMousePos = new Point((int)args.Event.X, (int)args.Event.Y);
             }
@@ -1336,6 +1430,9 @@ namespace Deep3DStudio.Viewport
             }
             else if (_isDragging && !_isPanning)
             {
+                // Rotate view if not dragging a handle and not selecting
+                // But in Select mode, left drag should probably still rotate view unless box selecting (which isn't implemented)
+
                 int deltaX = x - _lastMousePos.X;
                 int deltaY = y - _lastMousePos.Y;
 
@@ -1386,6 +1483,10 @@ namespace Deep3DStudio.Viewport
         {
             switch (args.Event.Key)
             {
+                case Gdk.Key.q: // Q for Select
+                case Gdk.Key.Q:
+                    SetGizmoMode(GizmoMode.Select);
+                    break;
                 case Gdk.Key.w:
                 case Gdk.Key.W:
                     SetGizmoMode(GizmoMode.Translate);

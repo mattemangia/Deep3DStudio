@@ -805,6 +805,14 @@ namespace Deep3DStudio
             toolbar.Style = ToolbarStyle.Icons;
             int iconSize = 24;
 
+            // Select Tool
+            var selectBtn = new ToolButton(AppIconFactory.GenerateIcon("select", iconSize), "Select");
+            selectBtn.TooltipText = "Select Objects (Q)";
+            selectBtn.Clicked += (s, e) => _viewport.SetGizmoMode(GizmoMode.Select);
+            toolbar.Insert(selectBtn, -1);
+
+            toolbar.Insert(new SeparatorToolItem(), -1);
+
             // Open Files
             var openBtn = new ToolButton(AppIconFactory.GenerateIcon("open", iconSize), "Open Images");
             openBtn.TooltipText = "Load input images for reconstruction";

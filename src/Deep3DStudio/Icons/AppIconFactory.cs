@@ -26,6 +26,7 @@ namespace Deep3DStudio.Icons
                         case "wireframe": DrawWireframeIcon(cr, size); break;
                         case "rgb": DrawRgbIcon(cr, size); break;
                         case "depthmap": DrawDepthMapIcon(cr, size); break;
+                        case "select": DrawSelectIcon(cr, size); break;
                     }
                 }
 
@@ -169,6 +170,26 @@ namespace Deep3DStudio.Icons
             cr.SetSourceRGB(0.3, 0.3, 0.3);
             cr.LineWidth = 1;
             cr.Rectangle(startX, startY, barWidth, barHeight);
+            cr.Stroke();
+        }
+
+        private static void DrawSelectIcon(Context cr, int size)
+        {
+            cr.SetSourceRGB(0.9, 0.9, 0.9);
+            cr.LineWidth = 2;
+
+            // Cursor arrow
+            cr.MoveTo(size * 0.3, size * 0.2);
+            cr.LineTo(size * 0.3, size * 0.8);
+            cr.LineTo(size * 0.45, size * 0.65);
+            cr.LineTo(size * 0.6, size * 0.9);
+            cr.LineTo(size * 0.7, size * 0.85);
+            cr.LineTo(size * 0.55, size * 0.6);
+            cr.LineTo(size * 0.8, size * 0.6);
+            cr.ClosePath();
+
+            cr.FillPreserve();
+            cr.SetSourceRGB(0.2, 0.2, 0.2);
             cr.Stroke();
         }
 
