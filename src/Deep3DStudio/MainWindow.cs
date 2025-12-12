@@ -7,6 +7,7 @@ using Deep3DStudio.Configuration;
 using Deep3DStudio.Meshing;
 using Deep3DStudio.UI;
 using Deep3DStudio.Scene;
+using Deep3DStudio.IO;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Linq;
@@ -115,8 +116,108 @@ namespace Deep3DStudio
             // Load Initial Settings
             ApplyViewSettings();
 
+            // Enable Drag and Drop
+            Gtk.Drag.DestSet(this, DestDefaults.All, new TargetEntry[] { new TargetEntry("text/uri-list", 0, 0) }, Gdk.DragAction.Copy);
+            this.DragDataReceived += OnDragDataReceived;
+
             this.ShowAll();
         }
+
+        #region Drag and Drop
+
+        private void OnDragDataReceived(object o, DragDataReceivedArgs args)
+        {
+            if (args.SelectionData.Length > 0 && args.SelectionData.Format == 8)
+            {
+                var uris = System.Text.Encoding.UTF8.GetString(args.SelectionData.Data).Split('\n');
+                var imageFiles = new List<string>();
+                int importedCount = 0;
+
+                foreach (var uri in uris)
+                {
+                    var cleanUri = uri.Trim();
+                    if (string.IsNullOrEmpty(cleanUri)) continue;
+
+                    if (cleanUri.StartsWith("file://"))
+                    {
+                        // On Linux/Unix, file:///path/to/file.
+                        // On Windows, file:///C:/path/to/file
+                        string path = new Uri(cleanUri).LocalPath;
+
+                        // LocalPath is already unescaped by the Uri class
+
+                        if (System.IO.Directory.Exists(path)) continue; // Skip directories for now
+
+                        string ext = System.IO.Path.GetExtension(path).ToLower();
+
+                        if (ext == ".obj" || ext == ".stl" || (ext == ".ply" && IsMeshPly(path)))
+                        {
+                            try {
+                                var meshData = MeshImporter.Load(path);
+                                var meshObj = new MeshObject(System.IO.Path.GetFileNameWithoutExtension(path), meshData);
+                                _sceneGraph.AddObject(meshObj);
+                                importedCount++;
+                            } catch (Exception ex) {
+                                Console.WriteLine($"Error importing mesh {path}: {ex.Message}");
+                            }
+                        }
+                        else if (ext == ".xyz" || ext == ".ply") // PLY defaults to point cloud if not clearly mesh or failed mesh check
+                        {
+                            try {
+                                var pcObj = PointCloudImporter.Load(path);
+                                _sceneGraph.AddObject(pcObj);
+                                importedCount++;
+                            } catch (Exception ex) {
+                                Console.WriteLine($"Error importing point cloud {path}: {ex.Message}");
+                            }
+                        }
+                        else if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".tif" || ext == ".tiff" || ext == ".bmp")
+                        {
+                            imageFiles.Add(path);
+                        }
+                    }
+                }
+
+                if (imageFiles.Count > 0)
+                {
+                    foreach (var img in imageFiles)
+                    {
+                        if (!_imagePaths.Contains(img))
+                        {
+                            _imagePaths.Add(img);
+                            _imageBrowser.AddImage(img);
+                        }
+                    }
+                    _statusLabel.Text = $"{_imageBrowser.ImageCount} images loaded";
+                }
+
+                if (importedCount > 0)
+                {
+                    _statusLabel.Text = $"Imported {importedCount} 3D objects";
+                    _viewport.QueueDraw();
+                    _sceneTreeView.RefreshTree();
+                }
+            }
+            Gtk.Drag.Finish(args.Context, true, false, args.Time);
+        }
+
+        private bool IsMeshPly(string path)
+        {
+            // Simple heuristic check if PLY contains "element face"
+            try {
+                using (var reader = new System.IO.StreamReader(path)) {
+                    for(int i=0; i<20; i++) { // Check first 20 lines
+                        var line = reader.ReadLine();
+                        if (line == null) break;
+                        if (line.Contains("element face") && !line.Contains("element face 0")) return true;
+                        if (line == "end_header") break;
+                    }
+                }
+            } catch {}
+            return false;
+        }
+
+        #endregion
 
         #region Menu Bar
 
@@ -131,13 +232,17 @@ namespace Deep3DStudio
             var fileMenuItem = new MenuItem("_File");
             fileMenuItem.Submenu = fileMenu;
 
-            var openImagesItem = new MenuItem("_Open Images...");
+            var openImagesItem = new MenuItem("_Open Pictures...");
             openImagesItem.Activated += OnAddImages;
             fileMenu.Append(openImagesItem);
 
             var importMeshItem = new MenuItem("_Import Mesh...");
             importMeshItem.Activated += OnImportMesh;
             fileMenu.Append(importMeshItem);
+
+            var importPointsItem = new MenuItem("Import _Point Cloud...");
+            importPointsItem.Activated += OnImportPointCloud;
+            fileMenu.Append(importPointsItem);
 
             fileMenu.Append(new SeparatorMenuItem());
 
@@ -965,7 +1070,50 @@ namespace Deep3DStudio
 
             if (fc.Run() == (int)ResponseType.Accept)
             {
-                _statusLabel.Text = $"Import from {fc.Filename} - Not yet implemented";
+                try
+                {
+                    string path = fc.Filename;
+                    var meshData = MeshImporter.Load(path);
+                    var meshObj = new MeshObject(System.IO.Path.GetFileNameWithoutExtension(path), meshData);
+                    _sceneGraph.AddObject(meshObj);
+                    _sceneTreeView.RefreshTree();
+                    _viewport.QueueDraw();
+                    _statusLabel.Text = $"Imported mesh from {path}";
+                }
+                catch (Exception ex)
+                {
+                    ShowMessage($"Error importing mesh: {ex.Message}");
+                }
+            }
+            fc.Destroy();
+        }
+
+        private void OnImportPointCloud(object? sender, EventArgs e)
+        {
+            var fc = new FileChooserDialog("Import Point Cloud", this, FileChooserAction.Open,
+                "Cancel", ResponseType.Cancel, "Open", ResponseType.Accept);
+
+            var filter = new FileFilter();
+            filter.Name = "Point Cloud Files";
+            filter.AddPattern("*.ply");
+            filter.AddPattern("*.xyz");
+            fc.AddFilter(filter);
+
+            if (fc.Run() == (int)ResponseType.Accept)
+            {
+                try
+                {
+                    string path = fc.Filename;
+                    var pcObj = PointCloudImporter.Load(path);
+                    _sceneGraph.AddObject(pcObj);
+                    _sceneTreeView.RefreshTree();
+                    _viewport.QueueDraw();
+                    _statusLabel.Text = $"Imported point cloud from {path}";
+                }
+                catch (Exception ex)
+                {
+                    ShowMessage($"Error importing point cloud: {ex.Message}");
+                }
             }
             fc.Destroy();
         }
