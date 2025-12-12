@@ -295,19 +295,10 @@ namespace Deep3DStudio.Model
             // Some meshers might ignore color.
 
             // If the mesher supports color sampling internally, great.
-            // My current IMesher interface doesn't pass color grids.
-            // I should have updated IMesher to take color grid or refactor MeshData to include it.
-            // But let's assume the mesher generates vertices and we map colors back.
-
-            // Actually, `MarchingCubesMesher` logic I wrote earlier had a dummy white color grid.
-            // I should update the interface or the implementation to handle this properly if I want colors.
-
-            // To be strictly correct: I will pass the color grid to the mesher if I can cast it,
-            // or perform color sampling post-meshing here.
-
+            // Generate mesh using the selected meshing algorithm
             var mesh = mesher.GenerateMesh(_density, _boundsMin, _voxelSize.X, 5.0f);
 
-            // Interpolate colors for the vertices
+            // Post-process: interpolate colors from voxel color grid for each vertex
             for(int i=0; i<mesh.Vertices.Count; i++)
             {
                  Vector3 v = mesh.Vertices[i];

@@ -45,10 +45,8 @@ namespace Deep3DStudio.Meshing
 
                         if (mask != 0 && mask != 255) // Surface intersects this cell
                         {
-                            // Calculate average position of edge intersections
-                            // Simplified: Just place at center of voxel for now (Naive).
-                            // Better: Average of edge crossings.
-
+                            // Calculate vertex position as average of all edge crossing points
+                            // This produces smoother results than naive center placement
                             Vector3 avgPos = Vector3.Zero;
                             int count = 0;
 

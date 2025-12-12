@@ -21,7 +21,8 @@ namespace Deep3DStudio.Viewport
         Translate,
         Rotate,
         Scale,
-        Select // Added Select mode
+        Select,
+        Pen // Triangle editing mode
     }
 
     /// <summary>
@@ -83,6 +84,13 @@ namespace Deep3DStudio.Viewport
         // Matrices for picking
         private Matrix4 _viewMatrix;
         private Matrix4 _projectionMatrix;
+
+        // Mesh Editing Tool
+        private MeshEditingTool _meshEditingTool = new MeshEditingTool();
+        public MeshEditingTool MeshEditingTool => _meshEditingTool;
+
+        // Triangle editing events
+        public event EventHandler? TriangleSelectionChanged;
 
         // Color Palette for Selection
         private static readonly Vector3[] ColorPalette = new Vector3[]
@@ -524,10 +532,17 @@ namespace Deep3DStudio.Viewport
             }
 
             // Draw gizmo for selected objects
-            // Hide transform gizmos when in Select Mode
-            if (ShowGizmo && _sceneGraph != null && _sceneGraph.SelectedObjects.Count > 0 && _gizmoMode != GizmoMode.Select)
+            // Hide transform gizmos when in Select or Pen Mode
+            if (ShowGizmo && _sceneGraph != null && _sceneGraph.SelectedObjects.Count > 0 &&
+                _gizmoMode != GizmoMode.Select && _gizmoMode != GizmoMode.Pen)
             {
                 DrawGizmo();
+            }
+
+            // Draw selected triangles highlight (Pen mode)
+            if (_gizmoMode == GizmoMode.Pen && _meshEditingTool.SelectedTriangles.Count > 0)
+            {
+                DrawSelectedTriangles();
             }
 
             // Draw crop box
@@ -1049,6 +1064,54 @@ namespace Deep3DStudio.Viewport
             GL.LineWidth(1.0f);
         }
 
+        /// <summary>
+        /// Draw highlight overlay for selected triangles in Pen mode
+        /// </summary>
+        private void DrawSelectedTriangles()
+        {
+            var vertices = _meshEditingTool.GetSelectedTriangleVertices();
+            if (vertices.Count == 0)
+                return;
+
+            // Disable depth test for overlay effect, or enable for proper occlusion
+            GL.Enable(EnableCap.Blend);
+            GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+
+            // Draw filled triangles with semi-transparent highlight
+            GL.Begin(PrimitiveType.Triangles);
+            GL.Color4(1.0f, 0.5f, 0.0f, 0.4f); // Orange highlight
+
+            for (int i = 0; i < vertices.Count; i++)
+            {
+                GL.Vertex3(vertices[i]);
+            }
+
+            GL.End();
+
+            // Draw wireframe edges for clarity
+            GL.LineWidth(2.0f);
+            GL.Begin(PrimitiveType.Lines);
+            GL.Color4(1.0f, 0.3f, 0.0f, 1.0f); // Darker orange
+
+            for (int i = 0; i < vertices.Count; i += 3)
+            {
+                // Edge 0-1
+                GL.Vertex3(vertices[i]);
+                GL.Vertex3(vertices[i + 1]);
+                // Edge 1-2
+                GL.Vertex3(vertices[i + 1]);
+                GL.Vertex3(vertices[i + 2]);
+                // Edge 2-0
+                GL.Vertex3(vertices[i + 2]);
+                GL.Vertex3(vertices[i]);
+            }
+
+            GL.End();
+            GL.LineWidth(1.0f);
+
+            GL.Disable(EnableCap.Blend);
+        }
+
         private void DrawGizmo()
         {
             if (_sceneGraph == null || _sceneGraph.SelectedObjects.Count == 0) return;
@@ -1490,6 +1553,15 @@ namespace Deep3DStudio.Viewport
 
             if (args.Event.Button == 1) // Left click
             {
+                // Pen mode: triangle picking
+                if (_gizmoMode == GizmoMode.Pen)
+                {
+                    HandlePenModeClick((int)args.Event.X, (int)args.Event.Y, args.Event.State);
+                    _isDragging = true;
+                    _lastMousePos = new Point((int)args.Event.X, (int)args.Event.Y);
+                    return;
+                }
+
                 // Check gizmo first
                 int gizmoAxis = CheckGizmoSelection((int)args.Event.X, (int)args.Event.Y);
                 if (gizmoAxis >= 0 && _sceneGraph?.SelectedObjects.Count > 0)
@@ -1701,12 +1773,22 @@ namespace Deep3DStudio.Viewport
                 case Gdk.Key.R:
                     SetGizmoMode(GizmoMode.Scale);
                     break;
+                case Gdk.Key.p:
+                case Gdk.Key.P:
+                    SetGizmoMode(GizmoMode.Pen);
+                    break;
                 case Gdk.Key.f:
                 case Gdk.Key.F:
                     FocusOnSelection();
                     break;
                 case Gdk.Key.Delete:
-                    if (_sceneGraph != null)
+                    // In Pen mode, delete selected triangles
+                    if (_gizmoMode == GizmoMode.Pen && _meshEditingTool.SelectedTriangles.Count > 0)
+                    {
+                        _meshEditingTool.DeleteSelectedTriangles();
+                        TriangleSelectionChanged?.Invoke(this, EventArgs.Empty);
+                    }
+                    else if (_sceneGraph != null)
                     {
                         foreach (var obj in _sceneGraph.SelectedObjects.ToList())
                         {
@@ -1715,10 +1797,113 @@ namespace Deep3DStudio.Viewport
                     }
                     break;
                 case Gdk.Key.Escape:
-                    _sceneGraph?.ClearSelection();
+                    // In Pen mode, clear triangle selection first
+                    if (_gizmoMode == GizmoMode.Pen && _meshEditingTool.SelectedTriangles.Count > 0)
+                    {
+                        _meshEditingTool.ClearSelection();
+                        TriangleSelectionChanged?.Invoke(this, EventArgs.Empty);
+                    }
+                    else
+                    {
+                        _sceneGraph?.ClearSelection();
+                    }
                     break;
             }
             this.QueueDraw();
+        }
+
+        /// <summary>
+        /// Handle click events in Pen (triangle editing) mode
+        /// </summary>
+        private void HandlePenModeClick(int mouseX, int mouseY, Gdk.ModifierType modifiers)
+        {
+            if (_sceneGraph == null)
+                return;
+
+            // Get ray from mouse position
+            var (rayOrigin, rayDir) = GetRayFromScreenPoint(mouseX, mouseY);
+
+            // Get all mesh objects from scene
+            var meshObjects = _sceneGraph.GetVisibleObjects()
+                .OfType<MeshObject>()
+                .ToList();
+
+            // Perform triangle picking
+            var (pickedMesh, triangleIndex, distance) = _meshEditingTool.PickTriangle(rayOrigin, rayDir, meshObjects);
+
+            bool addToSelection = (modifiers & Gdk.ModifierType.ShiftMask) != 0 ||
+                                  (modifiers & Gdk.ModifierType.ControlMask) != 0;
+
+            if (pickedMesh != null && triangleIndex >= 0)
+            {
+                if (addToSelection)
+                {
+                    _meshEditingTool.ToggleTriangleSelection(pickedMesh, triangleIndex);
+                }
+                else
+                {
+                    _meshEditingTool.SelectTriangle(pickedMesh, triangleIndex, false);
+                }
+            }
+            else if (!addToSelection)
+            {
+                _meshEditingTool.ClearSelection();
+            }
+
+            TriangleSelectionChanged?.Invoke(this, EventArgs.Empty);
+            this.QueueDraw();
+        }
+
+        /// <summary>
+        /// Generate a ray from camera through screen point for picking
+        /// </summary>
+        private (Vector3 origin, Vector3 direction) GetRayFromScreenPoint(int screenX, int screenY)
+        {
+            int width = this.Allocation.Width;
+            int height = this.Allocation.Height;
+
+            if (width <= 0 || height <= 0)
+                return (Vector3.Zero, -Vector3.UnitZ);
+
+            // Convert screen coordinates to normalized device coordinates (-1 to 1)
+            float ndcX = (2.0f * screenX / width) - 1.0f;
+            float ndcY = 1.0f - (2.0f * screenY / height); // Y is flipped
+
+            // Create near and far points in NDC
+            Vector4 nearPoint = new Vector4(ndcX, ndcY, -1.0f, 1.0f);
+            Vector4 farPoint = new Vector4(ndcX, ndcY, 1.0f, 1.0f);
+
+            // Unproject to world space
+            Matrix4 invProjection = _projectionMatrix.Inverted();
+            Matrix4 invView = _viewMatrix.Inverted();
+            Matrix4 invVP = invProjection * invView;
+
+            Vector4 nearWorld = nearPoint * invVP;
+            Vector4 farWorld = farPoint * invVP;
+
+            // Perspective divide
+            if (Math.Abs(nearWorld.W) > 1e-6f)
+            {
+                nearWorld /= nearWorld.W;
+            }
+            if (Math.Abs(farWorld.W) > 1e-6f)
+            {
+                farWorld /= farWorld.W;
+            }
+
+            Vector3 rayOrigin = new Vector3(nearWorld.X, nearWorld.Y, nearWorld.Z);
+            Vector3 rayDir = new Vector3(farWorld.X - nearWorld.X, farWorld.Y - nearWorld.Y, farWorld.Z - nearWorld.Z);
+
+            if (rayDir.LengthSquared > 1e-6f)
+            {
+                rayDir.Normalize();
+            }
+            else
+            {
+                rayDir = -Vector3.UnitZ;
+            }
+
+            return (rayOrigin, rayDir);
         }
 
         #endregion
