@@ -40,6 +40,10 @@ namespace Deep3DStudio
 
             win.Show();
             Application.Run();
+
+            // Prevent premature garbage collection of the Gtk.Application instance
+            // while the native main loop is running.
+            GC.KeepAlive(app);
         }
     }
 }

@@ -497,6 +497,7 @@ namespace Deep3DStudio.Viewport
                 // Note: For now, meshes and other objects still use legacy GL.
                 // If the context is strictly Core, they won't render.
                 // But Grid/Axes verify the context is working.
+                GL.BindVertexArray(0);
                 GL.UseProgram(0);
             }
             else
