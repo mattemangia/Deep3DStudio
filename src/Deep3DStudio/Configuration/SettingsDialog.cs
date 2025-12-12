@@ -9,12 +9,13 @@ namespace Deep3DStudio.Configuration
         private ComboBoxText _deviceCombo;
         private ComboBoxText _meshingCombo;
         private ComboBoxText _coordCombo;
+        private ComboBoxText _bboxCombo;
         private ColorButton _bgColorButton;
         private ColorButton _gridColorButton;
 
         public SettingsDialog(Gtk.Window parent) : base("Settings", parent, DialogFlags.Modal)
         {
-            this.SetDefaultSize(400, 400);
+            this.SetDefaultSize(400, 450);
 
             var vbox = this.ContentArea;
             vbox.Margin = 20;
@@ -43,6 +44,14 @@ namespace Deep3DStudio.Configuration
                 _coordCombo.AppendText(name);
             _coordCombo.Active = (int)AppSettings.Instance.CoordSystem;
             vbox.PackStart(_coordCombo, false, false, 0);
+
+            // Bounding Box Style
+            vbox.PackStart(new Label("Bounding Box Style:") { Halign = Align.Start }, false, false, 0);
+            _bboxCombo = new ComboBoxText();
+            foreach (var name in Enum.GetNames(typeof(BoundingBoxMode)))
+                _bboxCombo.AppendText(name);
+            _bboxCombo.Active = (int)AppSettings.Instance.BoundingBoxStyle;
+            vbox.PackStart(_bboxCombo, false, false, 0);
 
             // Separator
             vbox.PackStart(new Separator(Orientation.Horizontal), false, false, 10);
@@ -90,6 +99,7 @@ namespace Deep3DStudio.Configuration
             AppSettings.Instance.Device = (ComputeDevice)_deviceCombo.Active;
             AppSettings.Instance.MeshingAlgo = (MeshingAlgorithm)_meshingCombo.Active;
             AppSettings.Instance.CoordSystem = (CoordinateSystem)_coordCombo.Active;
+            AppSettings.Instance.BoundingBoxStyle = (BoundingBoxMode)_bboxCombo.Active;
 
             // Save colors
             var bgColor = _bgColorButton.Rgba;

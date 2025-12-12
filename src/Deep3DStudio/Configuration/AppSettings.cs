@@ -33,6 +33,12 @@ namespace Deep3DStudio.Configuration
         DistanceMap // Colormap based on distance from camera/origin
     }
 
+    public enum BoundingBoxMode
+    {
+        Corners,
+        Full
+    }
+
     public class AppSettings
     {
         private static AppSettings _instance;
@@ -50,6 +56,9 @@ namespace Deep3DStudio.Configuration
         public bool ShowPointCloud { get; set; } = false;
         public bool ShowWireframe { get; set; } = false;
         public PointCloudColorMode PointCloudColor { get; set; } = PointCloudColorMode.RGB;
+
+        // Bounding Box Settings
+        public BoundingBoxMode BoundingBoxStyle { get; set; } = BoundingBoxMode.Full;
 
         // Viewport Colors (stored as RGB floats 0-1)
         public float ViewportBgR { get; set; } = 0.12f;
