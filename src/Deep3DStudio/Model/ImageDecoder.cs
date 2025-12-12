@@ -43,7 +43,22 @@ namespace Deep3DStudio.Model
                 var info = new SKImageInfo(bgra.Width, bgra.Height, SKColorType.Bgra8888, SKAlphaType.Unpremul);
                 var bitmap = new SKBitmap(info);
 
-                bitmap.WritePixels(info, bgra.Data, bgra.Step());
+                unsafe
+                {
+                    byte* srcPtr = (byte*)bgra.Data;
+                    byte* dstPtr = (byte*)bitmap.GetPixels();
+                    long height = bgra.Height;
+                    long widthInBytes = bgra.Width * 4; // 4 bytes per pixel for BGRA8888
+                    long srcStep = bgra.Step();
+                    long dstStep = bitmap.RowBytes;
+
+                    for (int y = 0; y < height; y++)
+                    {
+                        Buffer.MemoryCopy(srcPtr, dstPtr, widthInBytes, widthInBytes);
+                        srcPtr += srcStep;
+                        dstPtr += dstStep;
+                    }
+                }
                 return bitmap;
             }
             catch (Exception ex)
