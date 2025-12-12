@@ -1,5 +1,7 @@
 using System;
 using Gtk;
+using Deep3DStudio.Icons;
+using Deep3DStudio.Configuration;
 
 namespace Deep3DStudio
 {
@@ -13,6 +15,22 @@ namespace Deep3DStudio
             Environment.SetEnvironmentVariable("MESA_GL_VERSION_OVERRIDE", "3.3COMPAT");
 
             Application.Init();
+
+            // Initialize settings from INI file (platform-specific location)
+            var settings = IniSettings.Instance;
+            Console.WriteLine($"Settings loaded from: {IniSettings.GetSettingsPath()}");
+
+            // Set default application icon for all windows
+            try
+            {
+                var iconSet = ApplicationIcon.CreateIconSet();
+                Gtk.Window.SetDefaultIconList(iconSet);
+                Console.WriteLine("Application icon set successfully.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Warning: Could not set application icon: {ex.Message}");
+            }
 
             var app = new Application("org.Deep3DStudio.Deep3DStudio", GLib.ApplicationFlags.None);
             app.Register(GLib.Cancellable.Current);
