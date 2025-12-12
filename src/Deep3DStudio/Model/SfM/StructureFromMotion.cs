@@ -133,28 +133,72 @@ namespace Deep3DStudio.Model.SfM
 
             // 5. Output
             var mesh = new MeshData();
+
+            // Coordinate Conversion Matrix M (OpenCV -> OpenGL)
+            // Flip Y and Z axes: (x, y, z) -> (x, -y, -z)
+            // This applies to both World Points and Camera Axes
+
+            var minBound = new Vector3(float.MaxValue);
+            var maxBound = new Vector3(float.MinValue);
+
             foreach (var mp in _map)
             {
-                // Convert OpenCV Point3d to OpenTK Vector3
-                // Simple filter: Check reasonably in front of cameras?
-                mesh.Vertices.Add(new Vector3((float)mp.Position.X, (float)mp.Position.Y, (float)mp.Position.Z));
+                // Apply M to Point: (x, -y, -z)
+                var p = new Vector3((float)mp.Position.X, -(float)mp.Position.Y, -(float)mp.Position.Z);
+                mesh.Vertices.Add(p);
                 mesh.Colors.Add(new Vector3((float)mp.Color.Val2 / 255f, (float)mp.Color.Val1 / 255f, (float)mp.Color.Val0 / 255f)); // RGB vs BGR
+
+                minBound = Vector3.ComponentMin(minBound, p);
+                maxBound = Vector3.ComponentMax(maxBound, p);
             }
+
+            Console.WriteLine($"SfM Output: {mesh.Vertices.Count} points. Bounds: {minBound} to {maxBound}");
 
             foreach (var v in _views)
             {
                 if (v.IsRegistered)
                 {
+                    // Convert OpenCV Pose (R, t) to OpenGL Pose (R', t')
+                    // R' = M * R * M
+                    // t' = M * t
+
+                    var R_cv = v.R;
+                    var t_cv = v.t;
+
+                    using var R_gl = new Mat(3, 3, MatType.CV_64F);
+                    using var t_gl = new Mat(3, 1, MatType.CV_64F);
+
+                    // R_gl = M * R_cv * M
+                    // Row 0: R00, -R01, -R02
+                    R_gl.Set(0, 0, R_cv.At<double>(0, 0));
+                    R_gl.Set(0, 1, -R_cv.At<double>(0, 1));
+                    R_gl.Set(0, 2, -R_cv.At<double>(0, 2));
+
+                    // Row 1: -R10, R11, R12
+                    R_gl.Set(1, 0, -R_cv.At<double>(1, 0));
+                    R_gl.Set(1, 1, R_cv.At<double>(1, 1));
+                    R_gl.Set(1, 2, R_cv.At<double>(1, 2));
+
+                    // Row 2: -R20, R21, R22
+                    R_gl.Set(2, 0, -R_cv.At<double>(2, 0));
+                    R_gl.Set(2, 1, R_cv.At<double>(2, 1));
+                    R_gl.Set(2, 2, R_cv.At<double>(2, 2));
+
+                    // t_gl = M * t_cv -> (tx, -ty, -tz)
+                    t_gl.Set(0, 0, t_cv.At<double>(0, 0));
+                    t_gl.Set(1, 0, -t_cv.At<double>(1, 0));
+                    t_gl.Set(2, 0, -t_cv.At<double>(2, 0));
+
+                    var camToWorld = CvPoseToOpenTK(R_gl, t_gl); // Returns M_gl.Inverted() (Camera -> World)
+
                     result.Poses.Add(new CameraPose
                     {
                         ImageIndex = v.Index,
                         ImagePath = v.Path,
                         Width = v.Size.Width,
                         Height = v.Size.Height,
-                        // OpenCV Pose (R, t) is World->Camera.
-                        // We store Camera->World.
-                        CameraToWorld = CvPoseToOpenTK(v.R, v.t),
-                        WorldToCamera = CvPoseToOpenTK(v.R, v.t).Inverted()
+                        CameraToWorld = camToWorld,
+                        WorldToCamera = camToWorld.Inverted()
                     });
                 }
             }

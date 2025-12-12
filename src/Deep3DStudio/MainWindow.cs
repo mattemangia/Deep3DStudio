@@ -1474,7 +1474,7 @@ namespace Deep3DStudio
                             for (int x = 0; x < width; x++)
                             {
                                 float d = depthMap[x, y];
-                                if (d > 0 && d < float.MaxValue)
+                                if (d > 0)
                                 {
                                     if (d < minDepth) minDepth = d;
                                     if (d > maxDepth) maxDepth = d;
@@ -1491,11 +1491,19 @@ namespace Deep3DStudio
                             for(int x=0; x<width; x++)
                             {
                                 float d = depthMap[x, y];
-                                float t = (d - minDepth) / range;
-                                t = Math.Clamp(t, 0f, 1f);
+                                if (d <= 0)
+                                {
+                                    // Transparent background
+                                    bitmap.SetPixel(x, y, new SkiaSharp.SKColor(0, 0, 0, 0));
+                                }
+                                else
+                                {
+                                    float t = (d - minDepth) / range;
+                                    t = Math.Clamp(t, 0f, 1f);
 
-                                var (r, g, b) = ImageUtils.TurboColormap(t);
-                                bitmap.SetPixel(x, y, new SkiaSharp.SKColor((byte)(r*255), (byte)(g*255), (byte)(b*255), 255));
+                                    var (r, g, b) = ImageUtils.TurboColormap(t);
+                                    bitmap.SetPixel(x, y, new SkiaSharp.SKColor((byte)(r*255), (byte)(g*255), (byte)(b*255), 255));
+                                }
                             }
                         }
 
@@ -2530,7 +2538,7 @@ namespace Deep3DStudio
 
             for (int y = 0; y < height; y++)
                 for (int x = 0; x < width; x++)
-                    depthMap[x, y] = float.MaxValue;
+                    depthMap[x, y] = -1.0f; // Initialize as invalid/background
 
             if (mesh.PixelToVertexIndex != null && mesh.PixelToVertexIndex.Length == width * height)
             {
@@ -2599,7 +2607,7 @@ namespace Deep3DStudio
 
                     if (px >= 0 && px < width && py >= 0 && py < height)
                     {
-                        if (depth < depthMap[px, py])
+                        if (depthMap[px, py] < 0 || depth < depthMap[px, py])
                         {
                             depthMap[px, py] = depth;
                             projectedCount++;
