@@ -930,6 +930,7 @@ namespace Deep3DStudio
             _workflowCombo = new ComboBoxText();
             _workflowCombo.AppendText("Dust3r (Fast)");
             _workflowCombo.AppendText("NeRF (Refined)");
+            _workflowCombo.AppendText("Interior Scan");
             _workflowCombo.Active = 0;
             wfBox.PackStart(_workflowCombo, false, false, 0);
             wfItem.Add(wfBox);
@@ -1464,6 +1465,24 @@ namespace Deep3DStudio
 
                     _statusLabel.Text = "Dust3r & Meshing Complete.";
                 }
+                else if (workflow == "Interior Scan")
+                {
+                    _statusLabel.Text = $"Meshing Interior (High Res) using {AppSettings.Instance.MeshingAlgo}...";
+
+                    var meshedResult = await Task.Run(() => {
+                         // Use higher resolution (e.g. 500) for interiors to capture details in large spaces
+                         var (grid, min, size) = VoxelizePoints(result.Meshes, 500);
+                         IMesher mesher = GetMesher(AppSettings.Instance.MeshingAlgo);
+                         return mesher.GenerateMesh(grid, min, size, 0.5f);
+                    });
+
+                    var meshObj = new MeshObject("Interior Mesh", meshedResult);
+                    _sceneGraph.AddObject(meshObj);
+
+                    AddCamerasToScene(result);
+
+                    _statusLabel.Text = "Interior Scan Complete.";
+                }
                 else
                 {
                     _statusLabel.Text = "Initializing NeRF Voxel Grid...";
@@ -1597,7 +1616,7 @@ namespace Deep3DStudio
             return depthMap;
         }
 
-        private (float[,,], OpenTK.Mathematics.Vector3, float) VoxelizePoints(List<MeshData> meshes)
+        private (float[,,], OpenTK.Mathematics.Vector3, float) VoxelizePoints(List<MeshData> meshes, int maxRes = 200)
         {
             var min = new OpenTK.Mathematics.Vector3(float.MaxValue);
             var max = new OpenTK.Mathematics.Vector3(float.MinValue);
@@ -1613,7 +1632,7 @@ namespace Deep3DStudio
             int h = (int)((max.Y - min.Y) / voxelSize) + 5;
             int d = (int)((max.Z - min.Z) / voxelSize) + 5;
 
-            if (w > 200) { voxelSize *= (w/200f); w=200; h=(int)((max.Y-min.Y)/voxelSize)+5; d=(int)((max.Z-min.Z)/voxelSize)+5; }
+            if (w > maxRes) { voxelSize *= (w/(float)maxRes); w=maxRes; h=(int)((max.Y-min.Y)/voxelSize)+5; d=(int)((max.Z-min.Z)/voxelSize)+5; }
 
             float[,,] grid = new float[w,h,d];
 
