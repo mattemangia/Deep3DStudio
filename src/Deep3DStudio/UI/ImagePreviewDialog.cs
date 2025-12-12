@@ -229,7 +229,7 @@ namespace Deep3DStudio.UI
                     t = Math.Clamp(t, 0f, 1f);
 
                     // Turbo colormap
-                    var (r, g, b) = ImageBrowserPanel.TurboColormap(t);
+                    var (r, g, b) = ImageUtils.TurboColormap(t);
 
                     int idx = (y * displayWidth + x) * 4;
                     pixels[idx] = (byte)(r * 255);
@@ -262,7 +262,7 @@ namespace Deep3DStudio.UI
                 for (int x = 0; x < width; x++)
                 {
                     float t = (float)x / width;
-                    var (r, g, b) = ImageBrowserPanel.TurboColormap(t);
+                    var (r, g, b) = ImageUtils.TurboColormap(t);
                     cr.SetSourceRGB(r, g, b);
                     cr.Rectangle(x, 0, 1, height);
                     cr.Fill();

@@ -71,6 +71,18 @@ namespace Deep3DStudio.IO
                 }
             }
 
+            // If no indices were generated (no faces), it might be a point cloud.
+            // In that case, add all raw vertices.
+            if (mesh.Indices.Count == 0 && rawVertices.Count > 0)
+            {
+                mesh.Vertices = rawVertices;
+                for (int i = 0; i < rawVertices.Count; i++)
+                {
+                    mesh.Colors.Add(new Vector3(0.8f));
+                    mesh.UVs.Add(Vector2.Zero);
+                }
+            }
+
             // Try to load texture material if mtl file exists
             // This is a simplified check, ideally we parse mtllib
             string mtlPath = Path.ChangeExtension(filepath, ".mtl");
@@ -79,22 +91,26 @@ namespace Deep3DStudio.IO
                 // Very basic parser to find map_Kd
                 foreach(var line in File.ReadLines(mtlPath))
                 {
-                     var parts = line.Trim().Split(new[]{' '}, StringSplitOptions.RemoveEmptyEntries);
-                     if (parts.Length >= 2 && parts[0] == "map_Kd")
+                     var trimmedLine = line.Trim();
+                     if (trimmedLine.StartsWith("map_Kd"))
                      {
-                         string texPath = line.Substring(parts[0].Length).Trim();
-                         if (!Path.IsPathRooted(texPath))
-                             texPath = Path.Combine(Path.GetDirectoryName(filepath) ?? "", texPath);
-
-                         if (File.Exists(texPath))
+                         var parts = trimmedLine.Split(new[]{' '}, 2, StringSplitOptions.RemoveEmptyEntries);
+                         if (parts.Length >= 2)
                          {
-                             try {
-                                 mesh.Texture = ImageDecoder.DecodeBitmap(texPath);
-                             } catch (Exception ex) {
-                                 Console.WriteLine("Failed to load texture: " + ex.Message);
+                             string texPath = parts[1].Trim();
+                             if (!Path.IsPathRooted(texPath))
+                                 texPath = Path.Combine(Path.GetDirectoryName(filepath) ?? "", texPath);
+
+                             if (File.Exists(texPath))
+                             {
+                                 try {
+                                     mesh.Texture = ImageDecoder.DecodeBitmap(texPath);
+                                 } catch (Exception ex) {
+                                     Console.WriteLine("Failed to load texture: " + ex.Message);
+                                 }
                              }
+                             break; // Only load first texture found
                          }
-                         break; // Only load first texture found
                      }
                 }
             }

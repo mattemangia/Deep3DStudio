@@ -798,30 +798,7 @@ namespace Deep3DStudio.Viewport
 
         private static Vector3 TurboColormap(float t)
         {
-            t = Math.Max(0f, Math.Min(1f, t));
-            float r, g, b;
-
-            if (t < 0.25f)
-            {
-                float s = t / 0.25f;
-                r = 0.0f; g = s; b = 1.0f;
-            }
-            else if (t < 0.5f)
-            {
-                float s = (t - 0.25f) / 0.25f;
-                r = 0.0f; g = 1.0f; b = 1.0f - s;
-            }
-            else if (t < 0.75f)
-            {
-                float s = (t - 0.5f) / 0.25f;
-                r = s; g = 1.0f; b = 0.0f;
-            }
-            else
-            {
-                float s = (t - 0.75f) / 0.25f;
-                r = 1.0f; g = 1.0f - s; b = 0.0f;
-            }
-
+            var (r, g, b) = ImageUtils.TurboColormap(t);
             return new Vector3(r, g, b);
         }
 

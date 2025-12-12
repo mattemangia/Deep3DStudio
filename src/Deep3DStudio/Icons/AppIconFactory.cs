@@ -159,8 +159,7 @@ namespace Deep3DStudio.Icons
             {
                 // Turbo-like colormap: blue -> cyan -> green -> yellow -> red
                 double t = (double)i / (steps - 1);
-                double r, g, b;
-                TurboColormap(t, out r, out g, out b);
+                var (r, g, b) = Model.ImageUtils.TurboColormap((float)t);
 
                 cr.SetSourceRGB(r, g, b);
                 cr.Rectangle(startX + i * stepWidth, startY, stepWidth + 1, barHeight);
@@ -222,35 +221,5 @@ namespace Deep3DStudio.Icons
             cr.Stroke();
         }
 
-        private static void TurboColormap(double t, out double r, out double g, out double b)
-        {
-            // Simplified turbo colormap approximation
-            t = Math.Max(0, Math.Min(1, t));
-
-            if (t < 0.25)
-            {
-                // Blue to Cyan
-                double s = t / 0.25;
-                r = 0.0; g = s; b = 1.0;
-            }
-            else if (t < 0.5)
-            {
-                // Cyan to Green
-                double s = (t - 0.25) / 0.25;
-                r = 0.0; g = 1.0; b = 1.0 - s;
-            }
-            else if (t < 0.75)
-            {
-                // Green to Yellow
-                double s = (t - 0.5) / 0.25;
-                r = s; g = 1.0; b = 0.0;
-            }
-            else
-            {
-                // Yellow to Red
-                double s = (t - 0.75) / 0.25;
-                r = 1.0; g = 1.0 - s; b = 0.0;
-            }
-        }
     }
 }
