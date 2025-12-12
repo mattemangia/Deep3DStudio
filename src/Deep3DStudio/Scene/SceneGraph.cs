@@ -184,7 +184,7 @@ namespace Deep3DStudio.Scene
     {
         public MeshData MeshData { get; set; }
         public bool ShowAsPointCloud { get; set; } = false;
-        public float PointSize { get; set; } = 3.0f;
+        public float PointSize { get; set; } = 8.0f;
         public bool ShowWireframe { get; set; } = false;
 
         // Statistics
@@ -257,7 +257,7 @@ namespace Deep3DStudio.Scene
     {
         public List<Vector3> Points { get; set; } = new List<Vector3>();
         public List<Vector3> Colors { get; set; } = new List<Vector3>();
-        public float PointSize { get; set; } = 3.0f;
+        public float PointSize { get; set; } = 8.0f;
 
         public int PointCount => Points.Count;
 
