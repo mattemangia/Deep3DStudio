@@ -352,7 +352,7 @@ namespace Deep3DStudio.Texturing
             SKBitmap? cameraImage;
             try
             {
-                cameraImage = SKBitmap.Decode(camera.ImagePath);
+                cameraImage = ImageDecoder.DecodeBitmap(camera.ImagePath);
                 if (cameraImage == null) return;
             }
             catch
