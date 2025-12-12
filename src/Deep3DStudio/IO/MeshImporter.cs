@@ -26,8 +26,11 @@ namespace Deep3DStudio.IO
         public static MeshData LoadObj(string filepath)
         {
             var mesh = new MeshData();
-            var vertices = new List<Vector3>();
-            var indices = new List<int>();
+            var rawVertices = new List<Vector3>();
+            var rawUVs = new List<Vector2>();
+
+            // Unique vertex tracking: (vIdx, vtIdx) -> newIndex
+            var uniqueVertices = new Dictionary<(int, int), int>();
 
             foreach (var line in File.ReadLines(filepath))
             {
@@ -41,8 +44,16 @@ namespace Deep3DStudio.IO
                         float x = float.Parse(parts[1], CultureInfo.InvariantCulture);
                         float y = float.Parse(parts[2], CultureInfo.InvariantCulture);
                         float z = float.Parse(parts[3], CultureInfo.InvariantCulture);
-                        vertices.Add(new Vector3(x, y, z));
-                        mesh.Colors.Add(new Vector3(0.8f)); // Default gray
+                        rawVertices.Add(new Vector3(x, y, z));
+                    }
+                }
+                else if (parts[0] == "vt")
+                {
+                    if (parts.Length >= 3)
+                    {
+                        float u = float.Parse(parts[1], CultureInfo.InvariantCulture);
+                        float v = float.Parse(parts[2], CultureInfo.InvariantCulture);
+                        rawUVs.Add(new Vector2(u, v));
                     }
                 }
                 else if (parts[0] == "f")
@@ -52,26 +63,99 @@ namespace Deep3DStudio.IO
                         // Triangulate fan
                         for (int i = 2; i < parts.Length - 1; i++)
                         {
-                            indices.Add(ParseObjIndex(parts[1], vertices.Count));
-                            indices.Add(ParseObjIndex(parts[i], vertices.Count));
-                            indices.Add(ParseObjIndex(parts[i + 1], vertices.Count));
+                            AddObjVertex(parts[1], rawVertices, rawUVs, mesh, uniqueVertices);
+                            AddObjVertex(parts[i], rawVertices, rawUVs, mesh, uniqueVertices);
+                            AddObjVertex(parts[i + 1], rawVertices, rawUVs, mesh, uniqueVertices);
                         }
                     }
                 }
             }
 
-            mesh.Vertices = vertices;
-            mesh.Indices = indices;
+            // Try to load texture material if mtl file exists
+            // This is a simplified check, ideally we parse mtllib
+            string mtlPath = Path.ChangeExtension(filepath, ".mtl");
+            if (File.Exists(mtlPath))
+            {
+                // Very basic parser to find map_Kd
+                foreach(var line in File.ReadLines(mtlPath))
+                {
+                     var parts = line.Trim().Split(new[]{' '}, StringSplitOptions.RemoveEmptyEntries);
+                     if (parts.Length >= 2 && parts[0] == "map_Kd")
+                     {
+                         string texPath = line.Substring(parts[0].Length).Trim();
+                         if (!Path.IsPathRooted(texPath))
+                             texPath = Path.Combine(Path.GetDirectoryName(filepath) ?? "", texPath);
+
+                         if (File.Exists(texPath))
+                         {
+                             try {
+                                 mesh.Texture = ImageDecoder.DecodeBitmap(texPath);
+                             } catch (Exception ex) {
+                                 Console.WriteLine("Failed to load texture: " + ex.Message);
+                             }
+                         }
+                         break; // Only load first texture found
+                     }
+                }
+            }
+            // Also check for image with same name
+            else
+            {
+                 string[] exts = { ".png", ".jpg", ".jpeg" };
+                 string baseName = Path.Combine(Path.GetDirectoryName(filepath) ?? "", Path.GetFileNameWithoutExtension(filepath));
+                 foreach(var e in exts)
+                 {
+                     if (File.Exists(baseName + e))
+                     {
+                         try {
+                             mesh.Texture = ImageDecoder.DecodeBitmap(baseName + e);
+                             break;
+                         } catch {}
+                     }
+                 }
+            }
+
             return mesh;
         }
 
-        private static int ParseObjIndex(string str, int vertexCount)
+        private static void AddObjVertex(string facePart, List<Vector3> rawV, List<Vector2> rawVT, MeshData mesh, Dictionary<(int, int), int> uniqueCache)
         {
-            var parts = str.Split('/');
-            int idx = int.Parse(parts[0]);
-            if (idx < 0) idx += vertexCount;
-            else idx -= 1; // OBJ is 1-based
-            return idx;
+            var parts = facePart.Split('/');
+
+            // 1. Vertex Index
+            int vIdx = int.Parse(parts[0]);
+            if (vIdx < 0) vIdx += rawV.Count;
+            else vIdx -= 1;
+
+            // 2. UV Index
+            int vtIdx = -1;
+            if (parts.Length > 1 && !string.IsNullOrEmpty(parts[1]))
+            {
+                vtIdx = int.Parse(parts[1]);
+                if (vtIdx < 0) vtIdx += rawVT.Count;
+                else vtIdx -= 1;
+            }
+
+            var key = (vIdx, vtIdx);
+
+            if (uniqueCache.TryGetValue(key, out int existingIdx))
+            {
+                mesh.Indices.Add(existingIdx);
+            }
+            else
+            {
+                int newIdx = mesh.Vertices.Count;
+                mesh.Vertices.Add(rawV[vIdx]);
+                mesh.Colors.Add(new Vector3(0.8f)); // Default gray
+
+                if (vtIdx >= 0 && vtIdx < rawVT.Count)
+                    mesh.UVs.Add(rawVT[vtIdx]);
+                else
+                    mesh.UVs.Add(Vector2.Zero);
+
+                mesh.Indices.Add(newIdx);
+                uniqueCache[key] = newIdx;
+            }
         }
 
         public static MeshData LoadStl(string filepath)
@@ -170,12 +254,29 @@ namespace Deep3DStudio.IO
         public static MeshData LoadPly(string filepath)
         {
             var plyData = PlyParser.Parse(filepath);
-            return new MeshData
+            var mesh = new MeshData
             {
                 Vertices = plyData.Vertices,
                 Colors = plyData.Colors,
-                Indices = plyData.Indices
+                Indices = plyData.Indices,
+                UVs = plyData.UVs
             };
+
+            // Try load texture for PLY
+             string[] exts = { ".png", ".jpg", ".jpeg" };
+             string baseName = Path.Combine(Path.GetDirectoryName(filepath) ?? "", Path.GetFileNameWithoutExtension(filepath));
+             foreach(var e in exts)
+             {
+                 if (File.Exists(baseName + e))
+                 {
+                     try {
+                         mesh.Texture = ImageDecoder.DecodeBitmap(baseName + e);
+                         break;
+                     } catch {}
+                 }
+             }
+
+             return mesh;
         }
     }
 }

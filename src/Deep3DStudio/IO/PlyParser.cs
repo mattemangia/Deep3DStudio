@@ -11,6 +11,7 @@ namespace Deep3DStudio.IO
     {
         public List<Vector3> Vertices { get; set; } = new List<Vector3>();
         public List<Vector3> Colors { get; set; } = new List<Vector3>();
+        public List<Vector2> UVs { get; set; } = new List<Vector2>();
         public List<int> Indices { get; set; } = new List<int>();
     }
 
@@ -112,6 +113,7 @@ namespace Deep3DStudio.IO
                         if (el.Name == "vertex") {
                             plyData.Vertices.Capacity = el.Count;
                             plyData.Colors.Capacity = el.Count;
+                            plyData.UVs.Capacity = el.Count;
                         }
                         else if (el.Name == "face") {
                             plyData.Indices.Capacity = el.Count * 3;
@@ -126,18 +128,20 @@ namespace Deep3DStudio.IO
                             {
                                 float x=0, y=0, z=0;
                                 float r=0.8f, g=0.8f, b=0.8f;
+                                float u=0, v=0;
 
                                 if (isBinary)
                                 {
-                                    ReadBinaryVertex(reader, element.Properties, isBigEndian, ref x, ref y, ref z, ref r, ref g, ref b);
+                                    ReadBinaryVertex(reader, element.Properties, isBigEndian, ref x, ref y, ref z, ref r, ref g, ref b, ref u, ref v);
                                 }
                                 else
                                 {
-                                    ReadAsciiVertex(textReader, element.Properties, ref x, ref y, ref z, ref r, ref g, ref b);
+                                    ReadAsciiVertex(textReader, element.Properties, ref x, ref y, ref z, ref r, ref g, ref b, ref u, ref v);
                                 }
 
                                 plyData.Vertices.Add(new Vector3(x, y, z));
                                 plyData.Colors.Add(new Vector3(r, g, b));
+                                plyData.UVs.Add(new Vector2(u, v));
                             }
                         }
                         else if (element.Name == "face")
@@ -186,7 +190,7 @@ namespace Deep3DStudio.IO
             }
         }
 
-        private static void ReadAsciiVertex(StreamReader reader, List<PlyProperty> props, ref float x, ref float y, ref float z, ref float r, ref float g, ref float b)
+        private static void ReadAsciiVertex(StreamReader reader, List<PlyProperty> props, ref float x, ref float y, ref float z, ref float r, ref float g, ref float b, ref float u, ref float v)
         {
             var line = reader.ReadLine();
             if (line == null) return;
@@ -197,20 +201,20 @@ namespace Deep3DStudio.IO
                 var prop = props[p];
                 double val = double.Parse(parts[p], CultureInfo.InvariantCulture); // Read as double first
 
-                ApplyProperty(prop.Name, val, ref x, ref y, ref z, ref r, ref g, ref b);
+                ApplyProperty(prop.Name, val, ref x, ref y, ref z, ref r, ref g, ref b, ref u, ref v);
             }
         }
 
-        private static void ReadBinaryVertex(BinaryReader reader, List<PlyProperty> props, bool be, ref float x, ref float y, ref float z, ref float r, ref float g, ref float b)
+        private static void ReadBinaryVertex(BinaryReader reader, List<PlyProperty> props, bool be, ref float x, ref float y, ref float z, ref float r, ref float g, ref float b, ref float u, ref float v)
         {
              foreach(var prop in props)
              {
                  double val = ReadValue(reader, prop.Type, be);
-                 ApplyProperty(prop.Name, val, ref x, ref y, ref z, ref r, ref g, ref b);
+                 ApplyProperty(prop.Name, val, ref x, ref y, ref z, ref r, ref g, ref b, ref u, ref v);
              }
         }
 
-        private static void ApplyProperty(string name, double val, ref float x, ref float y, ref float z, ref float r, ref float g, ref float b)
+        private static void ApplyProperty(string name, double val, ref float x, ref float y, ref float z, ref float r, ref float g, ref float b, ref float u, ref float v)
         {
             if (name == "x") x = (float)val;
             else if (name == "y") y = (float)val;
@@ -230,6 +234,8 @@ namespace Deep3DStudio.IO
                 b = (float)val;
                 if (b > 1.0f) b /= 255f;
             }
+            else if (name == "s" || name == "u" || name == "texture_u") u = (float)val;
+            else if (name == "t" || name == "v" || name == "texture_v") v = (float)val;
         }
 
         private static void ReadAsciiFace(StreamReader reader, List<PlyProperty> props, List<int> indices)

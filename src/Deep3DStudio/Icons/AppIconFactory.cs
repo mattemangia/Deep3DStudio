@@ -27,6 +27,7 @@ namespace Deep3DStudio.Icons
                         case "rgb": DrawRgbIcon(cr, size); break;
                         case "depthmap": DrawDepthMapIcon(cr, size); break;
                         case "select": DrawSelectIcon(cr, size); break;
+                        case "texture": DrawTextureIcon(cr, size); break;
                     }
                 }
 
@@ -190,6 +191,34 @@ namespace Deep3DStudio.Icons
 
             cr.FillPreserve();
             cr.SetSourceRGB(0.2, 0.2, 0.2);
+            cr.Stroke();
+        }
+
+        private static void DrawTextureIcon(Context cr, int size)
+        {
+            // Checkerboard pattern
+            cr.SetSourceRGB(1.0, 1.0, 1.0);
+            cr.Rectangle(size * 0.2, size * 0.2, size * 0.6, size * 0.6);
+            cr.Fill();
+
+            cr.SetSourceRGB(0.4, 0.4, 0.4);
+            int rows = 2;
+            int cols = 2;
+            double w = (size * 0.6) / cols;
+            double h = (size * 0.6) / rows;
+
+            for(int r=0; r<rows; r++) {
+                for(int c=0; c<cols; c++) {
+                    if ((r + c) % 2 == 0) {
+                        cr.Rectangle(size * 0.2 + c * w, size * 0.2 + r * h, w, h);
+                        cr.Fill();
+                    }
+                }
+            }
+
+            cr.SetSourceRGB(0, 0, 0);
+            cr.LineWidth = 1;
+            cr.Rectangle(size * 0.2, size * 0.2, size * 0.6, size * 0.6);
             cr.Stroke();
         }
 

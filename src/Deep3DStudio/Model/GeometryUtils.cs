@@ -12,7 +12,12 @@ namespace Deep3DStudio.Model
     {
         public List<Vector3> Vertices { get; set; } = new List<Vector3>();
         public List<Vector3> Colors { get; set; } = new List<Vector3>();
+        public List<Vector2> UVs { get; set; } = new List<Vector2>();
         public List<int> Indices { get; set; } = new List<int>();
+
+        // Texture data (if any)
+        public SKBitmap? Texture { get; set; }
+        public int TextureId { get; set; } = -1; // OpenGL Texture ID
 
         // Maps original pixel index (y * width + x) to vertex index in Vertices list.
         // Value is -1 if no vertex was generated for that pixel (filtered out).

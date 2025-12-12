@@ -34,6 +34,7 @@ namespace Deep3DStudio
         private ComboBoxText _workflowCombo = null!;
         private ToggleToolButton _pointsToggle = null!;
         private ToggleToolButton _wireToggle = null!;
+        private ToggleToolButton _textureToggle = null!;
         private ToggleToolButton _meshToggle = null!;
         private ToggleToolButton _rgbColorToggle = null!;
         private ToggleToolButton _depthColorToggle = null!;
@@ -1103,6 +1104,17 @@ namespace Deep3DStudio
             };
             toolbar.Insert(_wireToggle, -1);
 
+            _textureToggle = new ToggleToolButton();
+            _textureToggle.IconWidget = AppIconFactory.GenerateIcon("texture", iconSize);
+            _textureToggle.Label = "Texture";
+            _textureToggle.TooltipText = "Toggle Texture Display";
+            _textureToggle.Active = IniSettings.Instance.ShowTexture;
+            _textureToggle.Toggled += (s, e) => {
+                IniSettings.Instance.ShowTexture = _textureToggle.Active;
+                _viewport.QueueDraw();
+            };
+            toolbar.Insert(_textureToggle, -1);
+
             toolbar.Insert(new SeparatorToolItem(), -1);
 
             // Point Cloud Color Mode Toggles
@@ -1912,6 +1924,7 @@ namespace Deep3DStudio
             var s = IniSettings.Instance;
             if (_pointsToggle != null) _pointsToggle.Active = s.ShowPointCloud;
             if (_wireToggle != null) _wireToggle.Active = s.ShowWireframe;
+            if (_textureToggle != null) _textureToggle.Active = s.ShowTexture;
             if (_meshToggle != null) _meshToggle.Active = !s.ShowPointCloud;
             if (_rgbColorToggle != null) _rgbColorToggle.Active = s.PointCloudColor == PointCloudColorMode.RGB;
             if (_depthColorToggle != null) _depthColorToggle.Active = s.PointCloudColor == PointCloudColorMode.DistanceMap;
