@@ -336,7 +336,7 @@ namespace Deep3DStudio.Viewport
                 GL.Enable(EnableCap.DepthTest);
                 GL.Enable(EnableCap.Blend);
                 GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-                GL.PointSize(3.0f);
+                GL.PointSize(5.0f);
                 GL.LineWidth(1.0f);
 
                 // Ensure initial frame is drawn immediately
@@ -758,7 +758,7 @@ namespace Deep3DStudio.Viewport
             if (mesh.Vertices.Count == 0) return;
 
             var settings = IniSettings.Instance;
-            GL.PointSize(isSelected ? 5.0f : 3.0f);
+            GL.PointSize(isSelected ? 6.0f : 4.0f);
 
             if (settings.PointCloudColor == PointCloudColorMode.DistanceMap)
             {
