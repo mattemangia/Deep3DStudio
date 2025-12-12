@@ -453,6 +453,53 @@ namespace Deep3DStudio
 
             editMenu.Append(meshOpsMenuItem);
 
+            // Triangle Editing submenu (Pen Tool operations)
+            var triangleOpsMenu = new Menu();
+            var triangleOpsMenuItem = new MenuItem("_Triangle Editing (Pen Tool)");
+            triangleOpsMenuItem.Submenu = triangleOpsMenu;
+
+            var deleteTrianglesItem = new MenuItem("_Delete Selected Triangles");
+            deleteTrianglesItem.AddAccelerator("activate", accelGroup,
+                (uint)Gdk.Key.Delete, Gdk.ModifierType.None, AccelFlags.Visible);
+            deleteTrianglesItem.Activated += OnDeleteSelectedTriangles;
+            triangleOpsMenu.Append(deleteTrianglesItem);
+
+            var flipTrianglesItem = new MenuItem("_Flip Selected Triangles");
+            flipTrianglesItem.Activated += OnFlipSelectedTriangles;
+            triangleOpsMenu.Append(flipTrianglesItem);
+
+            var subdivideTrianglesItem = new MenuItem("_Subdivide Selected Triangles");
+            subdivideTrianglesItem.Activated += OnSubdivideSelectedTriangles;
+            triangleOpsMenu.Append(subdivideTrianglesItem);
+
+            triangleOpsMenu.Append(new SeparatorMenuItem());
+
+            var selectAllTrianglesItem = new MenuItem("Select _All Triangles");
+            selectAllTrianglesItem.Activated += OnSelectAllTriangles;
+            triangleOpsMenu.Append(selectAllTrianglesItem);
+
+            var invertTriangleSelectionItem = new MenuItem("_Invert Selection");
+            invertTriangleSelectionItem.Activated += OnInvertTriangleSelection;
+            triangleOpsMenu.Append(invertTriangleSelectionItem);
+
+            var growSelectionItem = new MenuItem("_Grow Selection");
+            growSelectionItem.Activated += OnGrowTriangleSelection;
+            triangleOpsMenu.Append(growSelectionItem);
+
+            var clearTriangleSelectionItem = new MenuItem("_Clear Selection");
+            clearTriangleSelectionItem.AddAccelerator("activate", accelGroup,
+                (uint)Gdk.Key.Escape, Gdk.ModifierType.None, AccelFlags.Visible);
+            clearTriangleSelectionItem.Activated += OnClearTriangleSelection;
+            triangleOpsMenu.Append(clearTriangleSelectionItem);
+
+            triangleOpsMenu.Append(new SeparatorMenuItem());
+
+            var weldVerticesItem = new MenuItem("_Weld Vertices");
+            weldVerticesItem.Activated += OnWeldSelectedVertices;
+            triangleOpsMenu.Append(weldVerticesItem);
+
+            editMenu.Append(triangleOpsMenuItem);
+
             menuBar.Append(editMenuItem);
 
             // View Menu
@@ -625,6 +672,12 @@ namespace Deep3DStudio
 
             var scaleBtn = CreateIconButton("scale", "Scale (R)", btnSize, () => _viewport.SetGizmoMode(GizmoMode.Scale));
             vbox.PackStart(scaleBtn, false, false, 1);
+
+            vbox.PackStart(new Separator(Orientation.Horizontal), false, false, 5);
+
+            // Pen tool for triangle editing
+            var penBtn = CreateIconButton("pen", "Pen Tool (P) - Edit Triangles", btnSize, () => _viewport.SetGizmoMode(GizmoMode.Pen));
+            vbox.PackStart(penBtn, false, false, 1);
 
             vbox.PackStart(new Separator(Orientation.Horizontal), false, false, 5);
 
@@ -955,6 +1008,31 @@ namespace Deep3DStudio
                     cr.Stroke();
                     cr.Arc(s - 8, 8, 2, 0, 2 * Math.PI);
                     cr.Fill();
+                    break;
+
+                case "pen":
+                    // Pen/pencil icon for triangle editing
+                    cr.LineWidth = 2;
+                    cr.SetSourceRGB(1.0, 0.6, 0.2); // Orange color
+                    // Pen body (diagonal)
+                    cr.MoveTo(s - 4, 4);
+                    cr.LineTo(6, s - 6);
+                    cr.Stroke();
+                    // Pen tip
+                    cr.SetSourceRGB(0.4, 0.4, 0.4);
+                    cr.MoveTo(6, s - 6);
+                    cr.LineTo(4, s - 4);
+                    cr.LineTo(8, s - 8);
+                    cr.ClosePath();
+                    cr.Fill();
+                    // Triangle indicator
+                    cr.SetSourceRGB(0.3, 0.8, 0.3);
+                    cr.LineWidth = 1.5;
+                    cr.MoveTo(s - 8, s / 2);
+                    cr.LineTo(s - 4, s - 4);
+                    cr.LineTo(s / 2, s - 4);
+                    cr.ClosePath();
+                    cr.Stroke();
                     break;
 
                 default:
@@ -1489,6 +1567,136 @@ namespace Deep3DStudio
                 "Deep3D Studio\n\nA 3D reconstruction tool using Dust3r and NeRF.\n\nVersion 1.0");
             dialog.Run();
             dialog.Destroy();
+        }
+
+        #endregion
+
+        #region Triangle Editing Handlers
+
+        private void OnDeleteSelectedTriangles(object? sender, EventArgs e)
+        {
+            var tool = _viewport.MeshEditingTool;
+            if (tool.SelectedTriangles.Count == 0)
+            {
+                _statusLabel.Text = "No triangles selected. Use Pen tool (P) to select triangles.";
+                return;
+            }
+
+            var stats = tool.GetSelectionStats();
+            tool.DeleteSelectedTriangles();
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Deleted {stats.triangleCount} triangles from {stats.meshCount} mesh(es)";
+        }
+
+        private void OnFlipSelectedTriangles(object? sender, EventArgs e)
+        {
+            var tool = _viewport.MeshEditingTool;
+            if (tool.SelectedTriangles.Count == 0)
+            {
+                _statusLabel.Text = "No triangles selected. Use Pen tool (P) to select triangles.";
+                return;
+            }
+
+            var stats = tool.GetSelectionStats();
+            tool.FlipSelectedTriangles();
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Flipped {stats.triangleCount} triangles";
+        }
+
+        private void OnSubdivideSelectedTriangles(object? sender, EventArgs e)
+        {
+            var tool = _viewport.MeshEditingTool;
+            if (tool.SelectedTriangles.Count == 0)
+            {
+                _statusLabel.Text = "No triangles selected. Use Pen tool (P) to select triangles.";
+                return;
+            }
+
+            var stats = tool.GetSelectionStats();
+            tool.SubdivideSelectedTriangles();
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Subdivided {stats.triangleCount} triangles (each into 4)";
+        }
+
+        private void OnSelectAllTriangles(object? sender, EventArgs e)
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count == 0)
+            {
+                _statusLabel.Text = "No mesh selected. Select a mesh first.";
+                return;
+            }
+
+            var tool = _viewport.MeshEditingTool;
+            foreach (var mesh in selectedMeshes)
+            {
+                tool.SelectAll(mesh);
+            }
+            _viewport.QueueDraw();
+
+            var stats = tool.GetSelectionStats();
+            _statusLabel.Text = $"Selected all {stats.triangleCount} triangles";
+        }
+
+        private void OnInvertTriangleSelection(object? sender, EventArgs e)
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count == 0)
+            {
+                _statusLabel.Text = "No mesh selected. Select a mesh first.";
+                return;
+            }
+
+            var tool = _viewport.MeshEditingTool;
+            foreach (var mesh in selectedMeshes)
+            {
+                tool.InvertSelection(mesh);
+            }
+            _viewport.QueueDraw();
+
+            var stats = tool.GetSelectionStats();
+            _statusLabel.Text = $"Inverted selection: {stats.triangleCount} triangles now selected";
+        }
+
+        private void OnGrowTriangleSelection(object? sender, EventArgs e)
+        {
+            var tool = _viewport.MeshEditingTool;
+            if (tool.SelectedTriangles.Count == 0)
+            {
+                _statusLabel.Text = "No triangles selected. Use Pen tool (P) to select triangles first.";
+                return;
+            }
+
+            int beforeCount = tool.SelectedTriangles.Count;
+            tool.GrowSelection();
+            int afterCount = tool.SelectedTriangles.Count;
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Selection grown: {beforeCount} -> {afterCount} triangles";
+        }
+
+        private void OnClearTriangleSelection(object? sender, EventArgs e)
+        {
+            var tool = _viewport.MeshEditingTool;
+            tool.ClearSelection();
+            _viewport.QueueDraw();
+            _statusLabel.Text = "Triangle selection cleared";
+        }
+
+        private void OnWeldSelectedVertices(object? sender, EventArgs e)
+        {
+            var tool = _viewport.MeshEditingTool;
+            if (tool.SelectedTriangles.Count == 0)
+            {
+                _statusLabel.Text = "No triangles selected. Use Pen tool (P) to select triangles first.";
+                return;
+            }
+
+            tool.WeldSelectedVertices(0.001f);
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+            _statusLabel.Text = "Welded duplicate vertices in selected area";
         }
 
         #endregion

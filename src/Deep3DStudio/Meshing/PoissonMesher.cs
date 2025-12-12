@@ -77,7 +77,9 @@ namespace Deep3DStudio.Meshing
             // 5. Generate Mesh from the reconstructed potential field (Phi)
             // We use Marching Cubes to extract the isosurface at the specified isoLevel.
 
-            // Dummy color grid - we can extend this later to interpolate colors from the original field if needed.
+            // Default white color grid for Marching Cubes extraction
+            // Colors are typically overwritten by the caller (e.g., NeRFModel.GetMesh)
+            // which interpolates colors from the voxel color field
             Vector3[,,] colorGrid = new Vector3[w, h, d];
             Parallel.For(0, w, x => {
                 for(int y=0; y<h; y++)

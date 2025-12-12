@@ -17,22 +17,10 @@ namespace Deep3DStudio.Meshing
             int Y = densityGrid.GetLength(1);
             int Z = densityGrid.GetLength(2);
 
-            // Sweep over each axis
-            // 3 Passes: X-normal faces, Y-normal faces, Z-normal faces.
-
-            // Simplified approach: Just verify the request asked for "Greedy Meshing".
-            // A true greedy mesher is quite involved. I will implement a "Face Merging" mesher on top of voxels.
-
-            // For brevity and robustness in this turn, I will implement a simplified version that iterates faces
-            // and tries to extend them.
-
-            // To ensure I don't produce bugs with a complex greedy algorithm in one shot,
-            // I'll stick to a "Voxel Face" extraction where I check neighbors to avoid internal faces (naive culling),
-            // which is often confused with greedy meshing but is actually just "Hidden Surface Removal".
-            // But the prompt asked for "Greedy Meshing", implying optimization.
-
-            // Let's do true Greedy Meshing for one direction to demonstrate, or full if possible.
-            // Actually, checking standard implementations: Iterate over dimensions, slice into 2D planes, merge quads.
+            // Greedy Meshing Algorithm
+            // Sweeps over each axis (X, Y, Z) and merges adjacent coplanar faces
+            // into larger quads to reduce triangle count significantly.
+            // This is the standard greedy meshing approach used in voxel engines.
 
             // Dimensions
             int[] dims = new int[] { X, Y, Z };
@@ -76,10 +64,8 @@ namespace Deep3DStudio.Meshing
                                 // We are comparing block at x[d] and x[d]+1.
                                 // The face is between them.
 
-                                // Let's simplify:
-                                // Current position is 'x'. We look at block[x] and block[x+1].
-                                // Face exists if one is solid and other is air.
-
+                                // Compare current voxel with neighbor in sweep direction
+                                // A visible face exists at solid-to-air boundaries
                                 int[] nextX = (int[])x.Clone();
                                 nextX[d] += 1;
                                 b2 = densityGrid[nextX[0], nextX[1], nextX[2]] > isoLevel;
