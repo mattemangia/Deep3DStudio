@@ -138,12 +138,21 @@ namespace Deep3DStudio.Model.SfM
             // Flip Y and Z axes: (x, y, z) -> (x, -y, -z)
             // This applies to both World Points and Camera Axes
 
+            var minBound = new Vector3(float.MaxValue);
+            var maxBound = new Vector3(float.MinValue);
+
             foreach (var mp in _map)
             {
                 // Apply M to Point: (x, -y, -z)
-                mesh.Vertices.Add(new Vector3((float)mp.Position.X, -(float)mp.Position.Y, -(float)mp.Position.Z));
+                var p = new Vector3((float)mp.Position.X, -(float)mp.Position.Y, -(float)mp.Position.Z);
+                mesh.Vertices.Add(p);
                 mesh.Colors.Add(new Vector3((float)mp.Color.Val2 / 255f, (float)mp.Color.Val1 / 255f, (float)mp.Color.Val0 / 255f)); // RGB vs BGR
+
+                minBound = Vector3.ComponentMin(minBound, p);
+                maxBound = Vector3.ComponentMax(maxBound, p);
             }
+
+            Console.WriteLine($"SfM Output: {mesh.Vertices.Count} points. Bounds: {minBound} to {maxBound}");
 
             foreach (var v in _views)
             {
@@ -152,10 +161,6 @@ namespace Deep3DStudio.Model.SfM
                     // Convert OpenCV Pose (R, t) to OpenGL Pose (R', t')
                     // R' = M * R * M
                     // t' = M * t
-
-                    // R is 3x3. M is diag(1, -1, -1).
-                    // M * R flips rows 1, 2.
-                    // (M * R) * M flips cols 1, 2.
 
                     var R_cv = v.R;
                     var t_cv = v.t;
