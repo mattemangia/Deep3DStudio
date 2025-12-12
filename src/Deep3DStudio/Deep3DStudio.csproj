@@ -12,8 +12,8 @@
     <PackageReference Include="GtkSharp" Version="3.24.24.95" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.17.1" />
     <PackageReference Include="OpenTK" Version="4.8.2" />
-    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.2" />
     <PackageReference Include="MathNet.Numerics" Version="5.0.0" />
+    <PackageReference Include="SkiaSharp" Version="2.88.6" />
   </ItemGroup>
 
   <ItemGroup>

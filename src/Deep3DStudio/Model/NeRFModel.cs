@@ -4,8 +4,7 @@ using System.Threading.Tasks;
 using OpenTK.Mathematics;
 using Deep3DStudio.Model;
 using Deep3DStudio.Meshing;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+using SkiaSharp;
 
 namespace Deep3DStudio.Model
 {
@@ -188,9 +187,7 @@ namespace Deep3DStudio.Model
                         float transmittance = 1.0f;
 
                         var targetColP = colors[y * W + x];
-                        // Correctly extract RGB from Rgb24 using ToPixel<Rgb24>
-                        var pixel = targetColP.ToPixel<Rgb24>();
-                        var targetCol = new Vector3(pixel.R/255f, pixel.G/255f, pixel.B/255f);
+                        var targetCol = new Vector3(targetColP.Red/255f, targetColP.Green/255f, targetColP.Blue/255f);
 
                         while (t < tMax && transmittance > 0.01f)
                         {

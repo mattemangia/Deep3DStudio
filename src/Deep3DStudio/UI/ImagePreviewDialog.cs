@@ -1,9 +1,8 @@
 using System;
+using System.Runtime.InteropServices;
 using Gtk;
 using Gdk;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
+using SkiaSharp;
 
 namespace Deep3DStudio.UI
 {
@@ -25,7 +24,7 @@ namespace Deep3DStudio.UI
 
         private const int MaxDisplaySize = 800;
 
-        public ImagePreviewDialog(Window parent, ImageEntry entry) : base(
+        public ImagePreviewDialog(Gtk.Window parent, ImageEntry entry) : base(
             entry.FileName,
             parent,
             DialogFlags.Modal | DialogFlags.DestroyWithParent,
@@ -89,38 +88,23 @@ namespace Deep3DStudio.UI
             // Load full RGB image
             try
             {
-                using (var img = SixLabors.ImageSharp.Image.Load<Rgba32>(_entry.FilePath))
+                using var bitmap = SKBitmap.Decode(_entry.FilePath) ?? throw new InvalidOperationException("Unable to decode image.");
+                using var rgba = bitmap.Copy(SKColorType.Rgba8888)
+                    ?? throw new InvalidOperationException("Unable to convert image to RGBA8888.");
+
+                int displayWidth = rgba.Width;
+                int displayHeight = rgba.Height;
+
+                if (displayWidth > MaxDisplaySize || displayHeight > MaxDisplaySize)
                 {
-                    // Scale down if too large
-                    int displayWidth = img.Width;
-                    int displayHeight = img.Height;
-
-                    if (displayWidth > MaxDisplaySize || displayHeight > MaxDisplaySize)
-                    {
-                        float scale = Math.Min((float)MaxDisplaySize / displayWidth, (float)MaxDisplaySize / displayHeight);
-                        displayWidth = (int)(displayWidth * scale);
-                        displayHeight = (int)(displayHeight * scale);
-                    }
-
-                    var resized = img.Clone(ctx => ctx.Resize(displayWidth, displayHeight));
-
-                    byte[] pixels = new byte[displayWidth * displayHeight * 4];
-                    int idx = 0;
-                    for (int y = 0; y < displayHeight; y++)
-                    {
-                        for (int x = 0; x < displayWidth; x++)
-                        {
-                            var pixel = resized[x, y];
-                            pixels[idx++] = pixel.R;
-                            pixels[idx++] = pixel.G;
-                            pixels[idx++] = pixel.B;
-                            pixels[idx++] = pixel.A;
-                        }
-                    }
-
-                    _fullRgb = new Pixbuf(pixels, Colorspace.Rgb, true, 8, displayWidth, displayHeight, displayWidth * 4);
-                    resized.Dispose();
+                    float scale = Math.Min((float)MaxDisplaySize / displayWidth, (float)MaxDisplaySize / displayHeight);
+                    displayWidth = (int)(displayWidth * scale);
+                    displayHeight = (int)(displayHeight * scale);
                 }
+
+                using var resized = ResizeBitmap(rgba, displayWidth, displayHeight);
+
+                _fullRgb = PixbufFromBitmap(resized);
 
                 _imageWidget.Pixbuf = _fullRgb;
             }
@@ -305,6 +289,33 @@ namespace Deep3DStudio.UI
                 _fullDepth?.Dispose();
             }
             base.Dispose(disposing);
+        }
+
+        private static Pixbuf PixbufFromBitmap(SKBitmap bitmap)
+        {
+            using var pixmap = bitmap.PeekPixels();
+            if (pixmap == null)
+                throw new InvalidOperationException("Unable to access bitmap pixels.");
+
+            int byteCount = pixmap.RowBytes * pixmap.Height;
+            byte[] pixels = new byte[byteCount];
+            Marshal.Copy(pixmap.GetPixels(), pixels, 0, byteCount);
+
+            return new Pixbuf(pixels, Colorspace.Rgb, true, 8, pixmap.Width, pixmap.Height, pixmap.RowBytes);
+        }
+
+        private static SKBitmap ResizeBitmap(SKBitmap source, int width, int height)
+        {
+            var info = new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+            var result = new SKBitmap(info);
+
+            using var canvas = new SKCanvas(result);
+            using var image = SKImage.FromBitmap(source);
+            canvas.Clear(SKColors.Transparent);
+            canvas.DrawImage(image, new SKRect(0, 0, width, height));
+            canvas.Flush();
+
+            return result;
         }
     }
 }

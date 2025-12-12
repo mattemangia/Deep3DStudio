@@ -156,7 +156,7 @@ using System.Collections.Generic;
 using OpenTK.Mathematics;
 using MathNet.Numerics.LinearAlgebra;
 using Microsoft.ML.OnnxRuntime.Tensors;
-using SixLabors.ImageSharp.PixelFormats;
+using SkiaSharp;
 
 namespace Deep3DStudio.Model
 {
@@ -281,7 +281,7 @@ namespace Deep3DStudio.Model
             return ComputeRigidTransform(srcPts, dstPts);
         }
 
-        public static MeshData GenerateMeshFromDepth(Tensor<float> ptsTensor, Tensor<float> confTensor, SixLabors.ImageSharp.Color[] colors, int width, int height)
+        public static MeshData GenerateMeshFromDepth(Tensor<float> ptsTensor, Tensor<float> confTensor, SKColor[] colors, int width, int height)
         {
             var mesh = new MeshData();
             mesh.PixelToVertexIndex = new int[width * height];

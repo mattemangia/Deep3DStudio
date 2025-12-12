@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using OpenTK.Mathematics;
 using MathNet.Numerics.LinearAlgebra;
 using Microsoft.ML.OnnxRuntime.Tensors;
-using SixLabors.ImageSharp.PixelFormats;
+using SkiaSharp;
 
 namespace Deep3DStudio.Model
 {
@@ -308,7 +308,7 @@ namespace Deep3DStudio.Model
             return (overlap, rmse, matches);
         }
 
-        public static MeshData GenerateMeshFromDepth(Tensor<float> ptsTensor, Tensor<float> confTensor, SixLabors.ImageSharp.Color[] colors, int width, int height)
+        public static MeshData GenerateMeshFromDepth(Tensor<float> ptsTensor, Tensor<float> confTensor, SKColor[] colors, int width, int height)
         {
             var mesh = new MeshData();
             mesh.PixelToVertexIndex = new int[width * height];
@@ -331,10 +331,9 @@ namespace Deep3DStudio.Model
                         float pz = ptsTensor[0, y, x, 2];
 
                         var c = colors[pIdx];
-                        var pixel = c.ToPixel<Rgb24>();
 
                         mesh.Vertices.Add(new Vector3(px, py, pz));
-                        mesh.Colors.Add(new Vector3(pixel.R/255f, pixel.G/255f, pixel.B/255f));
+                        mesh.Colors.Add(new Vector3(c.Red/255f, c.Green/255f, c.Blue/255f));
                         mesh.PixelToVertexIndex[pIdx] = mesh.Vertices.Count - 1;
                     }
                     else

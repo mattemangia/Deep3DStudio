@@ -1,11 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Gtk;
 using Gdk;
 using Cairo;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
+using SkiaSharp;
 
 namespace Deep3DStudio.UI
 {
@@ -148,14 +147,14 @@ namespace Deep3DStudio.UI
             // Load and create thumbnail
             try
             {
-                using (var img = SixLabors.ImageSharp.Image.Load<Rgba32>(filePath))
-                {
-                    entry.Width = img.Width;
-                    entry.Height = img.Height;
+                using var bitmap = SKBitmap.Decode(filePath) ?? throw new InvalidOperationException("Unable to decode image.");
+                using var rgba = bitmap.Copy(SKColorType.Rgba8888)
+                    ?? throw new InvalidOperationException("Unable to convert image to RGBA8888.");
 
-                    // Create RGB thumbnail
-                    entry.Thumbnail = CreateThumbnailFromImage(img, ThumbnailSize);
-                }
+                entry.Width = rgba.Width;
+                entry.Height = rgba.Height;
+
+                entry.Thumbnail = CreateThumbnailFromBitmap(rgba, ThumbnailSize);
             }
             catch (Exception ex)
             {
@@ -267,7 +266,7 @@ namespace Deep3DStudio.UI
             _countLabel.Text = $"({_images.Count})";
         }
 
-        private Pixbuf CreateThumbnailFromImage(Image<Rgba32> img, int size)
+        private Pixbuf CreateThumbnailFromBitmap(SKBitmap img, int size)
         {
             // Resize maintaining aspect ratio
             int newWidth, newHeight;
@@ -282,25 +281,36 @@ namespace Deep3DStudio.UI
                 newWidth = (int)(size * (float)img.Width / img.Height);
             }
 
-            var resized = img.Clone(ctx => ctx.Resize(newWidth, newHeight));
+            using var resized = ResizeBitmap(img, newWidth, newHeight);
 
-            // Convert to Pixbuf
-            byte[] pixels = new byte[newWidth * newHeight * 4];
-            int idx = 0;
-            for (int y = 0; y < newHeight; y++)
-            {
-                for (int x = 0; x < newWidth; x++)
-                {
-                    var pixel = resized[x, y];
-                    pixels[idx++] = pixel.R;
-                    pixels[idx++] = pixel.G;
-                    pixels[idx++] = pixel.B;
-                    pixels[idx++] = pixel.A;
-                }
-            }
+            return PixbufFromBitmap(resized);
+        }
 
-            resized.Dispose();
-            return new Pixbuf(pixels, Colorspace.Rgb, true, 8, newWidth, newHeight, newWidth * 4);
+        private static Pixbuf PixbufFromBitmap(SKBitmap bitmap)
+        {
+            using var pixmap = bitmap.PeekPixels();
+            if (pixmap == null)
+                throw new InvalidOperationException("Unable to access bitmap pixels.");
+
+            int byteCount = pixmap.RowBytes * pixmap.Height;
+            byte[] pixels = new byte[byteCount];
+            Marshal.Copy(pixmap.GetPixels(), pixels, 0, byteCount);
+
+            return new Pixbuf(pixels, Colorspace.Rgb, true, 8, pixmap.Width, pixmap.Height, pixmap.RowBytes);
+        }
+
+        private static SKBitmap ResizeBitmap(SKBitmap source, int width, int height)
+        {
+            var info = new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+            var result = new SKBitmap(info);
+
+            using var canvas = new SKCanvas(result);
+            using var image = SKImage.FromBitmap(source);
+            canvas.Clear(SKColors.Transparent);
+            canvas.DrawImage(image, new SKRect(0, 0, width, height));
+            canvas.Flush();
+
+            return result;
         }
 
         private Pixbuf CreateDepthThumbnail(float[,] depthMap, int size)
