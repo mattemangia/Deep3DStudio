@@ -354,7 +354,9 @@ namespace Deep3DStudio.Model.SfM
                 // Use more relaxed parameters for robust registration
                 // Increased reprojection error from 6.0 to 12.0 pixels to handle imperfect triangulation
                 // Increased iterations for better convergence
-                Cv2.SolvePnPRansac(InputArray.Create(objPts), InputArray.Create(imgPts), view.K, null, rvec, tvec,
+                // Use empty distortion coefficients (not null) - null causes exception
+                using var distCoeffs = new Mat();
+                Cv2.SolvePnPRansac(InputArray.Create(objPts), InputArray.Create(imgPts), view.K, distCoeffs, rvec, tvec,
                     useExtrinsicGuess: false, iterationsCount: 500, reprojectionError: 12.0f, confidence: 0.99, inliers: inliers);
 
                 Console.WriteLine($"  PnP result: {inliers.Rows} inliers from {objPts.Count} correspondences");
@@ -485,12 +487,10 @@ namespace Deep3DStudio.Model.SfM
                 mp.ObservingViewIndices[v2.Index] = usedMatches[i].TrainIdx;
 
                 _map.Add(mp);
+                validPoints++;
             }
 
-            if (validPoints > 0 || rejectedPoints > 0)
-            {
-                Console.WriteLine($"  Triangulated {validPoints} valid points, rejected {rejectedPoints} bad points");
-            }
+            Console.WriteLine($"  Triangulated {validPoints} valid points, rejected {rejectedPoints} bad points");
         }
 
         private void RefinePose(ViewInfo view)

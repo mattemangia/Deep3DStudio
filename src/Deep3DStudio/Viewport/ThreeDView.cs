@@ -198,11 +198,27 @@ namespace Deep3DStudio.Viewport
                 return;
             }
 
+            // Validate bounds
+            if (float.IsInfinity(min.X) || float.IsInfinity(max.X) ||
+                float.IsNaN(min.X) || float.IsNaN(max.X))
+            {
+                Console.WriteLine("FocusOnSelection: Invalid bounds, using defaults");
+                _cameraTarget = Vector3.Zero;
+                _zoom = -5.0f;
+                this.QueueDraw();
+                return;
+            }
+
             var center = (min + max) * 0.5f;
             var size = (max - min).Length;
 
+            // Ensure minimum zoom distance
+            if (size < 0.1f) size = 1.0f;
+
             _cameraTarget = center;
             _zoom = -size * 1.5f;
+
+            Console.WriteLine($"FocusOnSelection: center({center.X:F2},{center.Y:F2},{center.Z:F2}), zoom={_zoom:F2}");
 
             this.QueueDraw();
         }

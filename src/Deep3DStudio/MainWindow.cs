@@ -2356,6 +2356,11 @@ namespace Deep3DStudio
 
                 _sceneTreeView.RefreshTree();
 
+                // Log scene bounds for debugging
+                var (sceneMin, sceneMax) = _sceneGraph.GetSceneBounds();
+                Console.WriteLine($"Scene bounds: min({sceneMin.X:F2},{sceneMin.Y:F2},{sceneMin.Z:F2}) max({sceneMax.X:F2},{sceneMax.Y:F2},{sceneMax.Z:F2})");
+                Console.WriteLine($"Scene contains {_sceneGraph.GetObjectsOfType<PointCloudObject>().Count()} point clouds, {_sceneGraph.GetVisibleObjects().Count()} visible objects");
+
                 // Auto-focus on the generated point cloud
                 _viewport.FocusOnSelection();
                 _viewport.QueueDraw();
