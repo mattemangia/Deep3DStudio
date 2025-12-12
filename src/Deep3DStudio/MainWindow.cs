@@ -64,6 +64,11 @@ namespace Deep3DStudio
             // Initialize Scene Graph
             _sceneGraph = new SceneGraph();
 
+            // Create viewport early (needed by menu bar)
+            _viewport = new ThreeDView();
+            _viewport.SetSceneGraph(_sceneGraph);
+            _viewport.ObjectPicked += OnViewportObjectPicked;
+
             var mainVBox = new Box(Orientation.Vertical, 0);
             this.Add(mainVBox);
 
@@ -95,10 +100,7 @@ namespace Deep3DStudio
             _rightPaned = new Paned(Orientation.Horizontal);
             _mainHPaned.Pack2(_rightPaned, true, false);
 
-            // 3D Viewport
-            _viewport = new ThreeDView();
-            _viewport.SetSceneGraph(_sceneGraph);
-            _viewport.ObjectPicked += OnViewportObjectPicked;
+            // 3D Viewport (already created above, just add to layout)
             _rightPaned.Pack1(_viewport, true, false);
 
             // 4. Status Bar (initialize before CreateSidePanel)
