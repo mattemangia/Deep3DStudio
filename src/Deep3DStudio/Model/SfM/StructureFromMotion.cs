@@ -222,13 +222,11 @@ namespace Deep3DStudio.Model.SfM
                     // Convert OpenCV Pose (R, t) to Viewer Pose (R', t')
                     // Using M = diag(1, -1, -1) to match point transformation
                     // R' = M * R * M
-                    // t' = M * t = (tx, -ty, -tz)
 
                     var R_cv = v.R;
                     var t_cv = v.t;
 
                     using var R_gl = new Mat(3, 3, MatType.CV_64F);
-                    using var t_gl = new Mat(3, 1, MatType.CV_64F);
 
                     // R_gl = M * R_cv * M where M = diag(1, -1, -1)
                     // The algebraic result for diagonal M with elements +/- 1 is:
@@ -258,22 +256,51 @@ namespace Deep3DStudio.Model.SfM
                     R_gl.Set(2, 1, R_cv.At<double>(2, 1));
                     R_gl.Set(2, 2, R_cv.At<double>(2, 2));
 
-                    // t_gl = M * t_cv -> (tx, -ty, -tz) with M = diag(1, -1, -1)
-                    t_gl.Set(0, 0, t_cv.At<double>(0, 0));
-                    t_gl.Set(1, 0, -t_cv.At<double>(1, 0));
-                    t_gl.Set(2, 0, -t_cv.At<double>(2, 0));
+                    // Calculate Camera Center in OpenGL Coordinates explicitly
+                    // C_cv = -R_cv^T * t_cv
+                    // C_gl = M * C_cv
 
-                    var camToWorld = CvPoseToOpenTK(R_gl, t_gl); // Returns M_gl.Inverted() (Camera -> World)
+                    // 1. Calculate C_cv
+                    var C_cv = new Vector3();
+                    using (var Rt = R_cv.T().ToMat())
+                    using (var negRt = (-Rt).ToMat()) // -R^T
+                    using (var C_mat = (negRt * t_cv).ToMat())
+                    {
+                        C_cv.X = (float)C_mat.At<double>(0, 0);
+                        C_cv.Y = (float)C_mat.At<double>(1, 0);
+                        C_cv.Z = (float)C_mat.At<double>(2, 0);
+                    }
 
-                    // Apply the same scale normalization to camera position
-                    // Extract camera position (translation column of CameraToWorld)
-                    var camPos = new Vector3(camToWorld.M41, camToWorld.M42, camToWorld.M43);
-                    // Apply normalization: (pos - center) * scale
-                    camPos = (camPos - center) * scale;
-                    // Update the matrix
-                    camToWorld.M41 = camPos.X;
-                    camToWorld.M42 = camPos.Y;
-                    camToWorld.M43 = camPos.Z;
+                    // 2. Transform to C_gl (Apply M = diag(1, -1, -1))
+                    var C_gl = new Vector3(C_cv.X, -C_cv.Y, -C_cv.Z);
+
+                    // 3. Normalize
+                    C_gl = (C_gl - center) * scale;
+
+                    // 4. Construct CameraToWorld Matrix
+                    // Rotation part: R_gl (because W2C has R_gl^T in Row Vector notation, so C2W has R_gl)
+                    // Translation part: C_gl
+                    var camToWorld = Matrix4.Identity;
+
+                    // Set Rotation (Upper-Left 3x3 = R_gl)
+                    // Row 0
+                    camToWorld.M11 = (float)R_gl.At<double>(0, 0);
+                    camToWorld.M12 = (float)R_gl.At<double>(0, 1);
+                    camToWorld.M13 = (float)R_gl.At<double>(0, 2);
+                    // Row 1
+                    camToWorld.M21 = (float)R_gl.At<double>(1, 0);
+                    camToWorld.M22 = (float)R_gl.At<double>(1, 1);
+                    camToWorld.M23 = (float)R_gl.At<double>(1, 2);
+                    // Row 2
+                    camToWorld.M31 = (float)R_gl.At<double>(2, 0);
+                    camToWorld.M32 = (float)R_gl.At<double>(2, 1);
+                    camToWorld.M33 = (float)R_gl.At<double>(2, 2);
+
+                    // Set Translation (Row 3)
+                    camToWorld.M41 = C_gl.X;
+                    camToWorld.M42 = C_gl.Y;
+                    camToWorld.M43 = C_gl.Z;
+                    // M44 is 1.0 by Identity
 
                     result.Poses.Add(new CameraPose
                     {
@@ -286,7 +313,7 @@ namespace Deep3DStudio.Model.SfM
                         FocalLength = (float)v.FocalLength // Store per-image focal length
                     });
 
-                    Console.WriteLine($"  Camera {v.Index}: pos=({camPos.X:F2},{camPos.Y:F2},{camPos.Z:F2})");
+                    Console.WriteLine($"  Camera {v.Index}: pos=({C_gl.X:F2},{C_gl.Y:F2},{C_gl.Z:F2})");
                 }
             }
             result.Meshes.Add(mesh);
@@ -927,16 +954,6 @@ namespace Deep3DStudio.Model.SfM
             int y = Math.Clamp((int)pt.Y, 0, img.Height - 1);
             var c = img.At<Vec3b>(y, x);
             return new Scalar(c.Item0, c.Item1, c.Item2);
-        }
-
-        private Matrix4 CvPoseToOpenTK(Mat R, Mat t)
-        {
-            var M = Matrix4.Identity;
-            M.M11 = (float)R.At<double>(0, 0); M.M12 = (float)R.At<double>(1, 0); M.M13 = (float)R.At<double>(2, 0);
-            M.M21 = (float)R.At<double>(0, 1); M.M22 = (float)R.At<double>(1, 1); M.M23 = (float)R.At<double>(2, 1);
-            M.M31 = (float)R.At<double>(0, 2); M.M32 = (float)R.At<double>(1, 2); M.M33 = (float)R.At<double>(2, 2);
-            M.M41 = (float)t.At<double>(0, 0); M.M42 = (float)t.At<double>(1, 0); M.M43 = (float)t.At<double>(2, 0);
-            return M.Inverted();
         }
 
         /// <summary>
