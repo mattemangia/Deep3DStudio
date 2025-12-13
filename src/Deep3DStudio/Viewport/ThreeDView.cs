@@ -359,10 +359,12 @@ namespace Deep3DStudio.Viewport
                     uniform mat4 model;
                     uniform mat4 view;
                     uniform mat4 projection;
+                    uniform float pointSize;
                     out vec3 vertexColor;
                     void main() {
                         gl_Position = projection * view * model * vec4(aPos, 1.0);
                         vertexColor = aColor;
+                        gl_PointSize = pointSize > 0.0 ? pointSize : 8.0;
                     }";
 
                 string fs = @"
@@ -915,7 +917,17 @@ namespace Deep3DStudio.Viewport
                 _pointCloudBuffers[pc.Id] = (vao, vbo, pc.Points.Count);
                 buffers = (vao, vbo, pc.Points.Count);
 
+                // Log sample data for debugging
                 Console.WriteLine($"Created modern GL buffers for point cloud {pc.Id}: {pc.Points.Count} points");
+                if (pc.Points.Count > 0)
+                {
+                    Console.WriteLine($"  Sample point 0: pos=({data[0]:F3},{data[1]:F3},{data[2]:F3}) color=({data[3]:F2},{data[4]:F2},{data[5]:F2})");
+                    if (pc.Points.Count > 100)
+                    {
+                        int midIdx = 100 * 6;
+                        Console.WriteLine($"  Sample point 100: pos=({data[midIdx]:F3},{data[midIdx+1]:F3},{data[midIdx+2]:F3}) color=({data[midIdx+3]:F2},{data[midIdx+4]:F2},{data[midIdx+5]:F2})");
+                    }
+                }
             }
 
             // Use shader and draw
@@ -923,11 +935,17 @@ namespace Deep3DStudio.Viewport
             _shader.SetMatrix4("projection", _projectionMatrix);
             _shader.SetMatrix4("view", _finalViewMatrix);
             _shader.SetMatrix4("model", pc.GetWorldTransform());
+            _shader.SetFloat("pointSize", pc.PointSize);
+
+            // Enable point size from shader
+            GL.Enable(EnableCap.ProgramPointSize);
 
             GL.BindVertexArray(buffers.vao);
             GL.DrawArrays(PrimitiveType.Points, 0, buffers.count);
             GL.BindVertexArray(0);
             GL.UseProgram(0);
+
+            GL.Disable(EnableCap.ProgramPointSize);
         }
 
         /// <summary>

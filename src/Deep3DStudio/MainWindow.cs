@@ -2339,25 +2339,23 @@ namespace Deep3DStudio
                     if (result.Meshes.Count > 0)
                     {
                         var sparseMesh = result.Meshes[0];
-                        Console.WriteLine($"Sparse SfM cloud: {sparseMesh.Vertices.Count} points");
+                        Console.WriteLine($"Sparse SfM cloud: {sparseMesh.Vertices.Count} points, {sparseMesh.Colors.Count} colors");
 
                         _statusLabel.Text = "Densifying Point Cloud...";
-                        // Wait for UI to update
                         while (Application.EventsPending()) Application.RunIteration();
 
                         var denseMesh = await Task.Run(() => GenerateDensePointCloud(result));
 
-                        // Only replace if dense has significantly more valid points
-                        // (at least 2x sparse count to be worthwhile)
-                        if (denseMesh.Vertices.Count > sparseMesh.Vertices.Count * 2)
+                        // Replace sparse with dense if we got significantly more points
+                        if (denseMesh.Vertices.Count > sparseMesh.Vertices.Count * 1.5)
                         {
-                            Console.WriteLine($"Densification: Replaced {sparseMesh.Vertices.Count} sparse points with {denseMesh.Vertices.Count} dense points.");
+                            Console.WriteLine($"Densification: Using dense cloud ({denseMesh.Vertices.Count} pts) over sparse ({sparseMesh.Vertices.Count} pts)");
                             result.Meshes.Clear();
                             result.Meshes.Add(denseMesh);
                         }
                         else
                         {
-                            Console.WriteLine($"Densification: Keeping sparse ({sparseMesh.Vertices.Count} pts) - dense only has {denseMesh.Vertices.Count} pts");
+                            Console.WriteLine($"Densification: Keeping sparse cloud ({sparseMesh.Vertices.Count} pts) - dense only has {denseMesh.Vertices.Count} pts");
                         }
                     }
                 }
@@ -2670,6 +2668,72 @@ namespace Deep3DStudio
             return depthMap;
         }
 
+        /// <summary>
+        /// Extract depth map without gap filling - only real sparse point depths.
+        /// Uses larger splatting radius to create small patches around each point.
+        /// </summary>
+        private float[,] ExtractDepthMapNoFill(MeshData mesh, int width, int height, OpenTK.Mathematics.Matrix4 worldToCamera, float focalLength = 0)
+        {
+            float[,] depthMap = new float[width, height];
+
+            for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                    depthMap[x, y] = -1.0f; // Initialize as invalid
+
+            float focal = focalLength > 0 ? focalLength : Math.Max(width, height) * 0.85f;
+            float cx = width / 2.0f;
+            float cy = height / 2.0f;
+
+            int splatRadius = 5; // Larger radius to create more coverage from sparse points
+            int projectedCount = 0;
+
+            foreach (var v in mesh.Vertices)
+            {
+                // Transform to camera space
+                var vCam = OpenTK.Mathematics.Vector3.TransformPosition(v, worldToCamera);
+                float depth = Math.Abs(vCam.Z);
+
+                if (depth < 0.1f) continue;
+
+                // Project to image plane
+                int px, py;
+                if (vCam.Z < 0) // OpenGL style (-Z fwd)
+                {
+                    px = (int)(-focal * vCam.X / vCam.Z + cx);
+                    py = (int)(-focal * vCam.Y / vCam.Z + cy);
+                }
+                else // OpenCV style (+Z fwd)
+                {
+                    px = (int)(focal * vCam.X / vCam.Z + cx);
+                    py = (int)(focal * vCam.Y / vCam.Z + cy);
+                }
+
+                // Splatting with larger radius
+                for (int dy = -splatRadius; dy <= splatRadius; dy++)
+                {
+                    for (int dx = -splatRadius; dx <= splatRadius; dx++)
+                    {
+                        if (dx*dx + dy*dy > splatRadius*splatRadius) continue;
+
+                        int nx = px + dx;
+                        int ny = py + dy;
+
+                        if (nx >= 0 && nx < width && ny >= 0 && ny < height)
+                        {
+                            if (depthMap[nx, ny] < 0 || depth < depthMap[nx, ny])
+                            {
+                                depthMap[nx, ny] = depth;
+                                projectedCount++;
+                            }
+                        }
+                    }
+                }
+            }
+
+            Console.WriteLine($"  Depth map (no fill): {projectedCount} pixels from {mesh.Vertices.Count} points");
+            return depthMap;
+        }
+
         private void FillDepthMapGaps(float[,] depthMap, int width, int height)
         {
             // Pyramid Filling (Push-Pull) for dense coverage
@@ -2820,9 +2884,9 @@ namespace Deep3DStudio
 
             Parallel.ForEach(result.Poses, pose =>
             {
-                // 1. Regenerate Depth Map (Filled) - pass focal length for consistency
+                // 1. Generate depth map from sparse points (NO gap filling - we want only real geometry)
                 float focal = pose.GetEffectiveFocalLength();
-                var depthMap = ExtractDepthMap(sparseMesh, pose.Width, pose.Height, pose.WorldToCamera, focal);
+                var depthMap = ExtractDepthMapNoFill(sparseMesh, pose.Width, pose.Height, pose.WorldToCamera, focal);
 
                 // 2. Load Image for Colors
                 if (!System.IO.File.Exists(pose.ImagePath)) return;
@@ -2833,28 +2897,25 @@ namespace Deep3DStudio
                 float scaleX = (float)img.Width / pose.Width;
                 float scaleY = (float)img.Height / pose.Height;
 
-                // 3. Back-project using camera-specific focal length (same as ExtractDepthMap)
+                // 3. Back-project only pixels with valid depth (no interpolated/filled values)
                 float cx = pose.Width / 2.0f;
                 float cy = pose.Height / 2.0f;
 
                 var localVerts = new List<OpenTK.Mathematics.Vector3>();
                 var localColors = new List<OpenTK.Mathematics.Vector3>();
 
-                // Stride to manage density (e.g., every 3rd pixel)
-                int stride = 3;
+                // Use smaller stride for denser output where we have valid depth
+                int stride = 2;
 
                 for(int y = 0; y < pose.Height; y+=stride)
                 {
                     for(int x = 0; x < pose.Width; x+=stride)
                     {
                         float d = depthMap[x, y];
-                        if (d <= 0) continue; // Invalid
+                        if (d <= 0) continue; // No valid depth at this pixel
 
-                        // Back-project using same intrinsics/convention as ExtractDepthMap
-                        // Assuming Z = -d (OpenGL convention used in ExtractDepthMap)
-                        // X = (u - cx) * d / f
-                        // Y = (v - cy) * d / f
-
+                        // Back-project to camera space
+                        // Camera looks in -Z direction (OpenGL convention after SfM conversion)
                         float z_cam = -d;
                         float x_cam = (x - cx) * d / focal;
                         float y_cam = (y - cy) * d / focal;
@@ -2863,15 +2924,14 @@ namespace Deep3DStudio
                         var pWorld = OpenTK.Mathematics.Vector3.TransformPosition(pCam, pose.CameraToWorld);
 
                         // Bounds check: only add points within reasonable distance of sparse cloud
-                        // This filters out artifactual points from gap-filling in empty regions
                         if (pWorld.X < sparseMin.X - margin || pWorld.X > sparseMax.X + margin ||
                             pWorld.Y < sparseMin.Y - margin || pWorld.Y > sparseMax.Y + margin ||
                             pWorld.Z < sparseMin.Z - margin || pWorld.Z > sparseMax.Z + margin)
                         {
-                            continue; // Skip points too far from known geometry
+                            continue;
                         }
 
-                        // Color sampling
+                        // Color sampling from original image
                         int imgX = (int)(x * scaleX);
                         int imgY = (int)(y * scaleY);
                         imgX = Math.Clamp(imgX, 0, img.Width - 1);
