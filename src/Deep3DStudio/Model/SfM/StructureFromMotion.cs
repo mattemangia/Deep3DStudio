@@ -41,6 +41,7 @@ namespace Deep3DStudio.Model.SfM
         private List<MapPoint> _map = new List<MapPoint>();
         private List<ViewInfo> _views = new List<ViewInfo>();
         private int _nextMapPointId = 0;
+        private bool _isPivotingCamera = false; // True if rotation-dominant motion detected
 
         public SceneResult ReconstructScene(List<string> imagePaths)
         {
@@ -421,6 +422,22 @@ namespace Deep3DStudio.Model.SfM
                 var v1 = _views[bestI];
                 var v2 = _views[bestJ];
 
+                // Check for rotation-dominant (pivoting) camera motion
+                // For pure rotation, triangulation will fail - the baseline is zero
+                // We detect this by checking if Homography fits better than Essential Matrix
+                bool isRotationDominant = DetectRotationDominantMotion(v1, v2, bestMatches, bestMask);
+
+                if (isRotationDominant)
+                {
+                    Console.WriteLine("WARNING: Rotation-dominant camera motion detected (pivoting/panning camera).");
+                    Console.WriteLine("  This typically occurs with cameras rotating in place (e.g., looking around a scene).");
+                    Console.WriteLine("  Standard triangulation is unreliable. Using spherical depth assumption.");
+
+                    // For pivoting cameras, we can't triangulate reliably
+                    // Instead, assume a spherical depth (all points at similar depth from camera)
+                    _isPivotingCamera = true;
+                }
+
                 v1.R = Mat.Eye(3, 3, MatType.CV_64F).ToMat();
                 v1.t = new Mat(3, 1, MatType.CV_64F, Scalar.All(0));
                 v1.IsRegistered = true;
@@ -430,7 +447,14 @@ namespace Deep3DStudio.Model.SfM
                 v2.IsRegistered = true;
 
                 // Create Initial Map
-                TriangulateAndAddPoints(v1, v2, bestMatches, bestMask);
+                if (_isPivotingCamera)
+                {
+                    TriangulateSphericalDepth(v1, v2, bestMatches, bestMask);
+                }
+                else
+                {
+                    TriangulateAndAddPoints(v1, v2, bestMatches, bestMask);
+                }
                 Console.WriteLine($"Map Initialized with Views {v1.Index} and {v2.Index}. {_map.Count} points, {bestInliers} inliers.");
 
                 bestR?.Dispose();
@@ -818,6 +842,118 @@ namespace Deep3DStudio.Model.SfM
             M.M31 = (float)R.At<double>(0, 2); M.M32 = (float)R.At<double>(1, 2); M.M33 = (float)R.At<double>(2, 2);
             M.M41 = (float)t.At<double>(0, 0); M.M42 = (float)t.At<double>(1, 0); M.M43 = (float)t.At<double>(2, 0);
             return M.Inverted();
+        }
+
+        /// <summary>
+        /// Detects if camera motion is rotation-dominant (pivoting camera) vs translation-dominant (moving camera)
+        /// For pure rotation, Homography fits well and Essential Matrix's translation is degenerate
+        /// </summary>
+        private bool DetectRotationDominantMotion(ViewInfo v1, ViewInfo v2, DMatch[] matches, Mat mask)
+        {
+            if (matches.Length < 10) return false;
+
+            // Get matched points
+            var pts1 = new List<Point2f>();
+            var pts2 = new List<Point2f>();
+            var indexer = mask?.GetGenericIndexer<byte>();
+
+            for (int i = 0; i < matches.Length; i++)
+            {
+                if (mask != null && indexer[i, 0] == 0) continue;
+                pts1.Add(v1.KeyPoints[matches[i].QueryIdx].Pt);
+                pts2.Add(v2.KeyPoints[matches[i].TrainIdx].Pt);
+            }
+
+            if (pts1.Count < 10) return false;
+
+            // Compute Homography and check reprojection error
+            using var H = Cv2.FindHomography(InputArray.Create(pts1), InputArray.Create(pts2), HomographyMethods.Ransac, 3.0);
+
+            if (H.Empty()) return false;
+
+            // Compute reprojection error for Homography
+            double homographyError = 0;
+            int inlierCount = 0;
+
+            for (int i = 0; i < pts1.Count; i++)
+            {
+                // Project pts1 using H
+                double x = pts1[i].X;
+                double y = pts1[i].Y;
+                double w = H.At<double>(2, 0) * x + H.At<double>(2, 1) * y + H.At<double>(2, 2);
+                double px = (H.At<double>(0, 0) * x + H.At<double>(0, 1) * y + H.At<double>(0, 2)) / w;
+                double py = (H.At<double>(1, 0) * x + H.At<double>(1, 1) * y + H.At<double>(1, 2)) / w;
+
+                double dx = px - pts2[i].X;
+                double dy = py - pts2[i].Y;
+                double err = Math.Sqrt(dx * dx + dy * dy);
+
+                if (err < 5.0) // Count as inlier if error < 5 pixels
+                {
+                    homographyError += err;
+                    inlierCount++;
+                }
+            }
+
+            if (inlierCount > 0) homographyError /= inlierCount;
+
+            // If Homography fits very well (low error, high inlier ratio), it's likely pure rotation
+            double inlierRatio = (double)inlierCount / pts1.Count;
+
+            Console.WriteLine($"  Rotation detection: Homography error={homographyError:F2}px, inlier ratio={inlierRatio:P0}");
+
+            // Heuristic: if >80% of points fit Homography with <3px error, it's rotation-dominant
+            return inlierRatio > 0.8 && homographyError < 3.0;
+        }
+
+        /// <summary>
+        /// For pivoting cameras, triangulation fails. Instead, assume spherical depth
+        /// (all points at a fixed distance from camera, creating a panoramic depth)
+        /// </summary>
+        private void TriangulateSphericalDepth(ViewInfo v1, ViewInfo v2, DMatch[] matches, Mat mask)
+        {
+            double assumedDepth = 5.0; // Assume all points are at 5 units depth
+
+            double fx = v1.K.At<double>(0, 0);
+            double fy = v1.K.At<double>(1, 1);
+            double cx = v1.K.At<double>(0, 2);
+            double cy = v1.K.At<double>(1, 2);
+
+            var indexer = mask?.GetGenericIndexer<byte>();
+            int addedPoints = 0;
+
+            for (int i = 0; i < matches.Length; i++)
+            {
+                if (mask != null && indexer[i, 0] == 0) continue;
+
+                var m = matches[i];
+                var pt = v1.KeyPoints[m.QueryIdx].Pt;
+
+                // Back-project using pinhole model and assumed depth
+                // x = (u - cx) * Z / fx
+                // y = (v - cy) * Z / fy
+                // z = Z
+                double x = (pt.X - cx) * assumedDepth / fx;
+                double y = (pt.Y - cy) * assumedDepth / fy;
+                double z = assumedDepth;
+
+                // Create map point (in camera 1 space, which is world space since R1=I, t1=0)
+                var mp = new MapPoint
+                {
+                    Id = _nextMapPointId++,
+                    Position = new Point3d(x, y, z),
+                    Descriptor = v1.Descriptors.Row(m.QueryIdx).Clone(),
+                    Color = GetColor(v1.Image, pt)
+                };
+
+                mp.ObservingViewIndices[v1.Index] = m.QueryIdx;
+                mp.ObservingViewIndices[v2.Index] = m.TrainIdx;
+
+                _map.Add(mp);
+                addedPoints++;
+            }
+
+            Console.WriteLine($"  Created {addedPoints} points using spherical depth assumption (depth={assumedDepth})");
         }
     }
 }
