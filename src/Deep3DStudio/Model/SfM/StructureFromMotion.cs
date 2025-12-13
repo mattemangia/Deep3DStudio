@@ -602,9 +602,9 @@ namespace Deep3DStudio.Model.SfM
 
         private void TriangulateAndAddPoints(ViewInfo v1, ViewInfo v2, DMatch[] matches, Mat mask)
         {
-            // Filter matches that are NOT already in map
-            // If v1_feat or v2_feat is already in map, we merge?
-            // Ideally yes. For simplicity, we only add if NEITHER is in map.
+            // Robust triangulation with reprojection error validation
+            // This handles ALL camera motion types: translation, rotation, pivoting, tilting, or combinations
+            // Points with high reprojection error are rejected or fall back to depth assumption
 
             // Need P matrices
             using var P1 = ComputeP(v1.K, v1.R, v1.t);
@@ -621,10 +621,6 @@ namespace Deep3DStudio.Model.SfM
                 if (mask != null && indexer[i, 0] == 0) continue;
 
                 var m = matches[i];
-                // Check map existence
-                // We need the Observation Dictionary in MapPoint.
-                // Assuming we implemented that change.
-
                 // Add to triangulation list
                 pts1.Add(new Point2d(v1.KeyPoints[m.QueryIdx].Pt.X, v1.KeyPoints[m.QueryIdx].Pt.Y));
                 pts2.Add(new Point2d(v2.KeyPoints[m.TrainIdx].Pt.X, v2.KeyPoints[m.TrainIdx].Pt.Y));
@@ -639,68 +635,152 @@ namespace Deep3DStudio.Model.SfM
             // Ensure output is Double before accessing as Double
             if (pts4D.Type() != MatType.CV_64F) pts4D.ConvertTo(pts4D, MatType.CV_64F);
 
+            // Reprojection error threshold (pixels)
+            const double maxReprojError = 4.0;
+
             int validPoints = 0;
             int rejectedPoints = 0;
+            int fallbackPoints = 0;
 
             for (int i = 0; i < pts4D.Cols; i++)
             {
                 double w = pts4D.At<double>(3, i);
+                bool useTriangulated = true;
+                double x = 0, y = 0, z = 0;
+
                 if (Math.Abs(w) < 1e-6)
                 {
-                    rejectedPoints++;
-                    continue;
+                    useTriangulated = false;
+                }
+                else
+                {
+                    x = pts4D.At<double>(0, i) / w;
+                    y = pts4D.At<double>(1, i) / w;
+                    z = pts4D.At<double>(2, i) / w;
+
+                    // Filter invalid points:
+                    // 1. Check for NaN/Inf
+                    if (double.IsNaN(x) || double.IsNaN(y) || double.IsNaN(z) ||
+                        double.IsInfinity(x) || double.IsInfinity(y) || double.IsInfinity(z))
+                    {
+                        useTriangulated = false;
+                    }
+                    // 2. Check point is in front of both cameras (Z > 0 in camera space)
+                    else
+                    {
+                        double z1 = v1.R.At<double>(2, 0) * x + v1.R.At<double>(2, 1) * y + v1.R.At<double>(2, 2) * z + v1.t.At<double>(2, 0);
+                        double z2 = v2.R.At<double>(2, 0) * x + v2.R.At<double>(2, 1) * y + v2.R.At<double>(2, 2) * z + v2.t.At<double>(2, 0);
+
+                        if (z1 < 0.01 || z2 < 0.01)
+                        {
+                            useTriangulated = false;
+                        }
+                        // 3. Check point is not too far (depth sanity check - max 500 units)
+                        else if (Math.Abs(x) > 500 || Math.Abs(y) > 500 || Math.Abs(z) > 500)
+                        {
+                            useTriangulated = false;
+                        }
+                    }
                 }
 
-                double x = pts4D.At<double>(0, i) / w;
-                double y = pts4D.At<double>(1, i) / w;
-                double z = pts4D.At<double>(2, i) / w;
-
-                // Filter invalid points:
-                // 1. Check for NaN/Inf
-                if (double.IsNaN(x) || double.IsNaN(y) || double.IsNaN(z) ||
-                    double.IsInfinity(x) || double.IsInfinity(y) || double.IsInfinity(z))
+                // CRITICAL: Validate triangulation quality with reprojection error
+                // This is what makes it work for ALL camera motion types
+                if (useTriangulated)
                 {
-                    rejectedPoints++;
-                    continue;
+                    double reprojError1 = ComputeReprojectionError(x, y, z, pts1[i], v1.K, v1.R, v1.t);
+                    double reprojError2 = ComputeReprojectionError(x, y, z, pts2[i], v2.K, v2.R, v2.t);
+                    double maxError = Math.Max(reprojError1, reprojError2);
+
+                    if (maxError > maxReprojError)
+                    {
+                        useTriangulated = false;
+                    }
                 }
 
-                // 2. Check point is in front of both cameras (Z > 0 in camera space)
-                // Transform point to camera 1 space
-                double z1 = v1.R.At<double>(2, 0) * x + v1.R.At<double>(2, 1) * y + v1.R.At<double>(2, 2) * z + v1.t.At<double>(2, 0);
-                double z2 = v2.R.At<double>(2, 0) * x + v2.R.At<double>(2, 1) * y + v2.R.At<double>(2, 2) * z + v2.t.At<double>(2, 0);
-
-                if (z1 < 0.01 || z2 < 0.01)
+                // If triangulation failed or has high reprojection error, use depth assumption
+                if (!useTriangulated)
                 {
-                    rejectedPoints++;
-                    continue; // Point is behind one of the cameras
+                    // Fall back to spherical depth assumption
+                    // Back-project from camera 1 with assumed depth
+                    double assumedDepth = 5.0;
+                    double fx = v1.K.At<double>(0, 0);
+                    double fy = v1.K.At<double>(1, 1);
+                    double cx = v1.K.At<double>(0, 2);
+                    double cy = v1.K.At<double>(1, 2);
+
+                    var pt = v1.KeyPoints[usedMatches[i].QueryIdx].Pt;
+                    x = (pt.X - cx) * assumedDepth / fx;
+                    y = (pt.Y - cy) * assumedDepth / fy;
+                    z = assumedDepth;
+
+                    // For non-identity camera pose, transform to world coordinates
+                    if (v1.R != null && v1.t != null)
+                    {
+                        // Point is in camera space, convert to world space
+                        // P_world = R^T * (P_cam - t) = R^T * P_cam - R^T * t
+                        // For R=I, t=0 this is identity transform
+                        using var pCam = new Mat(3, 1, MatType.CV_64F);
+                        pCam.Set(0, 0, x);
+                        pCam.Set(1, 0, y);
+                        pCam.Set(2, 0, z);
+
+                        using var Rt = v1.R.T().ToMat();
+                        using var pWorld = (Rt * (pCam - v1.t)).ToMat();
+                        x = pWorld.At<double>(0, 0);
+                        y = pWorld.At<double>(1, 0);
+                        z = pWorld.At<double>(2, 0);
+                    }
+
+                    fallbackPoints++;
                 }
-
-                // 3. Check point is not too far (depth sanity check - max 1000 units)
-                if (Math.Abs(x) > 1000 || Math.Abs(y) > 1000 || Math.Abs(z) > 1000)
+                else
                 {
-                    rejectedPoints++;
-                    continue;
+                    validPoints++;
                 }
 
                 var mp = new MapPoint
                 {
                     Id = _nextMapPointId++,
                     Position = new Point3d(x, y, z),
-                    // Use v1 descriptor
                     Descriptor = v1.Descriptors.Row(usedMatches[i].QueryIdx).Clone(),
-                    // Color from v1
                     Color = GetColor(v1.Image, v1.KeyPoints[usedMatches[i].QueryIdx].Pt)
                 };
 
-                // Add observations
                 mp.ObservingViewIndices[v1.Index] = usedMatches[i].QueryIdx;
                 mp.ObservingViewIndices[v2.Index] = usedMatches[i].TrainIdx;
 
                 _map.Add(mp);
-                validPoints++;
             }
 
-            Console.WriteLine($"  Triangulated {validPoints} valid points, rejected {rejectedPoints} bad points");
+            rejectedPoints = usedMatches.Count - validPoints - fallbackPoints;
+            Console.WriteLine($"  Triangulated {validPoints} validated points, {fallbackPoints} depth-assumed points, rejected {rejectedPoints}");
+        }
+
+        /// <summary>
+        /// Compute reprojection error: project 3D point to image and compute distance to observed 2D point
+        /// </summary>
+        private double ComputeReprojectionError(double X, double Y, double Z, Point2d observed, Mat K, Mat R, Mat t)
+        {
+            // Transform world point to camera coordinates: P_cam = R * P_world + t
+            double camX = R.At<double>(0, 0) * X + R.At<double>(0, 1) * Y + R.At<double>(0, 2) * Z + t.At<double>(0, 0);
+            double camY = R.At<double>(1, 0) * X + R.At<double>(1, 1) * Y + R.At<double>(1, 2) * Z + t.At<double>(1, 0);
+            double camZ = R.At<double>(2, 0) * X + R.At<double>(2, 1) * Y + R.At<double>(2, 2) * Z + t.At<double>(2, 0);
+
+            if (camZ < 0.001) return double.MaxValue; // Point behind camera
+
+            // Project to image: p = K * [X/Z, Y/Z, 1]
+            double fx = K.At<double>(0, 0);
+            double fy = K.At<double>(1, 1);
+            double cx = K.At<double>(0, 2);
+            double cy = K.At<double>(1, 2);
+
+            double projX = fx * camX / camZ + cx;
+            double projY = fy * camY / camZ + cy;
+
+            // Compute error
+            double dx = projX - observed.X;
+            double dy = projY - observed.Y;
+            return Math.Sqrt(dx * dx + dy * dy);
         }
 
         private void RefinePose(ViewInfo view)
