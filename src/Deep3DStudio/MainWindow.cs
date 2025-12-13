@@ -2945,10 +2945,13 @@ namespace Deep3DStudio
                         if (d <= 0) continue; // No valid depth at this pixel
 
                         // Back-project to camera space
-                        // Camera looks in -Z direction (OpenGL convention after SfM conversion)
-                        float z_cam = -d;
+                        // SfM poses are converted to an OpenGL-style frame (Y-up, -Z forward).
+                        // Pixel coordinates remain in image space (Y-down), so we need to flip
+                        // the Y component to match the camera pose convention; otherwise the
+                        // reconstructed cloud appears upside down.
+                        float z_cam = -d; // Camera looks down -Z after conversion
                         float x_cam = (x - cx) * d / focal;
-                        float y_cam = (y - cy) * d / focal;
+                        float y_cam = -(y - cy) * d / focal; // Flip Y to convert from image to camera coords
 
                         var pCam = new OpenTK.Mathematics.Vector3(x_cam, y_cam, z_cam);
                         var pWorld = OpenTK.Mathematics.Vector3.TransformPosition(pCam, pose.CameraToWorld);
