@@ -331,7 +331,18 @@ namespace Deep3DStudio.Model.SfM
 
             for (int i = 0; i < paths.Count; i++)
             {
-                var img = Cv2.ImRead(paths[i], ImreadModes.Color);
+                Mat img;
+                try
+                {
+                    // Use ImageDecoder to handle EXIF orientation correctly
+                    img = ImageDecoder.DecodeToMat(paths[i]);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to load image {paths[i]}: {ex.Message}");
+                    continue;
+                }
+
                 if (img.Empty()) continue;
 
                 // Max resolution limit
