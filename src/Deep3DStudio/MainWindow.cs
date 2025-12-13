@@ -2338,16 +2338,26 @@ namespace Deep3DStudio
                     // Densify the sparse SfM point cloud
                     if (result.Meshes.Count > 0)
                     {
+                        var sparseMesh = result.Meshes[0];
+                        Console.WriteLine($"Sparse SfM cloud: {sparseMesh.Vertices.Count} points");
+
                         _statusLabel.Text = "Densifying Point Cloud...";
                         // Wait for UI to update
                         while (Application.EventsPending()) Application.RunIteration();
 
                         var denseMesh = await Task.Run(() => GenerateDensePointCloud(result));
-                        if (denseMesh.Vertices.Count > 0)
+
+                        // Only replace if dense has significantly more valid points
+                        // (at least 2x sparse count to be worthwhile)
+                        if (denseMesh.Vertices.Count > sparseMesh.Vertices.Count * 2)
                         {
-                            Console.WriteLine($"Densification: Replaced {result.Meshes[0].Vertices.Count} sparse points with {denseMesh.Vertices.Count} dense points.");
+                            Console.WriteLine($"Densification: Replaced {sparseMesh.Vertices.Count} sparse points with {denseMesh.Vertices.Count} dense points.");
                             result.Meshes.Clear();
                             result.Meshes.Add(denseMesh);
+                        }
+                        else
+                        {
+                            Console.WriteLine($"Densification: Keeping sparse ({sparseMesh.Vertices.Count} pts) - dense only has {denseMesh.Vertices.Count} pts");
                         }
                     }
                 }
@@ -2797,10 +2807,22 @@ namespace Deep3DStudio
             if (result.Meshes.Count == 0) return denseMesh;
             var sparseMesh = result.Meshes[0];
 
+            // Calculate sparse point cloud bounds for validation
+            var sparseMin = new OpenTK.Mathematics.Vector3(float.MaxValue);
+            var sparseMax = new OpenTK.Mathematics.Vector3(float.MinValue);
+            foreach (var v in sparseMesh.Vertices)
+            {
+                sparseMin = OpenTK.Mathematics.Vector3.ComponentMin(sparseMin, v);
+                sparseMax = OpenTK.Mathematics.Vector3.ComponentMax(sparseMax, v);
+            }
+            var sparseExtent = sparseMax - sparseMin;
+            float margin = Math.Max(sparseExtent.X, Math.Max(sparseExtent.Y, sparseExtent.Z)) * 0.5f;
+
             Parallel.ForEach(result.Poses, pose =>
             {
-                // 1. Regenerate Depth Map (Filled)
-                var depthMap = ExtractDepthMap(sparseMesh, pose.Width, pose.Height, pose.WorldToCamera);
+                // 1. Regenerate Depth Map (Filled) - pass focal length for consistency
+                float focal = pose.GetEffectiveFocalLength();
+                var depthMap = ExtractDepthMap(sparseMesh, pose.Width, pose.Height, pose.WorldToCamera, focal);
 
                 // 2. Load Image for Colors
                 if (!System.IO.File.Exists(pose.ImagePath)) return;
@@ -2811,8 +2833,7 @@ namespace Deep3DStudio
                 float scaleX = (float)img.Width / pose.Width;
                 float scaleY = (float)img.Height / pose.Height;
 
-                // 3. Back-project using camera-specific focal length
-                float focal = pose.GetEffectiveFocalLength();
+                // 3. Back-project using camera-specific focal length (same as ExtractDepthMap)
                 float cx = pose.Width / 2.0f;
                 float cy = pose.Height / 2.0f;
 
@@ -2841,6 +2862,15 @@ namespace Deep3DStudio
                         var pCam = new OpenTK.Mathematics.Vector3(x_cam, y_cam, z_cam);
                         var pWorld = OpenTK.Mathematics.Vector3.TransformPosition(pCam, pose.CameraToWorld);
 
+                        // Bounds check: only add points within reasonable distance of sparse cloud
+                        // This filters out artifactual points from gap-filling in empty regions
+                        if (pWorld.X < sparseMin.X - margin || pWorld.X > sparseMax.X + margin ||
+                            pWorld.Y < sparseMin.Y - margin || pWorld.Y > sparseMax.Y + margin ||
+                            pWorld.Z < sparseMin.Z - margin || pWorld.Z > sparseMax.Z + margin)
+                        {
+                            continue; // Skip points too far from known geometry
+                        }
+
                         // Color sampling
                         int imgX = (int)(x * scaleX);
                         int imgY = (int)(y * scaleY);
@@ -2861,12 +2891,18 @@ namespace Deep3DStudio
                 }
             });
 
-            // Random shuffle to avoid striping artifacts if we render limit?
-            // Not needed for full render.
-
-            // Basic Voxel Grid filter to remove duplicates/overlapping points
-            // This is important because multiple cameras see the same surface
-            // We reuse the Voxelize logic's grid approach but for points
+            // Log dense cloud stats
+            if (denseMesh.Vertices.Count > 0)
+            {
+                var denseMin = new OpenTK.Mathematics.Vector3(float.MaxValue);
+                var denseMax = new OpenTK.Mathematics.Vector3(float.MinValue);
+                foreach (var v in denseMesh.Vertices)
+                {
+                    denseMin = OpenTK.Mathematics.Vector3.ComponentMin(denseMin, v);
+                    denseMax = OpenTK.Mathematics.Vector3.ComponentMax(denseMax, v);
+                }
+                Console.WriteLine($"Dense cloud: {denseMesh.Vertices.Count} points, bounds ({denseMin.X:F2},{denseMin.Y:F2},{denseMin.Z:F2}) to ({denseMax.X:F2},{denseMax.Y:F2},{denseMax.Z:F2})");
+            }
 
             return denseMesh;
         }
