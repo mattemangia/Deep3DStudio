@@ -359,10 +359,12 @@ namespace Deep3DStudio.Viewport
                     uniform mat4 model;
                     uniform mat4 view;
                     uniform mat4 projection;
+                    uniform float pointSize;
                     out vec3 vertexColor;
                     void main() {
                         gl_Position = projection * view * model * vec4(aPos, 1.0);
                         vertexColor = aColor;
+                        gl_PointSize = pointSize > 0.0 ? pointSize : 8.0;
                     }";
 
                 string fs = @"
@@ -933,14 +935,17 @@ namespace Deep3DStudio.Viewport
             _shader.SetMatrix4("projection", _projectionMatrix);
             _shader.SetMatrix4("view", _finalViewMatrix);
             _shader.SetMatrix4("model", pc.GetWorldTransform());
+            _shader.SetFloat("pointSize", pc.PointSize);
 
-            // Enable point size in shader (if supported)
+            // Enable point size from shader
             GL.Enable(EnableCap.ProgramPointSize);
 
             GL.BindVertexArray(buffers.vao);
             GL.DrawArrays(PrimitiveType.Points, 0, buffers.count);
             GL.BindVertexArray(0);
             GL.UseProgram(0);
+
+            GL.Disable(EnableCap.ProgramPointSize);
         }
 
         /// <summary>
