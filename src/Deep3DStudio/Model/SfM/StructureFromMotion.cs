@@ -730,8 +730,9 @@ namespace Deep3DStudio.Model.SfM
 
                     // Compose with regView's pose to get world pose
                     // view_pose = relative_pose * regView_pose
-                    using var newR = R * regView.R;
-                    using var newT = (R * regView.t) + t;
+                    // MatExpr needs to be converted to Mat before Clone()
+                    using var newR = (R * regView.R).ToMat();
+                    using var newT = ((R * regView.t) + t).ToMat();
 
                     view.R = newR.Clone();
                     view.t = newT.Clone();
