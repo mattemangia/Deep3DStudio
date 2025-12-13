@@ -5,6 +5,7 @@ using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using OpenTK.Mathematics;
 using Deep3DStudio.Configuration;
+using OpenCvSharp;
 
 namespace Deep3DStudio.Model
 {
@@ -174,10 +175,11 @@ namespace Deep3DStudio.Model
                 return result;
             }
 
-            // Step 2: Build pose graph and optimize
-            var poses = OptimizePoseGraph(allMatches, n);
+            // Step 2: Build pose graph and optimize.
+            // Note: 'poses' here are mesh alignment transforms, not necessarily camera poses.
+            var meshTransforms = OptimizePoseGraph(allMatches, n);
 
-            // Step 3: Transform all meshes to world coordinates and build result
+            // Step 3: Transform all meshes to world coordinates and recover camera poses
             var allMeshes = new Dictionary<int, MeshData>();
 
             // Collect unique meshes from matches
@@ -189,30 +191,135 @@ namespace Deep3DStudio.Model
                     allMeshes[match.ImageB] = CloneMeshData(match.MeshB);
             }
 
+            // Transform for fixing coordinate system (Dust3r Y-Down -> OpenGL Y-Up)
+            var fixCoord = Matrix4.CreateScale(1, -1, -1);
+
             // Apply global poses to meshes
             for (int i = 0; i < n; i++)
             {
                 if (allMeshes.TryGetValue(i, out var mesh))
                 {
                     var transformedMesh = CloneMeshData(mesh);
-                    transformedMesh.ApplyTransform(poses[i]);
-                    result.Meshes.Add(transformedMesh);
+                    transformedMesh.ApplyTransform(meshTransforms[i]);
 
                     var (t1, s1) = ImageUtils.LoadAndPreprocessImage(imagePaths[i]);
+                    int width = s1[1];
+                    int height = s1[0];
+
+                    // Recover Camera Pose using PnP on the global mesh
+                    var cameraPoseWorld = EstimatePosePnP(transformedMesh, width, height);
+
+                    // Apply the coordinate fix to Mesh and Camera
+                    transformedMesh.ApplyTransform(fixCoord);
+                    var finalCameraToWorld = cameraPoseWorld * fixCoord;
+
+                    result.Meshes.Add(transformedMesh);
                     result.Poses.Add(new CameraPose
                     {
                         ImageIndex = i,
                         ImagePath = imagePaths[i],
-                        Width = s1[1],
-                        Height = s1[0],
-                        CameraToWorld = poses[i],
-                        WorldToCamera = poses[i].Inverted()
+                        Width = width,
+                        Height = height,
+                        CameraToWorld = finalCameraToWorld,
+                        WorldToCamera = finalCameraToWorld.Inverted()
                     });
                 }
             }
 
             Console.WriteLine($"Reconstruction complete: {result.Meshes.Count} views integrated.");
             return result;
+        }
+
+        private Matrix4 EstimatePosePnP(MeshData mesh, int width, int height)
+        {
+            if (mesh.PixelToVertexIndex == null) return Matrix4.Identity;
+
+            var objectPoints = new List<Point3f>();
+            var imagePoints = new List<Point2f>();
+
+            // Stride to reduce computation and outlier influence
+            int stride = 8;
+
+            for (int y = 0; y < height; y += stride)
+            {
+                for (int x = 0; x < width; x += stride)
+                {
+                    int pIdx = y * width + x;
+                    if (pIdx < mesh.PixelToVertexIndex.Length)
+                    {
+                        int vIdx = mesh.PixelToVertexIndex[pIdx];
+                        if (vIdx != -1)
+                        {
+                            var v = mesh.Vertices[vIdx];
+                            objectPoints.Add(new Point3f(v.X, v.Y, v.Z));
+                            imagePoints.Add(new Point2f(x, y));
+                        }
+                    }
+                }
+            }
+
+            if (objectPoints.Count < 20) return Matrix4.Identity;
+
+            // Camera Matrix
+            // Heuristic focal length: max(w,h) * 0.85
+            double f = Math.Max(width, height) * 0.85;
+            double cx = width / 2.0;
+            double cy = height / 2.0;
+
+            var cameraMatrix = new double[,]
+            {
+                { f, 0, cx },
+                { 0, f, cy },
+                { 0, 0, 1 }
+            };
+
+            var distCoeffs = new double[5]; // Assume zero distortion (use double for distCoeffs)
+
+            // Use SolvePnP with standard types
+            // Signature: SolvePnP(IEnumerable<Point3f> objectPoints, IEnumerable<Point2f> imagePoints, double[,] cameraMatrix, IEnumerable<double> distCoeffs, ref double[] rvec, ref double[] tvec, bool useExtrinsicGuess = false, SolvePnPFlags flags = SolvePnPFlags.Iterative)
+
+            var rvec = new double[3]; // Output rotation vector
+            var tvec = new double[3]; // Output translation vector
+
+            try
+            {
+                Cv2.SolvePnP(
+                    objectPoints,
+                    imagePoints,
+                    cameraMatrix,
+                    distCoeffs, // IEnumerable<double>
+                    ref rvec,
+                    ref tvec,
+                    false,
+                    SolvePnPFlags.Iterative
+                );
+            }
+            catch(Exception ex)
+            {
+                Console.WriteLine("PnP Failed: " + ex.Message);
+                return Matrix4.Identity;
+            }
+
+            // Convert to Matrix4 (CameraToWorld)
+            double[,] R;
+            double[,] J; // Jacobian
+            Cv2.Rodrigues(rvec, out R, out J);
+
+            var viewMatrix = Matrix4.Identity;
+
+            // Transpose R for OpenTK
+            viewMatrix.M11 = (float)R[0, 0]; viewMatrix.M12 = (float)R[1, 0]; viewMatrix.M13 = (float)R[2, 0];
+            viewMatrix.M21 = (float)R[0, 1]; viewMatrix.M22 = (float)R[1, 1]; viewMatrix.M23 = (float)R[2, 1];
+            viewMatrix.M31 = (float)R[0, 2]; viewMatrix.M32 = (float)R[1, 2]; viewMatrix.M33 = (float)R[2, 2];
+
+            // Translation
+            viewMatrix.M41 = (float)tvec[0];
+            viewMatrix.M42 = (float)tvec[1];
+            viewMatrix.M43 = (float)tvec[2];
+            viewMatrix.M44 = 1.0f;
+
+            // Invert to get CameraToWorld
+            return viewMatrix.Inverted();
         }
 
         /// <summary>
