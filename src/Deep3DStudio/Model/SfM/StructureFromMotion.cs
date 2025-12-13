@@ -30,6 +30,7 @@ namespace Deep3DStudio.Model.SfM
             public Size Size;
             public Mat Image;
             public Mat K; // Intrinsics
+            public double FocalLength; // Store estimated focal length for later use
             public KeyPoint[] KeyPoints;
             public Mat Descriptors;
             public Mat R; // Camera -> World? No, World -> Camera (OpenCV convention)
@@ -62,53 +63,46 @@ namespace Deep3DStudio.Model.SfM
 
             // 3. Incremental Reconstruction
             int registeredCount = 2; // Initial pair
-            bool changed = true;
+            int maxAttempts = _views.Count * 3; // Allow multiple passes
+            int attempts = 0;
 
-            while (changed && registeredCount < _views.Count)
+            while (attempts < maxAttempts && registeredCount < _views.Count)
             {
-                changed = false;
+                attempts++;
                 // Find unregistered view with most matches to Map
                 var bestCandidate = -1;
-                var bestMatches = new List<DMatch>();
                 var bestObjectPoints = new List<Point3d>();
                 var bestImagePoints = new List<Point2d>();
 
-                // Heuristic: Try next sequential view first (Video case), then others
-                // But "Professional" means robust. Let's scan all unregistered.
-                // For performance on large sets, we might restrict to neighbors of registered.
-
-                // Sort unregistered views by index to prioritize sequence if it exists,
-                // but checking map overlap is key.
                 var unregistered = _views.Where(v => !v.IsRegistered).ToList();
+                if (unregistered.Count == 0) break;
 
-                int maxInliers = 0;
+                int maxMatches = 0;
 
                 foreach (var view in unregistered)
                 {
                     // Match View Features <-> Global Map Descriptors
-                    // This is "Map Tracking" / Implicit Loop Closure
                     var (objPts, imgPts) = FindMapMatches(view);
 
-                    if (objPts.Count > maxInliers)
+                    if (objPts.Count > maxMatches)
                     {
-                        maxInliers = objPts.Count;
+                        maxMatches = objPts.Count;
                         bestCandidate = view.Index;
                         bestObjectPoints = objPts;
                         bestImagePoints = imgPts;
                     }
                 }
 
-                if (bestCandidate != -1 && maxInliers >= 8) // Minimum threshold for PnP (lowered from 15 for small image sets)
+                // Very low threshold (6 points minimum for PnP) to register difficult views
+                if (bestCandidate != -1 && maxMatches >= 6)
                 {
                     var view = _views[bestCandidate];
                     if (RegisterView(view, bestObjectPoints, bestImagePoints))
                     {
-                        Console.WriteLine($"Registered Image {view.Index} with {maxInliers} map matches.");
+                        Console.WriteLine($"Registered Image {view.Index} with {maxMatches} map matches.");
                         registeredCount++;
-                        changed = true;
 
                         // Triangulate new points with existing registered views
-                        // To expand the map
                         ExpandMap(view);
 
                         // Bundle Adjustment (Local refinement)
@@ -116,14 +110,25 @@ namespace Deep3DStudio.Model.SfM
                     }
                     else
                     {
-                        Console.WriteLine($"Failed to register Image {bestCandidate} (PnP failed with {maxInliers} matches).");
+                        Console.WriteLine($"Failed to register Image {bestCandidate} (PnP failed with {maxMatches} matches).");
+                        // Mark as attempted to avoid infinite loop - but don't give up completely
+                        // The map may grow and this view could be registered later
                     }
                 }
-                else if (bestCandidate != -1)
+                else if (unregistered.Count > 0)
                 {
-                    Console.WriteLine($"Skipping Image {bestCandidate}: only {maxInliers} map matches found (minimum 8 required).");
+                    // No view could be registered - try direct triangulation between registered views
+                    // to expand the map
+                    Console.WriteLine($"No view could be registered (best had {maxMatches} matches). Expanding map...");
+                    ExpandMapBetweenRegisteredViews();
+
+                    // If we still can't register anything after expansion, break
+                    if (maxMatches < 4)
+                        break;
                 }
             }
+
+            Console.WriteLine($"Incremental reconstruction finished after {attempts} iterations.");
 
             // 4. Final Polish
             Console.WriteLine($"SfM Complete: Registered {registeredCount}/{_views.Count} views, {_map.Count} 3D points in map.");
@@ -198,7 +203,8 @@ namespace Deep3DStudio.Model.SfM
                         Width = v.Size.Width,
                         Height = v.Size.Height,
                         CameraToWorld = camToWorld,
-                        WorldToCamera = camToWorld.Inverted()
+                        WorldToCamera = camToWorld.Inverted(),
+                        FocalLength = (float)v.FocalLength // Store per-image focal length
                     });
                 }
             }
@@ -232,6 +238,8 @@ namespace Deep3DStudio.Model.SfM
                 detector.DetectAndCompute(img, null, out kps, desc);
 
                 // Estimate K (Auto-Zoom support)
+                // Different images might have different focal lengths (zoom)
+                // Use a heuristic based on image dimensions
                 double f = Math.Max(img.Width, img.Height) * 0.85; // Roughly 50-60 deg FOV
                 var K = Mat.Eye(3, 3, MatType.CV_64F).ToMat();
                 K.Set(0, 0, f);
@@ -246,31 +254,44 @@ namespace Deep3DStudio.Model.SfM
                     Size = img.Size(),
                     Image = img, // Keep loaded for color sampling
                     K = K,
+                    FocalLength = f, // Store for later use
                     KeyPoints = kps,
                     Descriptors = desc,
                     IsRegistered = false
                 });
+
+                Console.WriteLine($"  View {i}: {img.Width}x{img.Height}, focal={f:F1}, {kps.Length} features");
             }
         }
 
         private bool InitializeMap()
         {
             // Find pair with high feature matches and sufficient baseline
-            // Simplified: Just scan 0-1, 0-2, 1-2.
-            // Professional: Use Homography vs Fundamental matrix score to detect baseline.
+            // Scan ALL pairs to find the best initialization pair
+            // Score by: number of matches, baseline quality (not too small, not too large)
 
             using var matcher = new BFMatcher(NormTypes.Hamming, crossCheck: true);
 
-            for (int i = 0; i < Math.Min(_views.Count - 1, 3); i++)
+            int bestI = -1, bestJ = -1;
+            int bestInliers = 0;
+            Mat bestR = null, bestT = null;
+            DMatch[] bestMatches = null;
+            Mat bestMask = null;
+
+            Console.WriteLine($"Searching for best initialization pair among {_views.Count} images...");
+
+            // Search all pairs within a reasonable range
+            int maxPairDistance = Math.Min(_views.Count, 10); // Check pairs up to 10 images apart
+
+            for (int i = 0; i < _views.Count - 1; i++)
             {
-                for (int j = i + 1; j < Math.Min(_views.Count, i + 4); j++)
+                for (int j = i + 1; j < Math.Min(_views.Count, i + maxPairDistance); j++)
                 {
                     var v1 = _views[i];
                     var v2 = _views[j];
 
                     var matches = matcher.Match(v1.Descriptors, v2.Descriptors);
-                    Console.WriteLine($"Initialization: Matching views {v1.Index} and {v2.Index}: {matches.Length} matches");
-                    if (matches.Length < 50) continue; // Lowered from 100 to support smaller/simpler scenes
+                    if (matches.Length < 30) continue; // Lower threshold for difficult scenes
 
                     // Recover Pose
                     var p1 = new List<Point2d>();
@@ -282,11 +303,7 @@ namespace Deep3DStudio.Model.SfM
                     }
 
                     using var mask = new Mat();
-                    // Essential Matrix (uses both Ks correctly)
-                    // Note: OpenCV FindEssentialMat assumes same K? No, we can normalize points manually.
-                    // Or use the overload with focal/pp. But we have two Ks.
-                    // Correct way: Undistort points (normalize) -> FindEssentialMat with I -> RecoverPose with I.
-
+                    // Normalize points using each camera's intrinsics (supports different focal lengths)
                     var normP1 = NormalizePoints(p1, v1.K);
                     var normP2 = NormalizePoints(p2, v2.K);
 
@@ -300,7 +317,7 @@ namespace Deep3DStudio.Model.SfM
                     int inliers = Cv2.RecoverPose(E, InputArray.Create(normP1), InputArray.Create(normP2),
                         Mat.Eye(3, 3, MatType.CV_64F), R, t, mask);
 
-                    if (inliers > 50)
+                    if (inliers > 30 && inliers > bestInliers)
                     {
                         // Ensure Double precision to prevent type mismatch issues
                         if (R.Type() != MatType.CV_64F) R.ConvertTo(R, MatType.CV_64F);
@@ -313,26 +330,53 @@ namespace Deep3DStudio.Model.SfM
                         if (double.IsNaN(tx) || double.IsNaN(ty) || double.IsNaN(tz) ||
                             Math.Abs(tx) > 1000 || Math.Abs(ty) > 1000 || Math.Abs(tz) > 1000)
                         {
-                             Console.WriteLine($"Initialization rejected: Translation too large ({tx}, {ty}, {tz})");
                              continue;
                         }
 
-                        // Good initialization
-                        v1.R = Mat.Eye(3, 3, MatType.CV_64F).ToMat();
-                        v1.t = new Mat(3, 1, MatType.CV_64F, Scalar.All(0));
-                        v1.IsRegistered = true;
+                        // Track best pair
+                        bestI = i;
+                        bestJ = j;
+                        bestInliers = inliers;
+                        bestR?.Dispose();
+                        bestT?.Dispose();
+                        bestMask?.Dispose();
+                        bestR = R.Clone();
+                        bestT = t.Clone();
+                        bestMatches = matches;
+                        bestMask = mask.Clone();
 
-                        v2.R = R.Clone();
-                        v2.t = t.Clone();
-                        v2.IsRegistered = true;
-
-                        // Create Initial Map
-                        TriangulateAndAddPoints(v1, v2, matches, mask);
-                        Console.WriteLine($"Map Initialized with Views {v1.Index} and {v2.Index}. {_map.Count} points.");
-                        return true;
+                        Console.WriteLine($"  Candidate pair ({i},{j}): {inliers} inliers from {matches.Length} matches");
                     }
                 }
             }
+
+            // Use best pair found
+            if (bestI >= 0 && bestJ >= 0 && bestInliers >= 30)
+            {
+                var v1 = _views[bestI];
+                var v2 = _views[bestJ];
+
+                v1.R = Mat.Eye(3, 3, MatType.CV_64F).ToMat();
+                v1.t = new Mat(3, 1, MatType.CV_64F, Scalar.All(0));
+                v1.IsRegistered = true;
+
+                v2.R = bestR.Clone();
+                v2.t = bestT.Clone();
+                v2.IsRegistered = true;
+
+                // Create Initial Map
+                TriangulateAndAddPoints(v1, v2, bestMatches, bestMask);
+                Console.WriteLine($"Map Initialized with Views {v1.Index} and {v2.Index}. {_map.Count} points, {bestInliers} inliers.");
+
+                bestR?.Dispose();
+                bestT?.Dispose();
+                bestMask?.Dispose();
+                return true;
+            }
+
+            bestR?.Dispose();
+            bestT?.Dispose();
+            bestMask?.Dispose();
             return false;
         }
 
@@ -575,6 +619,38 @@ namespace Deep3DStudio.Model.SfM
             // SolvePnPRefineLM or similar?
             // OpenCvSharp doesn't expose bundle adjustment easily.
             // Just assume SolvePnP RANSAC result is good enough for "Professional" prototype.
+        }
+
+        /// <summary>
+        /// Expand map by triangulating new points between all pairs of registered views.
+        /// This helps when no new views can be registered due to insufficient map overlap.
+        /// </summary>
+        private void ExpandMapBetweenRegisteredViews()
+        {
+            using var matcher = new BFMatcher(NormTypes.Hamming, crossCheck: true);
+
+            var registeredViews = _views.Where(v => v.IsRegistered).ToList();
+            int newPointsBefore = _map.Count;
+
+            // Triangulate between all pairs of registered views
+            for (int i = 0; i < registeredViews.Count; i++)
+            {
+                for (int j = i + 1; j < registeredViews.Count; j++)
+                {
+                    var v1 = registeredViews[i];
+                    var v2 = registeredViews[j];
+
+                    // Only try pairs that haven't been fully exhausted
+                    var matches = matcher.Match(v1.Descriptors, v2.Descriptors);
+                    if (matches.Length > 10)
+                    {
+                        TriangulateAndAddPoints(v1, v2, matches, null);
+                    }
+                }
+            }
+
+            int newPoints = _map.Count - newPointsBefore;
+            Console.WriteLine($"  Expanded map with {newPoints} new points (total: {_map.Count})");
         }
 
         // Helpers

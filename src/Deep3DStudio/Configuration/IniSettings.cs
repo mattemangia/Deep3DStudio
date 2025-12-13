@@ -56,6 +56,7 @@ namespace Deep3DStudio.Configuration
         public bool ShowAxes { get; set; } = true;
         public bool ShowCameras { get; set; } = true;
         public bool ShowInfoOverlay { get; set; } = true;
+        public bool ShowPointCloudBounds { get; set; } = true; // Show bounding box for point clouds
         public int LastWindowWidth { get; set; } = 1400;
         public int LastWindowHeight { get; set; } = 900;
         public int LastPanelWidth { get; set; } = 250;
@@ -226,6 +227,7 @@ namespace Deep3DStudio.Configuration
                     writer.WriteLine($"ShowAxes={ShowAxes}");
                     writer.WriteLine($"ShowCameras={ShowCameras}");
                     writer.WriteLine($"ShowInfoOverlay={ShowInfoOverlay}");
+                    writer.WriteLine($"ShowPointCloudBounds={ShowPointCloudBounds}");
                     writer.WriteLine();
 
                     // [NeRF] section
@@ -298,6 +300,8 @@ namespace Deep3DStudio.Configuration
                 ShowCameras = sc;
             if (TryGetValue("Viewport", "ShowInfoOverlay", out string? sioStr) && bool.TryParse(sioStr, out var sio))
                 ShowInfoOverlay = sio;
+            if (TryGetValue("Viewport", "ShowPointCloudBounds", out string? spcbStr) && bool.TryParse(spcbStr, out var spcb))
+                ShowPointCloudBounds = spcb;
 
             // [NeRF]
             if (TryGetValue("NeRF", "Iterations", out string? itStr) && int.TryParse(itStr, out var it))
@@ -362,6 +366,7 @@ namespace Deep3DStudio.Configuration
             ShowAxes = true;
             ShowCameras = true;
             ShowInfoOverlay = true;
+            ShowPointCloudBounds = true;
             NeRFIterations = 50;
             VoxelGridSize = 128;
             NeRFLearningRate = 0.1f;

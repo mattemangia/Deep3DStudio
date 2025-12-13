@@ -2430,8 +2430,14 @@ namespace Deep3DStudio
                          return mesher.GenerateMesh(grid, min, size, 0.5f);
                     });
 
-                    var meshObj = new MeshObject("Reconstructed Mesh", meshedResult);
-                    _sceneGraph.AddObject(meshObj);
+                    Console.WriteLine($"Meshing result: {meshedResult.Vertices.Count} vertices, {meshedResult.Indices.Count} indices ({meshedResult.Indices.Count/3} triangles)");
+
+                    if (meshedResult.Vertices.Count > 0)
+                    {
+                        var meshObj = new MeshObject("Reconstructed Mesh", meshedResult);
+                        _sceneGraph.AddObject(meshObj);
+                        _viewport.FocusOnSelection();
+                    }
                     _statusLabel.Text = "Meshing Complete.";
                 }
                 else if (workflow == "Interior Scan")
@@ -2444,8 +2450,14 @@ namespace Deep3DStudio
                          return mesher.GenerateMesh(grid, min, size, 0.5f);
                     });
 
-                    var meshObj = new MeshObject("Interior Mesh", meshedResult);
-                    _sceneGraph.AddObject(meshObj);
+                    Console.WriteLine($"Interior Meshing result: {meshedResult.Vertices.Count} vertices, {meshedResult.Indices.Count} indices ({meshedResult.Indices.Count/3} triangles)");
+
+                    if (meshedResult.Vertices.Count > 0)
+                    {
+                        var meshObj = new MeshObject("Interior Mesh", meshedResult);
+                        _sceneGraph.AddObject(meshObj);
+                        _viewport.FocusOnSelection();
+                    }
                     _statusLabel.Text = "Interior Meshing Complete.";
                 }
                 else
@@ -2466,8 +2478,14 @@ namespace Deep3DStudio
                          return nerf.GetMesh(GetMesher(IniSettings.Instance.MeshingAlgo));
                     });
 
-                    var meshObj = new MeshObject("NeRF Mesh", nerfMesh);
-                    _sceneGraph.AddObject(meshObj);
+                    Console.WriteLine($"NeRF Meshing result: {nerfMesh.Vertices.Count} vertices, {nerfMesh.Indices.Count} indices ({nerfMesh.Indices.Count/3} triangles)");
+
+                    if (nerfMesh.Vertices.Count > 0)
+                    {
+                        var meshObj = new MeshObject("NeRF Mesh", nerfMesh);
+                        _sceneGraph.AddObject(meshObj);
+                        _viewport.FocusOnSelection();
+                    }
                     _statusLabel.Text = "NeRF Meshing Complete.";
                 }
 
@@ -2529,7 +2547,8 @@ namespace Deep3DStudio
             for (int i = 0; i < result.Poses.Count; i++)
             {
                 var pose = result.Poses[i];
-                var depthMap = ExtractDepthMap(combinedMesh, pose.Width, pose.Height, pose.WorldToCamera);
+                // Pass camera-specific focal length for accurate depth projection
+                var depthMap = ExtractDepthMap(combinedMesh, pose.Width, pose.Height, pose.WorldToCamera, pose.GetEffectiveFocalLength());
                 _imageBrowser.SetDepthData(i, depthMap);
             }
 
@@ -2548,7 +2567,7 @@ namespace Deep3DStudio
             }
         }
 
-        private float[,] ExtractDepthMap(MeshData mesh, int width, int height, OpenTK.Mathematics.Matrix4 worldToCamera)
+        private float[,] ExtractDepthMap(MeshData mesh, int width, int height, OpenTK.Mathematics.Matrix4 worldToCamera, float focalLength = 0)
         {
             float[,] depthMap = new float[width, height];
 
@@ -2577,8 +2596,8 @@ namespace Deep3DStudio
             else
             {
                 // Sparse Point Cloud Logic (SfM)
-                // Estimate camera intrinsics
-                float focal = Math.Max(width, height) * 0.85f;
+                // Use provided focal length if available, otherwise estimate
+                float focal = focalLength > 0 ? focalLength : Math.Max(width, height) * 0.85f;
                 float cx = width / 2.0f;
                 float cy = height / 2.0f;
 
@@ -2719,27 +2738,46 @@ namespace Deep3DStudio
                 });
             }
 
-            // 3. Final Smoothing Pass (3x3 Box Filter) to remove blockiness
+            // 3. Final Smoothing Pass - Edge-preserving bilateral-like filter
+            // Only smooth pixels that are close in depth to their neighbors
+            // This preserves depth discontinuities at object boundaries
             float[,] smoothed = (float[,])depthMap.Clone();
+            float depthThreshold = 0.15f; // Only blend depths within 15% of each other
+
             Parallel.For(0, height, y =>
             {
                 for (int x = 0; x < width; x++)
                 {
-                    float sum = 0;
-                    int count = 0;
-                    for(int dy=-1; dy<=1; dy++)
+                    float centerDepth = depthMap[x, y];
+                    if (centerDepth <= 0) continue;
+
+                    float sum = centerDepth;
+                    float weight = 1.0f;
+
+                    for(int dy = -1; dy <= 1; dy++)
                     {
-                        int ny = y+dy;
-                        if(ny<0 || ny>=height) continue;
-                        for(int dx=-1; dx<=1; dx++)
+                        int ny = y + dy;
+                        if(ny < 0 || ny >= height) continue;
+                        for(int dx = -1; dx <= 1; dx++)
                         {
-                             int nx = x+dx;
-                             if(nx<0 || nx>=width) continue;
-                             float v = depthMap[nx,ny];
-                             if(v > 0) { sum+=v; count++; }
+                            if (dx == 0 && dy == 0) continue;
+                            int nx = x + dx;
+                            if(nx < 0 || nx >= width) continue;
+                            float v = depthMap[nx, ny];
+                            if(v <= 0) continue;
+
+                            // Only include neighbors with similar depth (edge-preserving)
+                            float depthDiff = Math.Abs(v - centerDepth) / centerDepth;
+                            if (depthDiff < depthThreshold)
+                            {
+                                // Weight by inverse distance
+                                float w = (dx == 0 || dy == 0) ? 1.0f : 0.7f;
+                                sum += v * w;
+                                weight += w;
+                            }
                         }
                     }
-                    if(count > 0) smoothed[x,y] = sum/count;
+                    smoothed[x, y] = sum / weight;
                 }
             });
 
@@ -2773,8 +2811,8 @@ namespace Deep3DStudio
                 float scaleX = (float)img.Width / pose.Width;
                 float scaleY = (float)img.Height / pose.Height;
 
-                // 3. Back-project
-                float focal = Math.Max(pose.Width, pose.Height) * 0.85f;
+                // 3. Back-project using camera-specific focal length
+                float focal = pose.GetEffectiveFocalLength();
                 float cx = pose.Width / 2.0f;
                 float cy = pose.Height / 2.0f;
 

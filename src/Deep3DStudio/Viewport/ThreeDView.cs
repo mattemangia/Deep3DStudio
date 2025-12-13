@@ -715,9 +715,10 @@ namespace Deep3DStudio.Viewport
                 {
                     DrawPointCloudObject(pcObj);
 
-                    if (obj.Selected)
+                    // Always show bounding box for point clouds if enabled, or if selected
+                    if (obj.Selected || IniSettings.Instance.ShowPointCloudBounds)
                     {
-                        DrawSelectionOutline(obj);
+                        DrawPointCloudBoundingBox(pcObj);
                     }
                 }
 
@@ -841,6 +842,63 @@ namespace Deep3DStudio.Viewport
             }
 
             GL.End();
+        }
+
+        /// <summary>
+        /// Draws a bounding box around the point cloud with a distinct color
+        /// </summary>
+        private void DrawPointCloudBoundingBox(PointCloudObject pc)
+        {
+            if (pc.Points.Count == 0) return;
+
+            var min = pc.BoundsMin;
+            var max = pc.BoundsMax;
+
+            // Validate bounds
+            if (float.IsInfinity(min.X) || float.IsInfinity(max.X) ||
+                float.IsNaN(min.X) || float.IsNaN(max.X))
+            {
+                return;
+            }
+
+            GL.LineWidth(2.0f);
+
+            // Use a cyan color for point cloud bounds (different from selection outline)
+            if (pc.Selected)
+            {
+                var color = ColorPalette[pc.Id % ColorPalette.Length];
+                GL.Color4(color.X, color.Y, color.Z, 0.8f);
+            }
+            else
+            {
+                GL.Color4(0.0f, 0.8f, 0.9f, 0.6f); // Cyan with transparency
+            }
+
+            GL.Begin(PrimitiveType.Lines);
+
+            // Bottom face
+            GL.Vertex3(min.X, min.Y, min.Z); GL.Vertex3(max.X, min.Y, min.Z);
+            GL.Vertex3(max.X, min.Y, min.Z); GL.Vertex3(max.X, min.Y, max.Z);
+            GL.Vertex3(max.X, min.Y, max.Z); GL.Vertex3(min.X, min.Y, max.Z);
+            GL.Vertex3(min.X, min.Y, max.Z); GL.Vertex3(min.X, min.Y, min.Z);
+
+            // Top face
+            GL.Vertex3(min.X, max.Y, min.Z); GL.Vertex3(max.X, max.Y, min.Z);
+            GL.Vertex3(max.X, max.Y, min.Z); GL.Vertex3(max.X, max.Y, max.Z);
+            GL.Vertex3(max.X, max.Y, max.Z); GL.Vertex3(min.X, max.Y, max.Z);
+            GL.Vertex3(min.X, max.Y, max.Z); GL.Vertex3(min.X, max.Y, min.Z);
+
+            // Vertical edges
+            GL.Vertex3(min.X, min.Y, min.Z); GL.Vertex3(min.X, max.Y, min.Z);
+            GL.Vertex3(max.X, min.Y, min.Z); GL.Vertex3(max.X, max.Y, min.Z);
+            GL.Vertex3(max.X, min.Y, max.Z); GL.Vertex3(max.X, max.Y, max.Z);
+            GL.Vertex3(min.X, min.Y, max.Z); GL.Vertex3(min.X, max.Y, max.Z);
+
+            GL.End();
+            GL.LineWidth(1.0f);
+
+            // Draw bounds info text at the top of the bounding box
+            // This would require text rendering, which we skip for now
         }
 
         private static Vector3 TurboColormap(float t)

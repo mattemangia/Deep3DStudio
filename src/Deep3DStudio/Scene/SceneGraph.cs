@@ -196,6 +196,7 @@ namespace Deep3DStudio.Scene
             ObjectType = SceneObjectType.Mesh;
             MeshData = mesh;
             UpdateBounds();
+            Console.WriteLine($"MeshObject '{name}' created: {VertexCount} vertices, {TriangleCount} triangles, bounds: ({BoundsMin.X:F2},{BoundsMin.Y:F2},{BoundsMin.Z:F2}) to ({BoundsMax.X:F2},{BoundsMax.Y:F2},{BoundsMax.Z:F2})");
         }
 
         public override void UpdateBounds()
@@ -272,6 +273,7 @@ namespace Deep3DStudio.Scene
             Points = new List<Vector3>(mesh.Vertices);
             Colors = new List<Vector3>(mesh.Colors);
             UpdateBounds();
+            Console.WriteLine($"PointCloudObject '{name}' created: {Points.Count} points, bounds: ({BoundsMin.X:F2},{BoundsMin.Y:F2},{BoundsMin.Z:F2}) to ({BoundsMax.X:F2},{BoundsMax.Y:F2},{BoundsMax.Z:F2})");
         }
 
         public override void UpdateBounds()
