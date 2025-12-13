@@ -185,7 +185,32 @@ namespace Deep3DStudio.Model.SfM
                 maxBound = Vector3.ComponentMax(maxBound, p);
             }
 
-            Console.WriteLine($"SfM Output: {mesh.Vertices.Count} points. Bounds: {minBound} to {maxBound}");
+            Console.WriteLine($"SfM Output (raw): {mesh.Vertices.Count} points. Bounds: {minBound} to {maxBound}");
+
+            // Normalize scale: SfM with Essential Matrix has arbitrary scale
+            // Normalize so the scene fits in a reasonable cube (e.g., max dimension ~10 units)
+            var center = (minBound + maxBound) / 2.0f;
+            var extent = maxBound - minBound;
+            float maxExtent = Math.Max(extent.X, Math.Max(extent.Y, extent.Z));
+            float targetSize = 10.0f;
+            float scale = maxExtent > 0.001f ? targetSize / maxExtent : 1.0f;
+
+            // Apply normalization to points
+            for (int i = 0; i < mesh.Vertices.Count; i++)
+            {
+                mesh.Vertices[i] = (mesh.Vertices[i] - center) * scale;
+            }
+
+            // Recalculate bounds after normalization
+            minBound = new Vector3(float.MaxValue);
+            maxBound = new Vector3(float.MinValue);
+            foreach (var p in mesh.Vertices)
+            {
+                minBound = Vector3.ComponentMin(minBound, p);
+                maxBound = Vector3.ComponentMax(maxBound, p);
+            }
+
+            Console.WriteLine($"SfM Output (normalized): {mesh.Vertices.Count} points. Scale={scale:F4}, Bounds: {minBound} to {maxBound}");
 
             foreach (var v in _views)
             {
@@ -224,6 +249,16 @@ namespace Deep3DStudio.Model.SfM
 
                     var camToWorld = CvPoseToOpenTK(R_gl, t_gl); // Returns M_gl.Inverted() (Camera -> World)
 
+                    // Apply the same scale normalization to camera position
+                    // Extract camera position (translation column of CameraToWorld)
+                    var camPos = new Vector3(camToWorld.M41, camToWorld.M42, camToWorld.M43);
+                    // Apply normalization: (pos - center) * scale
+                    camPos = (camPos - center) * scale;
+                    // Update the matrix
+                    camToWorld.M41 = camPos.X;
+                    camToWorld.M42 = camPos.Y;
+                    camToWorld.M43 = camPos.Z;
+
                     result.Poses.Add(new CameraPose
                     {
                         ImageIndex = v.Index,
@@ -234,6 +269,8 @@ namespace Deep3DStudio.Model.SfM
                         WorldToCamera = camToWorld.Inverted(),
                         FocalLength = (float)v.FocalLength // Store per-image focal length
                     });
+
+                    Console.WriteLine($"  Camera {v.Index}: pos=({camPos.X:F2},{camPos.Y:F2},{camPos.Z:F2})");
                 }
             }
             result.Meshes.Add(mesh);
