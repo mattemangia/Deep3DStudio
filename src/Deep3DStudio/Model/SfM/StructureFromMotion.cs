@@ -177,8 +177,10 @@ namespace Deep3DStudio.Model.SfM
 
             foreach (var mp in _map)
             {
-                // Apply M to Point: (x, -y, -z)
-                var p = new Vector3((float)mp.Position.X, -(float)mp.Position.Y, -(float)mp.Position.Z);
+                // Apply coordinate flip: OpenCV (Y-down, Z-forward) -> Viewer convention
+                // Flip X to correct horizontal mirroring, keep Y and Z as-is
+                // This produces a right-handed coordinate system matching the viewer's expectations
+                var p = new Vector3(-(float)mp.Position.X, (float)mp.Position.Y, (float)mp.Position.Z);
                 mesh.Vertices.Add(p);
                 mesh.Colors.Add(new Vector3((float)mp.Color.Val2 / 255f, (float)mp.Color.Val1 / 255f, (float)mp.Color.Val0 / 255f)); // RGB vs BGR
 
@@ -217,9 +219,10 @@ namespace Deep3DStudio.Model.SfM
             {
                 if (v.IsRegistered)
                 {
-                    // Convert OpenCV Pose (R, t) to OpenGL Pose (R', t')
-                    // R' = M * R * M
-                    // t' = M * t
+                    // Convert OpenCV Pose (R, t) to Viewer Pose (R', t')
+                    // Using M = diag(-1, 1, 1) to match point transformation
+                    // R' = M * R * M (mathematically same result as before)
+                    // t' = M * t = (-tx, ty, tz)
 
                     var R_cv = v.R;
                     var t_cv = v.t;
@@ -227,7 +230,7 @@ namespace Deep3DStudio.Model.SfM
                     using var R_gl = new Mat(3, 3, MatType.CV_64F);
                     using var t_gl = new Mat(3, 1, MatType.CV_64F);
 
-                    // R_gl = M * R_cv * M
+                    // R_gl = M * R_cv * M where M = diag(-1, 1, 1)
                     // Row 0: R00, -R01, -R02
                     R_gl.Set(0, 0, R_cv.At<double>(0, 0));
                     R_gl.Set(0, 1, -R_cv.At<double>(0, 1));
@@ -243,10 +246,10 @@ namespace Deep3DStudio.Model.SfM
                     R_gl.Set(2, 1, R_cv.At<double>(2, 1));
                     R_gl.Set(2, 2, R_cv.At<double>(2, 2));
 
-                    // t_gl = M * t_cv -> (tx, -ty, -tz)
-                    t_gl.Set(0, 0, t_cv.At<double>(0, 0));
-                    t_gl.Set(1, 0, -t_cv.At<double>(1, 0));
-                    t_gl.Set(2, 0, -t_cv.At<double>(2, 0));
+                    // t_gl = M * t_cv -> (-tx, ty, tz) with M = diag(-1, 1, 1)
+                    t_gl.Set(0, 0, -t_cv.At<double>(0, 0));
+                    t_gl.Set(1, 0, t_cv.At<double>(1, 0));
+                    t_gl.Set(2, 0, t_cv.At<double>(2, 0));
 
                     var camToWorld = CvPoseToOpenTK(R_gl, t_gl); // Returns M_gl.Inverted() (Camera -> World)
 
