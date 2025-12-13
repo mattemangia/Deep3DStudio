@@ -1,0 +1,6 @@
+/app/obj/Debug/net8.0/verify_transform.csproj.AssemblyReference.cache
+/app/obj/Debug/net8.0/verify_transform.GeneratedMSBuildEditorConfig.editorconfig
+/app/obj/Debug/net8.0/verify_transform.AssemblyInfoInputs.cache
+/app/obj/Debug/net8.0/verify_transform.AssemblyInfo.cs
+/app/obj/Debug/net8.0/verify_transform.csproj.CoreCompileInputs.cache
+/app/obj/Debug/net8.0/verify_transform.sourcelink.json

@@ -177,10 +177,10 @@ namespace Deep3DStudio.Model.SfM
 
             foreach (var mp in _map)
             {
-                // Apply coordinate flip: OpenCV (Y-down, Z-forward) -> Viewer convention
-                // Flip X to correct horizontal mirroring, keep Y and Z as-is
-                // This produces a right-handed coordinate system matching the viewer's expectations
-                var p = new Vector3(-(float)mp.Position.X, (float)mp.Position.Y, (float)mp.Position.Z);
+                // Apply coordinate flip: OpenCV (Y-down, Z-forward) -> Viewer convention (Y-up, Z-backward)
+                // We use M = diag(1, -1, -1) which corresponds to (x, -y, -z)
+                // This preserves Right-Handedness and orients Up correctly
+                var p = new Vector3((float)mp.Position.X, -(float)mp.Position.Y, -(float)mp.Position.Z);
                 mesh.Vertices.Add(p);
                 mesh.Colors.Add(new Vector3((float)mp.Color.Val2 / 255f, (float)mp.Color.Val1 / 255f, (float)mp.Color.Val0 / 255f)); // RGB vs BGR
 
@@ -220,9 +220,9 @@ namespace Deep3DStudio.Model.SfM
                 if (v.IsRegistered)
                 {
                     // Convert OpenCV Pose (R, t) to Viewer Pose (R', t')
-                    // Using M = diag(-1, 1, 1) to match point transformation
-                    // R' = M * R * M (mathematically same result as before)
-                    // t' = M * t = (-tx, ty, tz)
+                    // Using M = diag(1, -1, -1) to match point transformation
+                    // R' = M * R * M
+                    // t' = M * t = (tx, -ty, -tz)
 
                     var R_cv = v.R;
                     var t_cv = v.t;
@@ -230,26 +230,38 @@ namespace Deep3DStudio.Model.SfM
                     using var R_gl = new Mat(3, 3, MatType.CV_64F);
                     using var t_gl = new Mat(3, 1, MatType.CV_64F);
 
-                    // R_gl = M * R_cv * M where M = diag(-1, 1, 1)
-                    // Row 0: R00, -R01, -R02
+                    // R_gl = M * R_cv * M where M = diag(1, -1, -1)
+                    // The algebraic result for diagonal M with elements +/- 1 is:
+                    // R_gl_ij = M_ii * R_cv_ij * M_jj
+
+                    // Row 0 (i=0, M=1):
+                    //   (0,0): 1*R00*1 = R00
+                    //   (0,1): 1*R01*-1 = -R01
+                    //   (0,2): 1*R02*-1 = -R02
                     R_gl.Set(0, 0, R_cv.At<double>(0, 0));
                     R_gl.Set(0, 1, -R_cv.At<double>(0, 1));
                     R_gl.Set(0, 2, -R_cv.At<double>(0, 2));
 
-                    // Row 1: -R10, R11, R12
+                    // Row 1 (i=1, M=-1):
+                    //   (1,0): -1*R10*1 = -R10
+                    //   (1,1): -1*R11*-1 = R11
+                    //   (1,2): -1*R12*-1 = R12
                     R_gl.Set(1, 0, -R_cv.At<double>(1, 0));
                     R_gl.Set(1, 1, R_cv.At<double>(1, 1));
                     R_gl.Set(1, 2, R_cv.At<double>(1, 2));
 
-                    // Row 2: -R20, R21, R22
+                    // Row 2 (i=2, M=-1):
+                    //   (2,0): -1*R20*1 = -R20
+                    //   (2,1): -1*R21*-1 = R21
+                    //   (2,2): -1*R22*-1 = R22
                     R_gl.Set(2, 0, -R_cv.At<double>(2, 0));
                     R_gl.Set(2, 1, R_cv.At<double>(2, 1));
                     R_gl.Set(2, 2, R_cv.At<double>(2, 2));
 
-                    // t_gl = M * t_cv -> (-tx, ty, tz) with M = diag(-1, 1, 1)
-                    t_gl.Set(0, 0, -t_cv.At<double>(0, 0));
-                    t_gl.Set(1, 0, t_cv.At<double>(1, 0));
-                    t_gl.Set(2, 0, t_cv.At<double>(2, 0));
+                    // t_gl = M * t_cv -> (tx, -ty, -tz) with M = diag(1, -1, -1)
+                    t_gl.Set(0, 0, t_cv.At<double>(0, 0));
+                    t_gl.Set(1, 0, -t_cv.At<double>(1, 0));
+                    t_gl.Set(2, 0, -t_cv.At<double>(2, 0));
 
                     var camToWorld = CvPoseToOpenTK(R_gl, t_gl); // Returns M_gl.Inverted() (Camera -> World)
 
