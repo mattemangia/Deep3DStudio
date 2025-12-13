@@ -30,6 +30,8 @@ namespace Deep3DStudio
         private SceneGraph _sceneGraph;
         private SceneTreeView _sceneTreeView;
 
+        private bool _isDirty = false;
+
         // UI References for updates
         private ComboBoxText _workflowCombo = null!;
         private ToggleToolButton _pointsToggle = null!;
@@ -81,6 +83,7 @@ namespace Deep3DStudio
 
             // Initialize Scene Graph
             _sceneGraph = new SceneGraph();
+            _sceneGraph.SceneChanged += (s, e) => { _isDirty = true; UpdateTitle(); };
 
             // Create viewport early (needed by menu bar)
             _viewport = new ThreeDView();
@@ -147,8 +150,20 @@ namespace Deep3DStudio
         /// </summary>
         private void OnWindowDelete(object o, DeleteEventArgs args)
         {
+            if (!CheckSaveChanges())
+            {
+                args.RetVal = true; // Cancel close
+                return;
+            }
             SaveWindowState();
             Application.Quit();
+        }
+
+        private void UpdateTitle()
+        {
+            string title = "Deep3D Studio";
+            if (_isDirty) title += " *";
+            this.Title = title;
         }
 
         /// <summary>
@@ -299,6 +314,16 @@ namespace Deep3DStudio
             var newProjectItem = new MenuItem("_New Project");
             newProjectItem.Activated += OnNewProject;
             fileMenu.Append(newProjectItem);
+
+            var openItem = new MenuItem("_Open Project...");
+            openItem.Activated += OnLoadProject;
+            fileMenu.Append(openItem);
+
+            var saveItem = new MenuItem("_Save Project...");
+            saveItem.Activated += OnSaveProject;
+            fileMenu.Append(saveItem);
+
+            fileMenu.Append(new SeparatorMenuItem());
 
             var openImagesItem = new MenuItem("_Open Pictures...");
             openImagesItem.Activated += OnAddImages;
@@ -1309,15 +1334,140 @@ namespace Deep3DStudio
 
         private void OnNewProject(object? sender, EventArgs e)
         {
+            if (!CheckSaveChanges()) return;
+
             _imagePaths.Clear();
             _imageBrowser.Clear();
             _sceneGraph.Clear();
             _lastSceneResult = null;
 
             _statusLabel.Text = "Project cleared. Ready.";
+            _isDirty = false;
+            UpdateTitle();
 
             _sceneTreeView.RefreshTree();
             _viewport.QueueDraw();
+        }
+
+        private void OnSaveProject(object? sender, EventArgs e)
+        {
+            var fc = new FileChooserDialog("Save Project", this, FileChooserAction.Save,
+                "Cancel", ResponseType.Cancel, "Save", ResponseType.Accept);
+
+            var filter = new FileFilter();
+            filter.Name = "Deep3D Project";
+            filter.AddPattern("*.d3d");
+            fc.AddFilter(filter);
+            fc.CurrentName = "MyProject.d3d";
+
+            if (fc.Run() == (int)ResponseType.Accept)
+            {
+                try
+                {
+                    string path = fc.Filename;
+                    if (!path.EndsWith(".d3d")) path += ".d3d";
+
+                    ProjectManager.SaveProject(path, this, _sceneGraph, _imagePaths);
+                    _statusLabel.Text = $"Project saved to {path}";
+                    _isDirty = false;
+                    UpdateTitle();
+                }
+                catch (Exception ex)
+                {
+                    ShowMessage($"Error saving project: {ex.Message}");
+                }
+            }
+            fc.Destroy();
+        }
+
+        private void OnLoadProject(object? sender, EventArgs e)
+        {
+            if (!CheckSaveChanges()) return;
+
+            var fc = new FileChooserDialog("Open Project", this, FileChooserAction.Open,
+                "Cancel", ResponseType.Cancel, "Open", ResponseType.Accept);
+
+            var filter = new FileFilter();
+            filter.Name = "Deep3D Project";
+            filter.AddPattern("*.d3d");
+            fc.AddFilter(filter);
+
+            if (fc.Run() == (int)ResponseType.Accept)
+            {
+                try
+                {
+                    _statusLabel.Text = "Loading project...";
+                    while (Application.EventsPending()) Application.RunIteration();
+
+                    string path = fc.Filename;
+                    var state = ProjectManager.LoadProject(path);
+
+                    // Clear current
+                    _imagePaths.Clear();
+                    _imageBrowser.Clear();
+                    _sceneGraph.Clear();
+                    _lastSceneResult = null;
+
+                    // Restore images
+                    foreach (var imgPath in state.ImagePaths)
+                    {
+                        if (System.IO.File.Exists(imgPath))
+                        {
+                            _imagePaths.Add(imgPath);
+                            _imageBrowser.AddImage(imgPath);
+                        }
+                        else
+                        {
+                            Console.WriteLine($"Warning: Image not found at {imgPath}");
+                        }
+                    }
+
+                    // Restore scene
+                    ProjectManager.RestoreSceneFromState(state, _sceneGraph);
+
+                    _statusLabel.Text = $"Project loaded from {path}";
+                    _isDirty = false;
+                    UpdateTitle();
+
+                    _sceneTreeView.RefreshTree();
+                    _viewport.QueueDraw();
+                }
+                catch (Exception ex)
+                {
+                    ShowMessage($"Error loading project: {ex.Message}");
+                }
+            }
+            fc.Destroy();
+        }
+
+        private bool CheckSaveChanges()
+        {
+            if (!_isDirty) return true;
+
+            var dialog = new MessageDialog(this, DialogFlags.Modal, MessageType.Question, ButtonsType.None,
+                "Do you want to save changes to the current project?");
+            dialog.AddButton("Yes", ResponseType.Yes);
+            dialog.AddButton("No", ResponseType.No);
+            dialog.AddButton("Cancel", ResponseType.Cancel);
+
+            int response = dialog.Run();
+            dialog.Destroy();
+
+            if (response == (int)ResponseType.Yes)
+            {
+                OnSaveProject(null, EventArgs.Empty);
+                // If save was successful (or cancelled inside save dialog), we might need to know.
+                // For simplicity, if they clicked Yes, we assume they saved or handled it.
+                // But ideally OnSaveProject should return bool.
+                // Let's assume if it remains dirty, they cancelled the save dialog.
+                return !_isDirty;
+            }
+            else if (response == (int)ResponseType.No)
+            {
+                return true; // Discard changes
+            }
+
+            return false; // Cancel action
         }
 
         private void OnImportMesh(object? sender, EventArgs e)
