@@ -67,6 +67,7 @@ namespace Deep3DStudio.Viewport
         private Shader? _shader;
         private int _gridVao, _gridVbo;
         private int _axesVao, _axesVbo;
+        private int _cameraVao, _cameraVbo;
         private bool _useModernGL = false;
 
         // Point cloud modern GL buffers (key = object Id)
@@ -454,6 +455,19 @@ namespace Deep3DStudio.Viewport
         private void OnUnrealized(object? sender, EventArgs e)
         {
             _loaded = false;
+            if (_cameraVao != 0) GL.DeleteVertexArray(_cameraVao);
+            if (_cameraVbo != 0) GL.DeleteBuffer(_cameraVbo);
+            if (_gridVao != 0) GL.DeleteVertexArray(_gridVao);
+            if (_gridVbo != 0) GL.DeleteBuffer(_gridVbo);
+            if (_axesVao != 0) GL.DeleteVertexArray(_axesVao);
+            if (_axesVbo != 0) GL.DeleteBuffer(_axesVbo);
+
+            foreach(var kvp in _pointCloudBuffers)
+            {
+                GL.DeleteVertexArray(kvp.Value.vao);
+                GL.DeleteBuffer(kvp.Value.vbo);
+            }
+            _pointCloudBuffers.Clear();
         }
 
         private void OnRender(object? sender, RenderArgs args)
@@ -1265,12 +1279,82 @@ namespace Deep3DStudio.Viewport
         {
             if (_sceneGraph == null) return;
 
+            if (_useModernGL && _shader != null)
+            {
+                DrawCamerasModern();
+                return;
+            }
+
             foreach (var cam in _sceneGraph.GetObjectsOfType<CameraObject>())
             {
                 if (!cam.Visible || !cam.ShowFrustum) continue;
 
                 DrawCameraFrustum(cam);
             }
+        }
+
+        private void DrawCamerasModern()
+        {
+            var cameras = _sceneGraph!.GetObjectsOfType<CameraObject>()
+                .Where(c => c.Visible && c.ShowFrustum).ToList();
+
+            if (cameras.Count == 0) return;
+
+            List<float> vertices = new List<float>();
+
+            foreach (var cam in cameras)
+            {
+                Vector3 pos = cam.Position;
+                if (cam.Pose != null)
+                {
+                    pos = cam.Pose.CameraToWorld.ExtractTranslation();
+                }
+
+                var corners = cam.GetFrustumCorners(CameraFrustumScale);
+                var color = cam.Selected ? new Vector3(1f, 1f, 0f) : cam.FrustumColor;
+
+                void AddLine(Vector3 p1, Vector3 p2)
+                {
+                    vertices.Add(p1.X); vertices.Add(p1.Y); vertices.Add(p1.Z);
+                    vertices.Add(color.X); vertices.Add(color.Y); vertices.Add(color.Z);
+                    vertices.Add(p2.X); vertices.Add(p2.Y); vertices.Add(p2.Z);
+                    vertices.Add(color.X); vertices.Add(color.Y); vertices.Add(color.Z);
+                }
+
+                for (int i = 0; i < 4; i++) AddLine(pos, corners[i]);
+
+                AddLine(corners[0], corners[1]);
+                AddLine(corners[1], corners[2]);
+                AddLine(corners[2], corners[3]);
+                AddLine(corners[3], corners[0]);
+                AddLine(corners[0], corners[2]);
+                AddLine(corners[1], corners[3]);
+            }
+
+            if (_cameraVao == 0)
+            {
+                _cameraVao = GL.GenVertexArray();
+                _cameraVbo = GL.GenBuffer();
+            }
+
+            GL.BindVertexArray(_cameraVao);
+            GL.BindBuffer(BufferTarget.ArrayBuffer, _cameraVbo);
+            GL.BufferData(BufferTarget.ArrayBuffer, vertices.Count * sizeof(float), vertices.ToArray(), BufferUsageHint.DynamicDraw);
+
+            GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 0);
+            GL.EnableVertexAttribArray(0);
+            GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 3 * sizeof(float));
+            GL.EnableVertexAttribArray(1);
+
+            _shader!.Use();
+            _shader.SetMatrix4("projection", _projectionMatrix);
+            _shader.SetMatrix4("view", _finalViewMatrix);
+            _shader.SetMatrix4("model", Matrix4.Identity);
+
+            GL.DrawArrays(PrimitiveType.Lines, 0, vertices.Count / 6);
+
+            GL.BindVertexArray(0);
+            GL.UseProgram(0);
         }
 
         private void DrawCameraFrustum(CameraObject cam)
@@ -1308,7 +1392,7 @@ namespace Deep3DStudio.Viewport
 
             GL.End();
 
-            // Draw camera body
+            // Draw camera body (Legacy GL only for now)
             GL.Color3(color.X * 0.8f, color.Y * 0.8f, color.Z * 0.8f);
             float camSize = CameraFrustumScale * 0.15f;
 

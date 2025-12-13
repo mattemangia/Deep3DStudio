@@ -36,6 +36,7 @@ namespace Deep3DStudio
         private ToggleToolButton _wireToggle = null!;
         private ToggleToolButton _textureToggle = null!;
         private ToggleToolButton _meshToggle = null!;
+        private ToggleToolButton _camerasToggle = null!;
         private ToggleToolButton _rgbColorToggle = null!;
         private ToggleToolButton _depthColorToggle = null!;
 
@@ -1010,6 +1011,23 @@ namespace Deep3DStudio
                     cr.Fill();
                     break;
 
+                case "camera":
+                    // Camera body
+                    cr.LineWidth = 1.5;
+                    cr.SetSourceRGB(0.8, 0.8, 0.8);
+                    cr.Rectangle(4, 8, s - 8, s - 12);
+                    cr.Stroke();
+                    // Lens
+                    cr.Arc(cx, cy + 2, s / 4, 0, 2 * Math.PI);
+                    cr.Stroke();
+                    // Viewfinder/Flash bump
+                    cr.MoveTo(cx - 3, 8);
+                    cr.LineTo(cx - 2, 5);
+                    cr.LineTo(cx + 2, 5);
+                    cr.LineTo(cx + 3, 8);
+                    cr.Stroke();
+                    break;
+
                 case "pen":
                     // Pen/pencil icon for triangle editing
                     cr.LineWidth = 2;
@@ -1195,6 +1213,18 @@ namespace Deep3DStudio
                 _viewport.QueueDraw();
             };
             toolbar.Insert(_textureToggle, -1);
+
+            _camerasToggle = new ToggleToolButton();
+            _camerasToggle.IconWidget = AppIconFactory.GenerateIcon("camera", iconSize);
+            _camerasToggle.Label = "Cameras";
+            _camerasToggle.TooltipText = "Toggle Camera Frustums";
+            _camerasToggle.Active = IniSettings.Instance.ShowCameras;
+            _camerasToggle.Toggled += (s, e) => {
+                IniSettings.Instance.ShowCameras = _camerasToggle.Active;
+                _viewport.ShowCameras = _camerasToggle.Active;
+                _viewport.QueueDraw();
+            };
+            toolbar.Insert(_camerasToggle, -1);
 
             toolbar.Insert(new SeparatorToolItem(), -1);
 
@@ -2241,6 +2271,7 @@ namespace Deep3DStudio
             if (_wireToggle != null) _wireToggle.Active = s.ShowWireframe;
             if (_textureToggle != null) _textureToggle.Active = s.ShowTexture;
             if (_meshToggle != null) _meshToggle.Active = s.ShowMesh;
+            if (_camerasToggle != null) _camerasToggle.Active = s.ShowCameras;
             if (_rgbColorToggle != null) _rgbColorToggle.Active = s.PointCloudColor == PointCloudColorMode.RGB;
             if (_depthColorToggle != null) _depthColorToggle.Active = s.PointCloudColor == PointCloudColorMode.DistanceMap;
             _viewport.QueueDraw();
