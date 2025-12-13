@@ -2335,30 +2335,26 @@ namespace Deep3DStudio
                     var sfm = new Deep3DStudio.Model.SfM.SfMInference();
                     result = await Task.Run(() => sfm.ReconstructScene(_imagePaths));
 
-                    // Densify the sparse SfM point cloud
+                    // DEBUG: Skip dense generation for now and use sparse points directly
+                    // This helps identify if the issue is in dense generation or rendering
                     if (result.Meshes.Count > 0)
                     {
                         var sparseMesh = result.Meshes[0];
-                        Console.WriteLine($"Sparse SfM cloud: {sparseMesh.Vertices.Count} points");
+                        Console.WriteLine($"Sparse SfM cloud: {sparseMesh.Vertices.Count} points, {sparseMesh.Colors.Count} colors");
 
-                        _statusLabel.Text = "Densifying Point Cloud...";
-                        // Wait for UI to update
-                        while (Application.EventsPending()) Application.RunIteration();
-
-                        var denseMesh = await Task.Run(() => GenerateDensePointCloud(result));
-
-                        // Only replace if dense has significantly more valid points
-                        // (at least 2x sparse count to be worthwhile)
-                        if (denseMesh.Vertices.Count > sparseMesh.Vertices.Count * 2)
+                        // Log sample of sparse points
+                        if (sparseMesh.Vertices.Count > 0)
                         {
-                            Console.WriteLine($"Densification: Replaced {sparseMesh.Vertices.Count} sparse points with {denseMesh.Vertices.Count} dense points.");
-                            result.Meshes.Clear();
-                            result.Meshes.Add(denseMesh);
+                            for (int i = 0; i < Math.Min(5, sparseMesh.Vertices.Count); i++)
+                            {
+                                var v = sparseMesh.Vertices[i];
+                                var c = i < sparseMesh.Colors.Count ? sparseMesh.Colors[i] : new OpenTK.Mathematics.Vector3(1, 1, 1);
+                                Console.WriteLine($"  Point {i}: pos=({v.X:F3},{v.Y:F3},{v.Z:F3}) color=({c.X:F2},{c.Y:F2},{c.Z:F2})");
+                            }
                         }
-                        else
-                        {
-                            Console.WriteLine($"Densification: Keeping sparse ({sparseMesh.Vertices.Count} pts) - dense only has {denseMesh.Vertices.Count} pts");
-                        }
+
+                        // Skip dense generation - use sparse directly for debugging
+                        Console.WriteLine("DEBUG: Using sparse point cloud directly (dense generation disabled)");
                     }
                 }
 
