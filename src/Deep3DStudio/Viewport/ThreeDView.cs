@@ -69,6 +69,9 @@ namespace Deep3DStudio.Viewport
         private int _axesVao, _axesVbo;
         private bool _useModernGL = false;
 
+        // Point cloud modern GL buffers (key = object Id)
+        private Dictionary<int, (int vao, int vbo, int count)> _pointCloudBuffers = new Dictionary<int, (int, int, int)>();
+
         // Display Options
         public bool ShowGrid { get; set; } = true;
         public bool ShowAxes { get; set; } = true;
@@ -81,9 +84,10 @@ namespace Deep3DStudio.Viewport
         public event EventHandler<SceneObject?>? ObjectPicked;
         public event EventHandler? SelectionChanged;
 
-        // Matrices for picking
+        // Matrices for picking and rendering
         private Matrix4 _viewMatrix;
         private Matrix4 _projectionMatrix;
+        private Matrix4 _finalViewMatrix; // coordTransform * _viewMatrix
 
         // Mesh Editing Tool
         private MeshEditingTool _meshEditingTool = new MeshEditingTool();
@@ -493,16 +497,16 @@ namespace Deep3DStudio.Viewport
                           rotation *
                           Matrix4.CreateTranslation(0, 0, _zoom);
 
-            var finalView = coordTransform * _viewMatrix;
+            _finalViewMatrix = coordTransform * _viewMatrix;
             GL.MatrixMode(MatrixMode.Modelview);
-            GL.LoadMatrix(ref finalView);
+            GL.LoadMatrix(ref _finalViewMatrix);
 
             // Draw scene elements
             if (_useModernGL && _shader != null)
             {
                 _shader.Use();
                 _shader.SetMatrix4("projection", _projectionMatrix);
-                _shader.SetMatrix4("view", finalView); // finalView is coordTransform * _viewMatrix
+                _shader.SetMatrix4("view", _finalViewMatrix);
                 _shader.SetMatrix4("model", Matrix4.Identity);
 
                 if (ShowGrid)
@@ -822,6 +826,15 @@ namespace Deep3DStudio.Viewport
             if (pc.Points.Count == 0) return;
 
             GL.PointSize(pc.PointSize);
+
+            // Use modern GL path if available (for Core profile compatibility)
+            if (_useModernGL && _shader != null)
+            {
+                DrawPointCloudModern(pc);
+                return;
+            }
+
+            // Legacy fixed-function path (requires Compatibility profile)
             GL.Begin(PrimitiveType.Points);
 
             bool hasColors = pc.Colors.Count >= pc.Points.Count;
@@ -844,6 +857,79 @@ namespace Deep3DStudio.Viewport
             GL.End();
         }
 
+        private void DrawPointCloudModern(PointCloudObject pc)
+        {
+            // Create or update VAO/VBO for this point cloud
+            if (!_pointCloudBuffers.TryGetValue(pc.Id, out var buffers) || buffers.count != pc.Points.Count)
+            {
+                // Delete old buffers if they exist
+                if (buffers.vao != 0)
+                {
+                    GL.DeleteVertexArray(buffers.vao);
+                    GL.DeleteBuffer(buffers.vbo);
+                }
+
+                // Create interleaved buffer: position (vec3) + color (vec3)
+                var data = new float[pc.Points.Count * 6];
+                bool hasColors = pc.Colors.Count >= pc.Points.Count;
+
+                for (int i = 0; i < pc.Points.Count; i++)
+                {
+                    var p = pc.Points[i];
+                    data[i * 6 + 0] = p.X;
+                    data[i * 6 + 1] = p.Y;
+                    data[i * 6 + 2] = p.Z;
+
+                    if (hasColors)
+                    {
+                        var c = pc.Colors[i];
+                        data[i * 6 + 3] = c.X;
+                        data[i * 6 + 4] = c.Y;
+                        data[i * 6 + 5] = c.Z;
+                    }
+                    else
+                    {
+                        data[i * 6 + 3] = 1.0f;
+                        data[i * 6 + 4] = 1.0f;
+                        data[i * 6 + 5] = 1.0f;
+                    }
+                }
+
+                int vao = GL.GenVertexArray();
+                int vbo = GL.GenBuffer();
+
+                GL.BindVertexArray(vao);
+                GL.BindBuffer(BufferTarget.ArrayBuffer, vbo);
+                GL.BufferData(BufferTarget.ArrayBuffer, data.Length * sizeof(float), data, BufferUsageHint.StaticDraw);
+
+                // Position attribute (location = 0)
+                GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 0);
+                GL.EnableVertexAttribArray(0);
+
+                // Color attribute (location = 1)
+                GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 3 * sizeof(float));
+                GL.EnableVertexAttribArray(1);
+
+                GL.BindVertexArray(0);
+
+                _pointCloudBuffers[pc.Id] = (vao, vbo, pc.Points.Count);
+                buffers = (vao, vbo, pc.Points.Count);
+
+                Console.WriteLine($"Created modern GL buffers for point cloud {pc.Id}: {pc.Points.Count} points");
+            }
+
+            // Use shader and draw
+            _shader!.Use();
+            _shader.SetMatrix4("projection", _projectionMatrix);
+            _shader.SetMatrix4("view", _finalViewMatrix);
+            _shader.SetMatrix4("model", pc.GetWorldTransform());
+
+            GL.BindVertexArray(buffers.vao);
+            GL.DrawArrays(PrimitiveType.Points, 0, buffers.count);
+            GL.BindVertexArray(0);
+            GL.UseProgram(0);
+        }
+
         /// <summary>
         /// Draws a bounding box around the point cloud with a distinct color
         /// </summary>
@@ -863,16 +949,27 @@ namespace Deep3DStudio.Viewport
 
             GL.LineWidth(2.0f);
 
-            // Use a cyan color for point cloud bounds (different from selection outline)
+            // Get color for bounding box
+            Vector3 color;
             if (pc.Selected)
             {
-                var color = ColorPalette[pc.Id % ColorPalette.Length];
-                GL.Color4(color.X, color.Y, color.Z, 0.8f);
+                color = ColorPalette[pc.Id % ColorPalette.Length];
             }
             else
             {
-                GL.Color4(0.0f, 0.8f, 0.9f, 0.6f); // Cyan with transparency
+                color = new Vector3(0.0f, 0.8f, 0.9f); // Cyan
             }
+
+            // Use modern GL if available
+            if (_useModernGL && _shader != null)
+            {
+                DrawBoundingBoxModern(min, max, color, pc.GetWorldTransform());
+                GL.LineWidth(1.0f);
+                return;
+            }
+
+            // Legacy path
+            GL.Color4(color.X, color.Y, color.Z, 0.6f);
 
             GL.Begin(PrimitiveType.Lines);
 
@@ -896,9 +993,70 @@ namespace Deep3DStudio.Viewport
 
             GL.End();
             GL.LineWidth(1.0f);
+        }
 
-            // Draw bounds info text at the top of the bounding box
-            // This would require text rendering, which we skip for now
+        private int _boundingBoxVao = 0;
+        private int _boundingBoxVbo = 0;
+
+        private void DrawBoundingBoxModern(Vector3 min, Vector3 max, Vector3 color, Matrix4 modelTransform)
+        {
+            // Create line data for bounding box (24 vertices for 12 edges)
+            var vertices = new float[]
+            {
+                // Bottom face
+                min.X, min.Y, min.Z, color.X, color.Y, color.Z,
+                max.X, min.Y, min.Z, color.X, color.Y, color.Z,
+                max.X, min.Y, min.Z, color.X, color.Y, color.Z,
+                max.X, min.Y, max.Z, color.X, color.Y, color.Z,
+                max.X, min.Y, max.Z, color.X, color.Y, color.Z,
+                min.X, min.Y, max.Z, color.X, color.Y, color.Z,
+                min.X, min.Y, max.Z, color.X, color.Y, color.Z,
+                min.X, min.Y, min.Z, color.X, color.Y, color.Z,
+                // Top face
+                min.X, max.Y, min.Z, color.X, color.Y, color.Z,
+                max.X, max.Y, min.Z, color.X, color.Y, color.Z,
+                max.X, max.Y, min.Z, color.X, color.Y, color.Z,
+                max.X, max.Y, max.Z, color.X, color.Y, color.Z,
+                max.X, max.Y, max.Z, color.X, color.Y, color.Z,
+                min.X, max.Y, max.Z, color.X, color.Y, color.Z,
+                min.X, max.Y, max.Z, color.X, color.Y, color.Z,
+                min.X, max.Y, min.Z, color.X, color.Y, color.Z,
+                // Vertical edges
+                min.X, min.Y, min.Z, color.X, color.Y, color.Z,
+                min.X, max.Y, min.Z, color.X, color.Y, color.Z,
+                max.X, min.Y, min.Z, color.X, color.Y, color.Z,
+                max.X, max.Y, min.Z, color.X, color.Y, color.Z,
+                max.X, min.Y, max.Z, color.X, color.Y, color.Z,
+                max.X, max.Y, max.Z, color.X, color.Y, color.Z,
+                min.X, min.Y, max.Z, color.X, color.Y, color.Z,
+                min.X, max.Y, max.Z, color.X, color.Y, color.Z,
+            };
+
+            // Create or recreate VAO/VBO
+            if (_boundingBoxVao == 0)
+            {
+                _boundingBoxVao = GL.GenVertexArray();
+                _boundingBoxVbo = GL.GenBuffer();
+            }
+
+            GL.BindVertexArray(_boundingBoxVao);
+            GL.BindBuffer(BufferTarget.ArrayBuffer, _boundingBoxVbo);
+            GL.BufferData(BufferTarget.ArrayBuffer, vertices.Length * sizeof(float), vertices, BufferUsageHint.DynamicDraw);
+
+            GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 0);
+            GL.EnableVertexAttribArray(0);
+            GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 3 * sizeof(float));
+            GL.EnableVertexAttribArray(1);
+
+            _shader!.Use();
+            _shader.SetMatrix4("projection", _projectionMatrix);
+            _shader.SetMatrix4("view", _finalViewMatrix);
+            _shader.SetMatrix4("model", modelTransform);
+
+            GL.DrawArrays(PrimitiveType.Lines, 0, 24);
+
+            GL.BindVertexArray(0);
+            GL.UseProgram(0);
         }
 
         private static Vector3 TurboColormap(float t)
