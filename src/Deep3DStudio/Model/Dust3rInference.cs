@@ -189,24 +189,39 @@ namespace Deep3DStudio.Model
                     allMeshes[match.ImageB] = CloneMeshData(match.MeshB);
             }
 
+            // Coordinate Conversion Matrix S (OpenCV -> OpenGL)
+            // Flip Y and Z axes: (x, y, z) -> (x, -y, -z)
+            // This aligns the Computer Vision coordinate system (Y-down, Z-forward)
+            // with the application's OpenGL Viewport (Y-up, -Z forward).
+            var S = Matrix4.CreateScale(1, -1, -1);
+
             // Apply global poses to meshes
             for (int i = 0; i < n; i++)
             {
                 if (allMeshes.TryGetValue(i, out var mesh))
                 {
                     var transformedMesh = CloneMeshData(mesh);
+                    // Transform to global frame (OpenCV)
                     transformedMesh.ApplyTransform(poses[i]);
+
+                    // Convert to OpenGL frame
+                    transformedMesh.ApplyTransform(S);
+
                     result.Meshes.Add(transformedMesh);
 
                     var (t1, s1) = ImageUtils.LoadAndPreprocessImage(imagePaths[i]);
+
+                    // Transform Pose to OpenGL Frame: T_gl = S * T_cv * S
+                    var camToWorldGL = S * poses[i] * S;
+
                     result.Poses.Add(new CameraPose
                     {
                         ImageIndex = i,
                         ImagePath = imagePaths[i],
                         Width = s1[1],
                         Height = s1[0],
-                        CameraToWorld = poses[i],
-                        WorldToCamera = poses[i].Inverted()
+                        CameraToWorld = camToWorldGL,
+                        WorldToCamera = camToWorldGL.Inverted()
                     });
                 }
             }
