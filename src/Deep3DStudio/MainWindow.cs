@@ -296,6 +296,10 @@ namespace Deep3DStudio
             var fileMenuItem = new MenuItem("_File");
             fileMenuItem.Submenu = fileMenu;
 
+            var newProjectItem = new MenuItem("_New Project");
+            newProjectItem.Activated += OnNewProject;
+            fileMenu.Append(newProjectItem);
+
             var openImagesItem = new MenuItem("_Open Pictures...");
             openImagesItem.Activated += OnAddImages;
             fileMenu.Append(openImagesItem);
@@ -1302,6 +1306,19 @@ namespace Deep3DStudio
         }
 
         #region Menu Actions
+
+        private void OnNewProject(object? sender, EventArgs e)
+        {
+            _imagePaths.Clear();
+            _imageBrowser.Clear();
+            _sceneGraph.Clear();
+            _lastSceneResult = null;
+
+            _statusLabel.Text = "Project cleared. Ready.";
+
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+        }
 
         private void OnImportMesh(object? sender, EventArgs e)
         {
