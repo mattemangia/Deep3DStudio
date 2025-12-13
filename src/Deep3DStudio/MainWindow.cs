@@ -1156,9 +1156,9 @@ namespace Deep3DStudio
             _meshToggle.IconWidget = AppIconFactory.GenerateIcon("mesh", iconSize);
             _meshToggle.Label = "Mesh";
             _meshToggle.TooltipText = "Show Solid Mesh";
-            _meshToggle.Active = true;
+            _meshToggle.Active = IniSettings.Instance.ShowMesh;
             _meshToggle.Toggled += (s, e) => {
-                 IniSettings.Instance.ShowPointCloud = !_meshToggle.Active;
+                 IniSettings.Instance.ShowMesh = _meshToggle.Active;
                  _viewport.QueueDraw();
             };
             toolbar.Insert(_meshToggle, -1);
@@ -1170,7 +1170,6 @@ namespace Deep3DStudio
             _pointsToggle.Active = IniSettings.Instance.ShowPointCloud;
             _pointsToggle.Toggled += (s, e) => {
                 IniSettings.Instance.ShowPointCloud = _pointsToggle.Active;
-                _meshToggle.Active = !IniSettings.Instance.ShowPointCloud;
                 _viewport.QueueDraw();
             };
             toolbar.Insert(_pointsToggle, -1);
@@ -2241,7 +2240,7 @@ namespace Deep3DStudio
             if (_pointsToggle != null) _pointsToggle.Active = s.ShowPointCloud;
             if (_wireToggle != null) _wireToggle.Active = s.ShowWireframe;
             if (_textureToggle != null) _textureToggle.Active = s.ShowTexture;
-            if (_meshToggle != null) _meshToggle.Active = !s.ShowPointCloud;
+            if (_meshToggle != null) _meshToggle.Active = s.ShowMesh;
             if (_rgbColorToggle != null) _rgbColorToggle.Active = s.PointCloudColor == PointCloudColorMode.RGB;
             if (_depthColorToggle != null) _depthColorToggle.Active = s.PointCloudColor == PointCloudColorMode.DistanceMap;
             _viewport.QueueDraw();

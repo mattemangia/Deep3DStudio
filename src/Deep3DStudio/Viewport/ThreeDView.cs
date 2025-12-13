@@ -700,13 +700,14 @@ namespace Deep3DStudio.Viewport
                         GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
                     }
 
+                    if (settings.ShowMesh)
+                    {
+                        DrawMesh(meshObj.MeshData, isSelected);
+                    }
+
                     if (settings.ShowPointCloud || meshObj.ShowAsPointCloud)
                     {
                         DrawPointCloud(meshObj.MeshData, isSelected);
-                    }
-                    else
-                    {
-                        DrawMesh(meshObj.MeshData, isSelected);
                     }
 
                     // Draw selection outline
@@ -719,12 +720,15 @@ namespace Deep3DStudio.Viewport
                 }
                 else if (obj is PointCloudObject pcObj)
                 {
-                    DrawPointCloudObject(pcObj);
-
-                    // Always show bounding box for point clouds if enabled, or if selected
-                    if (obj.Selected || IniSettings.Instance.ShowPointCloudBounds)
+                    if (settings.ShowPointCloud)
                     {
-                        DrawPointCloudBoundingBox(pcObj);
+                        DrawPointCloudObject(pcObj);
+
+                        // Always show bounding box for point clouds if enabled, or if selected
+                        if (obj.Selected || IniSettings.Instance.ShowPointCloudBounds)
+                        {
+                            DrawPointCloudBoundingBox(pcObj);
+                        }
                     }
                 }
 
@@ -747,13 +751,14 @@ namespace Deep3DStudio.Viewport
 
             foreach (var mesh in _meshes)
             {
+                if (settings.ShowMesh)
+                {
+                    DrawMesh(mesh, false);
+                }
+
                 if (settings.ShowPointCloud)
                 {
                     DrawPointCloud(mesh, false);
-                }
-                else
-                {
-                    DrawMesh(mesh, false);
                 }
             }
 

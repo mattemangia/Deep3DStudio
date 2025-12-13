@@ -32,6 +32,7 @@ namespace Deep3DStudio.Configuration
         public ReconstructionMethod ReconstructionMethod { get; set; } = ReconstructionMethod.Dust3r;
 
         // Rendering Settings
+        public bool ShowMesh { get; set; } = true;
         public bool ShowPointCloud { get; set; } = false;
         public bool ShowWireframe { get; set; } = false;
         public bool ShowTexture { get; set; } = true;
@@ -209,6 +210,7 @@ namespace Deep3DStudio.Configuration
 
                     // [Rendering] section
                     writer.WriteLine("[Rendering]");
+                    writer.WriteLine($"ShowMesh={ShowMesh}");
                     writer.WriteLine($"ShowPointCloud={ShowPointCloud}");
                     writer.WriteLine($"ShowWireframe={ShowWireframe}");
                     writer.WriteLine($"ShowTexture={ShowTexture}");
@@ -270,6 +272,8 @@ namespace Deep3DStudio.Configuration
                 ReconstructionMethod = recon;
 
             // [Rendering]
+            if (TryGetValue("Rendering", "ShowMesh", out string? smStr) && bool.TryParse(smStr, out var sm))
+                ShowMesh = sm;
             if (TryGetValue("Rendering", "ShowPointCloud", out string? spcStr) && bool.TryParse(spcStr, out var spc))
                 ShowPointCloud = spc;
             if (TryGetValue("Rendering", "ShowWireframe", out string? swStr) && bool.TryParse(swStr, out var sw))
@@ -352,6 +356,7 @@ namespace Deep3DStudio.Configuration
             CoordSystem = CoordinateSystem.RightHanded_Y_Up;
             BoundingBoxStyle = BoundingBoxMode.Full;
             ReconstructionMethod = ReconstructionMethod.Dust3r;
+            ShowMesh = true;
             ShowPointCloud = false;
             ShowWireframe = false;
             ShowTexture = true;
