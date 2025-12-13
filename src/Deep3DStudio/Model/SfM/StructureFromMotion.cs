@@ -65,6 +65,7 @@ namespace Deep3DStudio.Model.SfM
             int registeredCount = 2; // Initial pair
             int maxAttempts = _views.Count * 3; // Allow multiple passes
             int attempts = 0;
+            var failedViews = new HashSet<int>(); // Track views that failed PnP
 
             while (attempts < maxAttempts && registeredCount < _views.Count)
             {
@@ -99,10 +100,11 @@ namespace Deep3DStudio.Model.SfM
                     var view = _views[bestCandidate];
                     if (RegisterView(view, bestObjectPoints, bestImagePoints))
                     {
-                        Console.WriteLine($"Registered Image {view.Index} with {maxMatches} map matches.");
+                        Console.WriteLine($"Registered Image {view.Index} with {maxMatches} map matches (PnP).");
                         registeredCount++;
+                        failedViews.Remove(view.Index);
 
-                        // Triangulate new points with existing registered views
+                        // Triangulate new points with ALL registered views
                         ExpandMap(view);
 
                         // Bundle Adjustment (Local refinement)
@@ -110,21 +112,47 @@ namespace Deep3DStudio.Model.SfM
                     }
                     else
                     {
-                        Console.WriteLine($"Failed to register Image {bestCandidate} (PnP failed with {maxMatches} matches).");
-                        // Mark as attempted to avoid infinite loop - but don't give up completely
-                        // The map may grow and this view could be registered later
+                        // PnP failed - try essential matrix method as fallback
+                        if (TryRegisterFromAllPairs(view))
+                        {
+                            Console.WriteLine($"Registered Image {view.Index} via essential matrix fallback.");
+                            registeredCount++;
+                            ExpandMap(view);
+                        }
+                        else
+                        {
+                            Console.WriteLine($"Failed to register Image {bestCandidate} (PnP and essential matrix failed).");
+                            failedViews.Add(view.Index);
+                        }
                     }
                 }
                 else if (unregistered.Count > 0)
                 {
-                    // No view could be registered - try direct triangulation between registered views
-                    // to expand the map
-                    Console.WriteLine($"No view could be registered (best had {maxMatches} matches). Expanding map...");
-                    ExpandMapBetweenRegisteredViews();
+                    // No view could be registered via map matches
+                    // Try essential matrix for all unregistered views
+                    bool anyRegistered = false;
+                    foreach (var view in unregistered)
+                    {
+                        if (TryRegisterFromAllPairs(view))
+                        {
+                            Console.WriteLine($"Registered Image {view.Index} via direct pair matching.");
+                            registeredCount++;
+                            ExpandMap(view);
+                            anyRegistered = true;
+                            break; // Restart the loop to try map-based registration
+                        }
+                    }
 
-                    // If we still can't register anything after expansion, break
-                    if (maxMatches < 4)
-                        break;
+                    if (!anyRegistered)
+                    {
+                        // Expand map and try again
+                        Console.WriteLine($"No view could be registered (best had {maxMatches} matches). Expanding map...");
+                        ExpandMapBetweenRegisteredViews();
+
+                        // If we still can't register anything after expansion, break
+                        if (maxMatches < 4 && failedViews.Count == unregistered.Count)
+                            break;
+                    }
                 }
             }
 
@@ -278,14 +306,14 @@ namespace Deep3DStudio.Model.SfM
             DMatch[] bestMatches = null;
             Mat bestMask = null;
 
-            Console.WriteLine($"Searching for best initialization pair among {_views.Count} images...");
+            int totalPairs = (_views.Count * (_views.Count - 1)) / 2;
+            Console.WriteLine($"Searching for best initialization pair among {_views.Count} images ({totalPairs} pairs)...");
 
-            // Search all pairs within a reasonable range
-            int maxPairDistance = Math.Min(_views.Count, 10); // Check pairs up to 10 images apart
-
+            // Search ALL pairs - this is O(n^2) but necessary for robustness
+            // For 4 images: (0,1), (0,2), (0,3), (1,2), (1,3), (2,3)
             for (int i = 0; i < _views.Count - 1; i++)
             {
-                for (int j = i + 1; j < Math.Min(_views.Count, i + maxPairDistance); j++)
+                for (int j = i + 1; j < _views.Count; j++)
                 {
                     var v1 = _views[i];
                     var v2 = _views[j];
@@ -632,7 +660,9 @@ namespace Deep3DStudio.Model.SfM
             var registeredViews = _views.Where(v => v.IsRegistered).ToList();
             int newPointsBefore = _map.Count;
 
-            // Triangulate between all pairs of registered views
+            // Triangulate between ALL pairs of registered views
+            // For n registered views, this creates n*(n-1)/2 pairs
+            int pairsChecked = 0;
             for (int i = 0; i < registeredViews.Count; i++)
             {
                 for (int j = i + 1; j < registeredViews.Count; j++)
@@ -640,17 +670,79 @@ namespace Deep3DStudio.Model.SfM
                     var v1 = registeredViews[i];
                     var v2 = registeredViews[j];
 
-                    // Only try pairs that haven't been fully exhausted
                     var matches = matcher.Match(v1.Descriptors, v2.Descriptors);
                     if (matches.Length > 10)
                     {
                         TriangulateAndAddPoints(v1, v2, matches, null);
+                        pairsChecked++;
                     }
                 }
             }
 
             int newPoints = _map.Count - newPointsBefore;
-            Console.WriteLine($"  Expanded map with {newPoints} new points (total: {_map.Count})");
+            Console.WriteLine($"  Expanded map: checked {pairsChecked} pairs, added {newPoints} new points (total: {_map.Count})");
+        }
+
+        /// <summary>
+        /// Try to register views that failed before by matching against ALL registered views.
+        /// This handles disjoint groups by finding connections between them.
+        /// </summary>
+        private bool TryRegisterFromAllPairs(ViewInfo view)
+        {
+            using var matcher = new BFMatcher(NormTypes.Hamming, crossCheck: true);
+
+            var registeredViews = _views.Where(v => v.IsRegistered).ToList();
+            if (registeredViews.Count < 2) return false;
+
+            // Try to find any registered view with enough matches
+            foreach (var regView in registeredViews)
+            {
+                var matches = matcher.Match(view.Descriptors, regView.Descriptors);
+                if (matches.Length < 30) continue;
+
+                // Try essential matrix approach
+                var p1 = new List<Point2d>();
+                var p2 = new List<Point2d>();
+                foreach (var m in matches)
+                {
+                    p1.Add(new Point2d(view.KeyPoints[m.QueryIdx].Pt.X, view.KeyPoints[m.QueryIdx].Pt.Y));
+                    p2.Add(new Point2d(regView.KeyPoints[m.TrainIdx].Pt.X, regView.KeyPoints[m.TrainIdx].Pt.Y));
+                }
+
+                using var mask = new Mat();
+                var normP1 = NormalizePoints(p1, view.K);
+                var normP2 = NormalizePoints(p2, regView.K);
+
+                using var E = Cv2.FindEssentialMat(InputArray.Create(normP1), InputArray.Create(normP2),
+                    Mat.Eye(3, 3, MatType.CV_64F), (EssentialMatMethod)8, 0.999, 1.0, mask);
+
+                if (E.Rows != 3 || E.Cols != 3) continue;
+
+                using var R = new Mat();
+                using var t = new Mat();
+                int inliers = Cv2.RecoverPose(E, InputArray.Create(normP1), InputArray.Create(normP2),
+                    Mat.Eye(3, 3, MatType.CV_64F), R, t, mask);
+
+                if (inliers >= 20)
+                {
+                    if (R.Type() != MatType.CV_64F) R.ConvertTo(R, MatType.CV_64F);
+                    if (t.Type() != MatType.CV_64F) t.ConvertTo(t, MatType.CV_64F);
+
+                    // Compose with regView's pose to get world pose
+                    // view_pose = relative_pose * regView_pose
+                    using var newR = R * regView.R;
+                    using var newT = (R * regView.t) + t;
+
+                    view.R = newR.Clone();
+                    view.t = newT.Clone();
+                    view.IsRegistered = true;
+
+                    Console.WriteLine($"  Registered view {view.Index} via essential matrix with view {regView.Index} ({inliers} inliers)");
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         // Helpers
