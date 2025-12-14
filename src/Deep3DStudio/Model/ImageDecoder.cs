@@ -168,13 +168,12 @@ namespace Deep3DStudio.Model
 
             SKBitmap newBitmap;
 
-            // For simple rotations/flips, we can use Canvas
-            // But we need to be careful with dimensions.
+            // For simple rotations/flips, we can use Canvas while ensuring dimensions remain correct.
 
             int width = bitmap.Width;
             int height = bitmap.Height;
 
-            // Let's keep it simple.
+            // Use a minimal set of transformations to handle the supported orientations.
             switch (origin)
             {
                 case SKEncodedOrigin.BottomRight: // Rotate 180
