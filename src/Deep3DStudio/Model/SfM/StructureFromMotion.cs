@@ -44,6 +44,9 @@ namespace Deep3DStudio.Model.SfM
 
         private List<ViewInfo> _views = new List<ViewInfo>();
         private List<Point3D> _reconstructionCloud = new List<Point3D>();
+        // Optimization: Map (ViewIndex, FeatureIndex) to Point3D to avoid linear search
+        private Dictionary<(int, int), Point3D> _featureToPointMap = new Dictionary<(int, int), Point3D>();
+
         private HashSet<int> _doneViews = new HashSet<int>();
         private HashSet<int> _goodViews = new HashSet<int>();
 
@@ -67,6 +70,7 @@ namespace Deep3DStudio.Model.SfM
 
             _views.Clear();
             _reconstructionCloud.Clear();
+            _featureToPointMap.Clear();
             _doneViews.Clear();
             _goodViews.Clear();
 
@@ -488,7 +492,7 @@ namespace Deep3DStudio.Model.SfM
             Mat mask = new Mat();
             using var m1 = CreateMatFromPoint2d(pts1);
             using var m2 = CreateMatFromPoint2d(pts2);
-            Cv2.FindHomography(m1, m2, HomographyMethods.Ransac, 3.0, mask);
+            Cv2.FindHomography((InputArray)m1, (InputArray)m2, HomographyMethods.Ransac, 3.0, mask);
             return Cv2.CountNonZero(mask);
         }
 
@@ -509,14 +513,14 @@ namespace Deep3DStudio.Model.SfM
             using var m1 = CreateMatFromPoint2d(aligned1);
             using var m2 = CreateMatFromPoint2d(aligned2);
 
-            Mat E = Cv2.FindEssentialMat(m1, m2, K, EssentialMatMethod.Ransac, 0.999, 1.0, mask);
+            Mat E = Cv2.FindEssentialMat((InputArray)m1, (InputArray)m2, K, EssentialMatMethod.Ransac, 0.999, 1.0, mask);
 
             if (E.Rows != 3 || E.Cols != 3) return false;
 
             Mat R = new Mat();
             Mat T = new Mat();
 
-            int valid = Cv2.RecoverPose(E, m1, m2, K, R, T, mask);
+            int valid = Cv2.RecoverPose((InputArray)E, (InputArray)m1, (InputArray)m2, K, R, T, mask);
 
             if (valid < 5) return false;
 
@@ -588,8 +592,8 @@ namespace Deep3DStudio.Model.SfM
                 Point2d p2_1 = proj1.At<Point2d>(i);
                 Point2d p2_2 = proj2.At<Point2d>(i);
 
-                double err1 = Cv2.Norm(p2_1 - aligned1[i]);
-                double err2 = Cv2.Norm(p2_2 - aligned2[i]);
+                double err1 = Math.Sqrt(Math.Pow(p2_1.X - aligned1[i].X, 2) + Math.Pow(p2_1.Y - aligned1[i].Y, 2));
+                double err2 = Math.Sqrt(Math.Pow(p2_2.X - aligned2[i].X, 2) + Math.Pow(p2_2.Y - aligned2[i].Y, 2));
 
                 if (err1 > minReprojError || err2 > minReprojError) continue;
 
@@ -637,9 +641,8 @@ namespace Deep3DStudio.Model.SfM
                 int doneFeatIdx = m.TrainIdx;
                 int newFeatIdx = m.QueryIdx;
 
-                var cloudPt = _reconstructionCloud.FirstOrDefault(p => p.IdxImage.ContainsKey(currentDoneViewRef) && p.IdxImage[currentDoneViewRef] == doneFeatIdx);
-
-                if (cloudPt != null)
+                // Fast Lookup
+                if (_featureToPointMap.TryGetValue((currentDoneViewRef, doneFeatIdx), out var cloudPt))
                 {
                     pts3D.Add(cloudPt.Pt);
                     pts2D.Add(_views[newViewIdx].Points2D[newFeatIdx]);
@@ -660,7 +663,7 @@ namespace Deep3DStudio.Model.SfM
             using var m3d = CreateMatFromPoint3d(pts3D);
             using var m2d = CreateMatFromPoint2d(pts2D);
 
-            Cv2.SolvePnPRansac(m3d, m2d, K, _distCoef, rvec, tvec,
+            Cv2.SolvePnPRansac((InputArray)m3d, (InputArray)m2d, K, _distCoef, rvec, tvec,
                 false, 1000, 8.0f, 0.99, inliers, SolvePnPFlags.EPNP);
 
             if (inliers.Rows < 8) return false;
@@ -689,14 +692,30 @@ namespace Deep3DStudio.Model.SfM
             foreach (var np in newPoints)
             {
                 bool exists = false;
+
+                // Optimized merge using spatial or just list?
+                // Since this is called incrementally, let's keep linear check or maybe optimize later.
+                // The main bottleneck was Find2D3DMatches.
+                // However, we MUST update the map if we add or merge points.
+
+                // Simple heuristic: check against last few added or use octree?
+                // For now, let's stick to linear but ensure Map is updated.
+                // Actually, if we merge, we should update the existing point's IdxImage
+
                 foreach (var ep in _reconstructionCloud)
                 {
-                    if (Cv2.Norm(np.Pt - ep.Pt) < MERGE_DIST)
+                    double dist = Math.Sqrt(Math.Pow(np.Pt.X - ep.Pt.X, 2) + Math.Pow(np.Pt.Y - ep.Pt.Y, 2) + Math.Pow(np.Pt.Z - ep.Pt.Z, 2));
+                    if (dist < MERGE_DIST)
                     {
                         exists = true;
                         foreach (var kv in np.IdxImage)
                         {
-                            if (!ep.IdxImage.ContainsKey(kv.Key)) ep.IdxImage[kv.Key] = kv.Value;
+                            if (!ep.IdxImage.ContainsKey(kv.Key))
+                            {
+                                ep.IdxImage[kv.Key] = kv.Value;
+                                // Update Map
+                                _featureToPointMap[(kv.Key, kv.Value)] = ep;
+                            }
                         }
                         break;
                     }
@@ -704,6 +723,10 @@ namespace Deep3DStudio.Model.SfM
                 if (!exists)
                 {
                     _reconstructionCloud.Add(np);
+                    foreach(var kv in np.IdxImage)
+                    {
+                        _featureToPointMap[(kv.Key, kv.Value)] = np;
+                    }
                 }
             }
         }

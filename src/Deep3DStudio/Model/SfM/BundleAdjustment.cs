@@ -538,7 +538,8 @@ namespace Deep3DStudio.Model.SfM
                 R = Matrix<double>.Build.DenseIdentity(3) + K_skew;
             }
 
-            var Pc = R * Pw + cam.Translation;
+            var RPw = R * Pw; // Rotated point without translation
+            var Pc = RPw + cam.Translation; // Camera coordinates
             double x = Pc[0], y = Pc[1], z = Pc[2];
             double z2 = z * z;
 
@@ -562,22 +563,20 @@ namespace Deep3DStudio.Model.SfM
             // 4. d(P_c) / d(t) = I (3x3)
             var J_t = J_proj * Matrix<double>.Build.DenseIdentity(3); // 2x3
 
-            // 5. d(P_c) / d(r) (3x3) - Skew Symmetric approx or full Rodrigues deriv
-            // Using approximation for small update: d(R*P)/d(w) = -[R*P]_x
-            // P_c = R*P_w + t. The term derived from R is just P_c (approx if t is small? No).
-            // Actually, d(P_c)/d(delta_r) approx -[P_c]_x (skew symmetric of P_c)
-            // for local perturbation R_new = R * exp(delta_r) or exp(delta_r) * R?
-            // Standard BA uses local parameterization on the tangent space of rotation.
-            // Let's assume left multiplication: P_c_new = (I + [w]_x) * P_c = P_c + w x P_c
-            // So d(P_c)/dw = -[P_c]_x
+            // 5. d(P_c) / d(r) (3x3)
+            // Left Perturbation: R_new = exp(delta) * R
+            // P_c_new = exp(delta) * R * Pw + t ~= (I + [delta]x) * R * Pw + t
+            // P_c_new = R * Pw + t + [delta]x * (R * Pw)
+            // d(P_c) / d(delta) = -[R * Pw]x
 
-            var Pc_skew = Matrix<double>.Build.Dense(3, 3);
-            Pc_skew[0, 1] = -z; Pc_skew[0, 2] = y;
-            Pc_skew[1, 0] = z;  Pc_skew[1, 2] = -x;
-            Pc_skew[2, 0] = -y; Pc_skew[2, 1] = x;
+            double rx = RPw[0], ry = RPw[1], rz = RPw[2];
+            var RPw_skew = Matrix<double>.Build.Dense(3, 3);
+            RPw_skew[0, 1] = -rz; RPw_skew[0, 2] = ry;
+            RPw_skew[1, 0] = rz;  RPw_skew[1, 2] = -rx;
+            RPw_skew[2, 0] = -ry; RPw_skew[2, 1] = rx;
 
-            // J_r = J_proj * (-Pc_skew)
-            var J_r = J_proj * (-Pc_skew); // 2x3
+            // J_r = J_proj * (-RPw_skew)
+            var J_r = J_proj * (-RPw_skew); // 2x3
 
             // Combine J_c = [J_r | J_t] (2x6)
             J_c = Matrix<double>.Build.Dense(2, 6);
