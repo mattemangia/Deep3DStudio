@@ -310,10 +310,8 @@ namespace Deep3DStudio.Model
                  y = Math.Clamp(y, 0, GridSize-1);
                  z = Math.Clamp(z, 0, GridSize-1);
 
-                 // If the mesher didn't set colors (defaulting to white/grey), overwrite them.
-                 // MarchingCubes (GeometryUtils) sets colors if provided.
-                 // My wrappers might not.
-                 // Let's just sample nearest voxel color.
+                 // If the mesher did not populate vertex colors, replace them with samples from the nearest voxel color.
+                 // MarchingCubes (GeometryUtils) sets colors when available, but other implementations may skip them.
                  if(mesh.Colors.Count <= i) mesh.Colors.Add(_color[x,y,z]);
                  else mesh.Colors[i] = _color[x,y,z];
             }

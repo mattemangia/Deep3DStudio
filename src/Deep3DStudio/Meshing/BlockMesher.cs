@@ -26,7 +26,7 @@ namespace Deep3DStudio.Meshing
 
             // Indices for 12 triangles (6 faces)
             // Front: 4,5,6, 4,6,7. Back: 1,0,3, 1,3,2 ... etc.
-            // Let's just generate quads and triangulate them.
+            // Generate quads for each face and triangulate them.
             // Faces: -Z, +Z, -Y, +Y, -X, +X
 
             for (int x = 0; x < X; x++)

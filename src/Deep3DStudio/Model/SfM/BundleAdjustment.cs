@@ -171,9 +171,7 @@ namespace Deep3DStudio.Model.SfM
         private Vector<double> Project(BACamera cam, Vector<double> pointWorld)
         {
             // Rodrigues to Rotation Matrix
-            // We implement Rodrigues formula manually for derivatives later, but here just value.
-            // Or use Cv2 for projection value to be safe? No, mixing types is slow.
-            // Let's implement simple projection logic.
+            // Implement Rodrigues formula manually for derivatives while keeping projection logic straightforward.
 
             // 1. Rotate
             // R = I + sin(theta) K + (1-cos(theta)) K^2
