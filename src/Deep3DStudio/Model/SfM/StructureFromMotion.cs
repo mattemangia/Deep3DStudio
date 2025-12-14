@@ -392,18 +392,8 @@ namespace Deep3DStudio.Model.SfM
             {
                 if (view.IsRegistered)
                 {
-                    // P = K[R|t] is not stored directly in ViewInfo P, but P is used for triangulation?
-                    // Actually P in ViewInfo is used in TriangulateViews.
-                    // So we must update P as well.
-
-                    // P = [R|t] (Extrinsics 3x4)
-                    // Wait, TriangulatePoints takes P = K*[R|t] if we use pixel coords,
-                    // or P=[R|t] if we use normalized coords.
-                    // In TriangulateViews, we used `Cv2.UndistortPoints` which normalizes them.
-                    // And we passed `P` which came from `GetCameraPose` -> `RecoverPose` -> [R|t].
-                    // So P stored in ViewInfo is Extrinsics [R|t].
-
-                    // Rebuild P
+                    // Update projection matrix P = [R|t] (Extrinsics 3x4)
+                    // P is used in TriangulateViews with normalized coordinates (UndistortPoints).
                     view.P = new Mat(3, 4, MatType.CV_64F);
                     view.R.CopyTo(view.P.ColRange(0, 3));
                     view.t.CopyTo(view.P.ColRange(3, 4));
@@ -693,14 +683,8 @@ namespace Deep3DStudio.Model.SfM
             {
                 bool exists = false;
 
-                // Optimized merge using spatial or just list?
-                // Since this is called incrementally, let's keep linear check or maybe optimize later.
-                // The main bottleneck was Find2D3DMatches.
-                // However, we MUST update the map if we add or merge points.
-
-                // Simple heuristic: check against last few added or use octree?
-                // For now, let's stick to linear but ensure Map is updated.
-                // Actually, if we merge, we should update the existing point's IdxImage
+                // Check if point already exists in the cloud to merge.
+                // Ensure Feature Map is updated on merge.
 
                 foreach (var ep in _reconstructionCloud)
                 {

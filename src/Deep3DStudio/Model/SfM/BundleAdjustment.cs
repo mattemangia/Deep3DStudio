@@ -101,15 +101,10 @@ namespace Deep3DStudio.Model.SfM
             for (int iter = 0; iter < iterations; iter++)
             {
                 // 1. Build Linear System (J^T J delta = -J^T r)
-                // We use the Schur Complement method to solve for Camera updates first, then Point updates.
-                // Or for simplicity in this implementation (to ensure stability), we might try dense if small,
-                // but let's try a simplified iterative update if implementing full Schur is too verbose.
-                //
-                // Actually, let's implement the standard structure:
+                // Use Schur Complement to solve for Camera updates first, then Point updates.
                 // H = [ H_cc  H_cp ]
                 //     [ H_pc  H_pp ]
-                // H_pp is block diagonal (3x3 blocks). Inverting it is easy.
-                //
+                // H_pp is block diagonal (3x3 blocks).
                 // Reduced Camera System: (H_cc - H_cp * inv(H_pp) * H_pc) * delta_c = -b_c + H_cp * inv(H_pp) * b_p
 
                 if (!SolveLMStep(ref lambda))
@@ -246,8 +241,6 @@ namespace Deep3DStudio.Model.SfM
 
             // Off-diagonal H_cp blocks (sparse storage)
             // Store as Dictionary mapping (camIdx, ptIdx) -> 6x3 Matrix
-            // Actually, we can accumulate directly into the Reduced Camera System if we iterate carefully.
-            // But let's follow the standard construction.
             var H_cp = new Dictionary<(int, int), Matrix<double>>();
 
             double currentTotalError = 0;
@@ -311,9 +304,7 @@ namespace Deep3DStudio.Model.SfM
             // S = H_cc - H_cp * inv(H_pp) * H_pc
             // rhs = b_c - H_cp * inv(H_pp) * b_p
 
-            // Since H_cc is block diagonal, we can build S as a dense matrix of size (6*Nc)x(6*Nc)
-            // or sparse. Typically it's dense-ish block structure.
-            // Let's map global indices.
+            // S is constructed as a dense matrix of size (6*Nc)x(6*Nc).
 
             int dimC = 6 * numCams;
             var S = Matrix<double>.Build.Dense(dimC, dimC);
@@ -422,7 +413,7 @@ namespace Deep3DStudio.Model.SfM
 
             // Apply updates
             // Update rule for rotation: R_new = exp(delta_phi) * R_old
-            // We use the "local parameterization" on the tangent space.
+            // Using local parameterization on the tangent space.
 
             for (int i = 0; i < numCams; i++)
             {
@@ -453,9 +444,8 @@ namespace Deep3DStudio.Model.SfM
                 using var R_delta = new Mat();
                 Cv2.Rodrigues(deltaVecMat, R_delta);
 
-                // 3. R_new = R_delta * R_old (Left multiply because Jacobian derived for left perturbation)
-                // Note: d(R*P)/d(w) ~ -[R*P]x for Left perturbation (P_c_new = (I+[w]x)*P_c)
-                // This corresponds to R_new = (I+[w]x) * R_old ~ exp(w) * R_old
+                // 3. R_new = R_delta * R_old (Left multiply for left perturbation)
+                // Corresponds to R_new = exp(w) * R_old
                 using var R_new = R_delta * R_old;
 
                 // 4. Convert back to Rodrigues
@@ -500,7 +490,7 @@ namespace Deep3DStudio.Model.SfM
 
         private void ComputeJacobians(BACamera cam, Vector<double> Pw, out Matrix<double> J_c, out Matrix<double> J_p)
         {
-            // Numerical or Analytical? Analytical is better.
+            // Analytical Jacobians
             // P_c = R * P_w + t
             // p_uv = Project(P_c)
 
@@ -508,7 +498,7 @@ namespace Deep3DStudio.Model.SfM
             // J_p: d(p)/d(Pw) (2x3)
 
             // 1. Transform Pw to Pc
-            // We need R matrix from Rodrigues vector
+            // Compute R matrix from Rodrigues vector
             var rVec = cam.Rotation;
             double theta = rVec.L2Norm();
             Matrix<double> R;
