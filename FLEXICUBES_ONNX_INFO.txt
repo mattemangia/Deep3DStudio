@@ -1,0 +1,487 @@
+================================================================================
+                       FlexiCubes ONNX Model Specification
+================================================================================
+
+Model: FlexiCubes (NVIDIA Research)
+Repository: https://github.com/MaxtirError/FlexiCubes
+Also available in: NVIDIA Kaolin (v0.15.0+)
+License: Apache 2.0
+Task: Differentiable Mesh Extraction from Signed Distance Fields
+
+================================================================================
+                                  OVERVIEW
+================================================================================
+
+FlexiCubes is a high-quality isosurface representation designed for gradient-based
+mesh optimization. Unlike traditional marching cubes, FlexiCubes:
+
+1. Uses tetrahedral grids (not voxel grids) for higher quality
+2. Supports gradient-based optimization through the extraction
+3. Predicts per-cube weights for flexible surface positioning
+4. Allows vertex deformation for sharper features
+
+Key Advantages over Marching Cubes:
+- Differentiable end-to-end
+- Higher quality meshes with fewer artifacts
+- Adaptive surface positioning
+- Better gradient flow for neural network training
+
+Grid Structure:
+- Tetrahedral grid with resolution n
+- Contains (n/2+1)^3 vertices (vs (n+1)^3 for voxel grids)
+- Produces denser output meshes than DMTet
+
+================================================================================
+                               ONNX COMPONENTS
+================================================================================
+
+The export produces three ONNX files plus lookup tables:
+
+1. flexicubes_sdf.onnx
+----------------------
+Purpose: Predict signed distance values at grid vertices
+
+INPUTS:
+  Name: query_points
+  Shape: (batch_size, num_points, 3)
+  Type: float32
+  Description: 3D positions of grid vertices
+  Range: Typically [-1, 1] normalized space
+
+OUTPUTS:
+  Name: sdf_values
+  Shape: (batch_size, num_points, 1)
+  Type: float32
+  Description: Signed distance at each point
+  Convention: Negative = inside, Positive = outside
+
+
+2. flexicubes_deformation.onnx
+------------------------------
+Purpose: Predict vertex deformations for sharper features
+
+INPUTS:
+  Name: points
+  Shape: (batch_size, num_points, 3)
+  Type: float32
+  Description: Grid vertex positions
+
+  Name: sdf_values
+  Shape: (batch_size, num_points, 1)
+  Type: float32
+  Description: SDF values at vertices
+
+OUTPUTS:
+  Name: deformation
+  Shape: (batch_size, num_points, 3)
+  Type: float32
+  Description: Vertex offsets to apply before extraction
+  Range: Bounded small values (typically |d| < 0.1 * grid_spacing)
+
+
+3. flexicubes_weights.onnx
+--------------------------
+Purpose: Predict per-cube extraction weights
+
+INPUTS:
+  Name: cube_features
+  Shape: (batch_size, num_cubes, feature_dim)
+  Type: float32
+  Description: Features for each cube (8 corner SDFs, etc.)
+
+OUTPUTS:
+  Name: weights
+  Shape: (batch_size, num_cubes, 21)
+  Type: float32
+  Description: Per-cube FlexiCubes weights for mesh extraction
+  Range: [0, 1] after sigmoid
+
+
+4. Lookup Tables (NumPy files)
+------------------------------
+- flexicubes_tet_table.npy: Tetrahedral case to edge mapping
+- flexicubes_num_vd_table.npy: Vertex/face count per case
+- flexicubes_check_table.npy: Validity checks for cases
+
+================================================================================
+                            MODEL PARAMETERS
+================================================================================
+
+Grid Configuration:
+  - Resolution n: 32, 64, 128, 256 (higher = more detail)
+  - Vertices: (n/2+1)^3
+  - Memory scales as O(n^3)
+
+Network Architecture:
+  - SDF Network: MLP with positional encoding
+  - Typical layers: 4-8 fully connected
+  - Hidden dimension: 256-512
+
+Resolution Guidelines:
+  - 32^3: ~4.9K vertices, fast preview
+  - 64^3: ~35.9K vertices, balanced quality
+  - 128^3: ~274.6K vertices, high quality
+  - 256^3: ~2.1M vertices, maximum detail
+
+Memory Requirements:
+  - 64^3 grid: ~1 GB VRAM
+  - 128^3 grid: ~4 GB VRAM
+  - 256^3 grid: ~16 GB VRAM
+
+================================================================================
+                              C# USAGE EXAMPLE
+================================================================================
+
+using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
+using System.Numerics;
+
+public class FlexiCubesInference : IDisposable
+{
+    private InferenceSession _sdfSession;
+    private InferenceSession _deformSession;
+    private InferenceSession _weightSession;
+
+    private int[] _tetTable;
+    private int[] _numVdTable;
+
+    private int _resolution;
+
+    public FlexiCubesInference(string modelDir, int resolution = 64)
+    {
+        _resolution = resolution;
+
+        var options = new SessionOptions();
+        try { options.AppendExecutionProvider_CUDA(0); } catch { }
+
+        _sdfSession = new InferenceSession(
+            Path.Combine(modelDir, "flexicubes_sdf.onnx"), options);
+        _deformSession = new InferenceSession(
+            Path.Combine(modelDir, "flexicubes_deformation.onnx"), options);
+        _weightSession = new InferenceSession(
+            Path.Combine(modelDir, "flexicubes_weights.onnx"), options);
+
+        // Load lookup tables
+        LoadTables(modelDir);
+    }
+
+    private void LoadTables(string modelDir)
+    {
+        // Load NumPy files (use NumSharp or manual parsing)
+        // _tetTable = LoadNpy(Path.Combine(modelDir, "flexicubes_tet_table.npy"));
+        // _numVdTable = LoadNpy(Path.Combine(modelDir, "flexicubes_num_vd_table.npy"));
+    }
+
+    /// <summary>
+    /// Extract mesh from SDF using FlexiCubes algorithm.
+    /// </summary>
+    public (Vector3[] vertices, int[] triangles) ExtractMesh()
+    {
+        // 1. Generate tetrahedral grid vertices
+        var gridVertices = GenerateTetGrid(_resolution);
+
+        // 2. Query SDF at grid vertices
+        var sdfValues = QuerySDF(gridVertices);
+
+        // 3. Predict vertex deformations (optional, for sharp features)
+        var deformations = PredictDeformation(gridVertices, sdfValues);
+
+        // 4. Apply deformations
+        var deformedVertices = ApplyDeformation(gridVertices, deformations);
+
+        // 5. Extract cubes and predict weights
+        var cubeFeatures = ExtractCubeFeatures(deformedVertices, sdfValues);
+        var weights = PredictWeights(cubeFeatures);
+
+        // 6. Run FlexiCubes extraction
+        return FlexiCubesExtract(deformedVertices, sdfValues, weights);
+    }
+
+    private float[] GenerateTetGrid(int resolution)
+    {
+        // Tetrahedral grid has (n/2+1)^3 vertices
+        int size = (resolution / 2) + 1;
+        int numVerts = size * size * size;
+        var vertices = new float[numVerts * 3];
+
+        int idx = 0;
+        for (int z = 0; z < size; z++)
+        {
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    // Map to [-1, 1]
+                    vertices[idx++] = (x / (float)(size - 1)) * 2 - 1;
+                    vertices[idx++] = (y / (float)(size - 1)) * 2 - 1;
+                    vertices[idx++] = (z / (float)(size - 1)) * 2 - 1;
+                }
+            }
+        }
+
+        return vertices;
+    }
+
+    private float[] QuerySDF(float[] gridVertices)
+    {
+        int numVerts = gridVertices.Length / 3;
+        var tensor = new DenseTensor<float>(gridVertices, new[] { 1, numVerts, 3 });
+
+        var inputs = new List<NamedOnnxValue>
+        {
+            NamedOnnxValue.CreateFromTensor("query_points", tensor)
+        };
+
+        using var results = _sdfSession.Run(inputs);
+        return results.First().AsTensor<float>().ToArray();
+    }
+
+    private float[] PredictDeformation(float[] vertices, float[] sdfValues)
+    {
+        int numVerts = vertices.Length / 3;
+
+        var inputs = new List<NamedOnnxValue>
+        {
+            NamedOnnxValue.CreateFromTensor("points",
+                new DenseTensor<float>(vertices, new[] { 1, numVerts, 3 })),
+            NamedOnnxValue.CreateFromTensor("sdf_values",
+                new DenseTensor<float>(sdfValues, new[] { 1, numVerts, 1 }))
+        };
+
+        using var results = _deformSession.Run(inputs);
+        return results.First().AsTensor<float>().ToArray();
+    }
+
+    private float[] ApplyDeformation(float[] vertices, float[] deformations)
+    {
+        var result = new float[vertices.Length];
+        for (int i = 0; i < vertices.Length; i++)
+        {
+            result[i] = vertices[i] + deformations[i];
+        }
+        return result;
+    }
+
+    private float[] ExtractCubeFeatures(float[] vertices, float[] sdfValues)
+    {
+        // Extract features for each cube (8 corner SDFs)
+        // Implementation depends on grid topology
+        int size = (_resolution / 2) + 1;
+        int numCubes = (size - 1) * (size - 1) * (size - 1);
+        var features = new float[numCubes * 8];
+
+        // For each cube, gather 8 corner SDF values
+        int cubeIdx = 0;
+        for (int z = 0; z < size - 1; z++)
+        {
+            for (int y = 0; y < size - 1; y++)
+            {
+                for (int x = 0; x < size - 1; x++)
+                {
+                    // 8 corners of the cube
+                    int[] corners = {
+                        z * size * size + y * size + x,
+                        z * size * size + y * size + (x + 1),
+                        z * size * size + (y + 1) * size + x,
+                        z * size * size + (y + 1) * size + (x + 1),
+                        (z + 1) * size * size + y * size + x,
+                        (z + 1) * size * size + y * size + (x + 1),
+                        (z + 1) * size * size + (y + 1) * size + x,
+                        (z + 1) * size * size + (y + 1) * size + (x + 1)
+                    };
+
+                    for (int c = 0; c < 8; c++)
+                    {
+                        features[cubeIdx * 8 + c] = sdfValues[corners[c]];
+                    }
+                    cubeIdx++;
+                }
+            }
+        }
+
+        return features;
+    }
+
+    private float[] PredictWeights(float[] cubeFeatures)
+    {
+        int numCubes = cubeFeatures.Length / 8;
+
+        var inputs = new List<NamedOnnxValue>
+        {
+            NamedOnnxValue.CreateFromTensor("cube_features",
+                new DenseTensor<float>(cubeFeatures, new[] { 1, numCubes, 8 }))
+        };
+
+        using var results = _weightSession.Run(inputs);
+        return results.First().AsTensor<float>().ToArray();
+    }
+
+    private (Vector3[] vertices, int[] triangles) FlexiCubesExtract(
+        float[] gridVertices,
+        float[] sdfValues,
+        float[] weights)
+    {
+        // FlexiCubes mesh extraction algorithm
+        // Uses tetrahedral decomposition with adaptive weighting
+
+        var meshVertices = new List<Vector3>();
+        var meshTriangles = new List<int>();
+
+        int size = (_resolution / 2) + 1;
+
+        // For each cube, determine case and extract triangles
+        for (int z = 0; z < size - 1; z++)
+        {
+            for (int y = 0; y < size - 1; y++)
+            {
+                for (int x = 0; x < size - 1; x++)
+                {
+                    int cubeIdx = z * (size - 1) * (size - 1) +
+                                  y * (size - 1) + x;
+
+                    // Get 8 corner SDF values
+                    float[] cornerSdf = new float[8];
+                    int[] corners = GetCornerIndices(x, y, z, size);
+
+                    for (int c = 0; c < 8; c++)
+                    {
+                        cornerSdf[c] = sdfValues[corners[c]];
+                    }
+
+                    // Determine case (sign configuration)
+                    int caseIdx = 0;
+                    for (int c = 0; c < 8; c++)
+                    {
+                        if (cornerSdf[c] < 0) caseIdx |= (1 << c);
+                    }
+
+                    if (caseIdx == 0 || caseIdx == 255) continue;
+
+                    // Extract triangles for this case using FlexiCubes rules
+                    // (Simplified - actual implementation uses lookup tables)
+                    ExtractCubeTriangles(
+                        meshVertices, meshTriangles,
+                        gridVertices, cornerSdf, corners, weights, cubeIdx);
+                }
+            }
+        }
+
+        return (meshVertices.ToArray(), meshTriangles.ToArray());
+    }
+
+    private int[] GetCornerIndices(int x, int y, int z, int size)
+    {
+        return new int[] {
+            z * size * size + y * size + x,
+            z * size * size + y * size + (x + 1),
+            z * size * size + (y + 1) * size + x,
+            z * size * size + (y + 1) * size + (x + 1),
+            (z + 1) * size * size + y * size + x,
+            (z + 1) * size * size + y * size + (x + 1),
+            (z + 1) * size * size + (y + 1) * size + x,
+            (z + 1) * size * size + (y + 1) * size + (x + 1)
+        };
+    }
+
+    private void ExtractCubeTriangles(
+        List<Vector3> vertices,
+        List<int> triangles,
+        float[] gridVertices,
+        float[] cornerSdf,
+        int[] corners,
+        float[] weights,
+        int cubeIdx)
+    {
+        // Simplified triangle extraction
+        // Full implementation requires FlexiCubes lookup tables
+
+        // For each edge with sign change, compute interpolated vertex
+        // Then form triangles based on case configuration
+
+        // This is where FlexiCubes weights affect vertex positioning
+        // Higher weight = vertex closer to one end of edge
+    }
+
+    public void Dispose()
+    {
+        _sdfSession?.Dispose();
+        _deformSession?.Dispose();
+        _weightSession?.Dispose();
+    }
+}
+
+================================================================================
+                       FLEXICUBES VS MARCHING CUBES
+================================================================================
+
+Comparison:
+
+| Feature              | Marching Cubes  | FlexiCubes      |
+|---------------------|-----------------|-----------------|
+| Grid type           | Voxel           | Tetrahedral     |
+| Differentiable      | No              | Yes             |
+| Vertex placement    | Edge midpoint   | Weighted        |
+| Mesh quality        | Good            | Better          |
+| Sharp features      | Limited         | Supported       |
+| Memory efficiency   | Higher          | Lower           |
+| Implementation      | Simple          | Complex         |
+
+When to use FlexiCubes:
+- Training neural SDFs with mesh supervision
+- Optimization-based mesh refinement
+- Sharp feature preservation
+- End-to-end differentiable pipelines
+
+When to use Marching Cubes:
+- Simple mesh extraction without gradients
+- Large grids where memory is constrained
+- Real-time applications needing speed
+
+================================================================================
+                             PREPROCESSING NOTES
+================================================================================
+
+SDF Normalization:
+  - SDF values should be normalized to grid spacing
+  - Typical range: [-1, 1] where 1 = grid diagonal
+  - Ensure smooth SDF (no discontinuities)
+
+Grid Bounds:
+  - Grid should fully contain the object
+  - Add padding (e.g., 10% on each side)
+  - Object should be centered
+
+Network Training:
+  - Use Eikonal loss for valid SDF: |grad(SDF)| = 1
+  - Regularize deformations to be small
+  - Weight network benefits from surface feature input
+
+================================================================================
+                              ERROR HANDLING
+================================================================================
+
+1. "Empty mesh output"
+   - Check SDF has both positive and negative values
+   - Verify object is within grid bounds
+   - Check for NaN in SDF values
+
+2. "Mesh has holes"
+   - Increase grid resolution
+   - Check SDF continuity
+   - Reduce deformation magnitude
+
+3. "Non-manifold mesh"
+   - Post-process with mesh cleaning
+   - Check for self-intersections
+   - Reduce grid resolution
+
+================================================================================
+                              VERSION INFO
+================================================================================
+
+Export Script Version: 1.0
+ONNX Opset: 14
+Also available in: NVIDIA Kaolin v0.15.0+
+Tested ONNX Runtime: 1.17.1
+
+================================================================================
