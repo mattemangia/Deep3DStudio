@@ -669,9 +669,9 @@ namespace Deep3DStudio
             var meshProcessingMenuItem = new MenuItem("_Mesh Processing");
             meshProcessingMenuItem.Submenu = meshProcessingMenu;
 
-            var flexiCubesItem = new MenuItem("_FlexiCubes Extraction");
-            flexiCubesItem.Activated += OnFlexiCubesExtract;
-            meshProcessingMenu.Append(flexiCubesItem);
+            var deepMeshPriorItem = new MenuItem("_DeepMeshPrior Optimization");
+            deepMeshPriorItem.Activated += OnDeepMeshPriorRefine;
+            meshProcessingMenu.Append(deepMeshPriorItem);
 
             var tripoSFItem = new MenuItem("Tripo_SF Refinement");
             tripoSFItem.Activated += OnTripoSFRefine;
@@ -703,13 +703,13 @@ namespace Deep3DStudio
             var workflowsMenuItem = new MenuItem("_Workflows");
             workflowsMenuItem.Submenu = workflowsMenu;
 
-            var dust3rFlexiItem = new MenuItem("_Dust3r → FlexiCubes");
-            dust3rFlexiItem.Activated += OnDust3rFlexiCubesWorkflow;
-            workflowsMenu.Append(dust3rFlexiItem);
+            var dust3rDmpItem = new MenuItem("_Dust3r → DeepMeshPrior");
+            dust3rDmpItem.Activated += OnDust3rDeepMeshPriorWorkflow;
+            workflowsMenu.Append(dust3rDmpItem);
 
-            var dust3rNerfFlexiItem = new MenuItem("Dust3r → _NeRF → FlexiCubes");
-            dust3rNerfFlexiItem.Activated += OnDust3rNeRFFlexiCubesWorkflow;
-            workflowsMenu.Append(dust3rNerfFlexiItem);
+            var dust3rNerfItem = new MenuItem("Dust3r → _NeRF → DeepMeshPrior");
+            dust3rNerfItem.Activated += OnDust3rNeRFDeepMeshPriorWorkflow;
+            workflowsMenu.Append(dust3rNerfItem);
 
             var fullPipelineItem = new MenuItem("_Full Pipeline (Mesh Only)");
             fullPipelineItem.Activated += OnFullPipelineWorkflow;
@@ -1405,8 +1405,8 @@ namespace Deep3DStudio
             _workflowCombo.AppendText("TripoSR (Single Image)");
             _workflowCombo.AppendText("TripoSG (High Quality)");
             _workflowCombo.AppendText("Wonder3D (Multi-View)");
-            _workflowCombo.AppendText("Dust3r + FlexiCubes");
-            _workflowCombo.AppendText("Dust3r + NeRF + FlexiCubes");
+            _workflowCombo.AppendText("Dust3r + DeepMeshPrior");
+            _workflowCombo.AppendText("Dust3r + NeRF + DeepMeshPrior");
             _workflowCombo.AppendText("Full Pipeline (Mesh Only)");
             _workflowCombo.Active = 0;
             wfBox.PackStart(_workflowCombo, false, false, 0);
@@ -1440,7 +1440,7 @@ namespace Deep3DStudio
             toolbar.Insert(aiRigBtn, -1);
 
             var aiRefineBtn = new ToolButton(AppIconFactory.GenerateIcon("refine", iconSize), "AI Refine");
-            aiRefineBtn.TooltipText = "Refine mesh with AI models (TripoSF/FlexiCubes)";
+            aiRefineBtn.TooltipText = "Refine mesh with AI models (TripoSF/DeepMeshPrior)";
             aiRefineBtn.Clicked += OnAIRefine;
             toolbar.Insert(aiRefineBtn, -1);
 
@@ -1477,8 +1477,8 @@ namespace Deep3DStudio
             var refineSetting = IniSettings.Instance.MeshRefinement;
             switch (refineSetting)
             {
-                case MeshRefinementMethod.FlexiCubes:
-                    await RunAIMeshingAsync(MeshingAlgorithm.FlexiCubes, "Mesh Refinement (FlexiCubes)");
+                case MeshRefinementMethod.DeepMeshPrior:
+                    await RunAIMeshingAsync(MeshingAlgorithm.DeepMeshPrior, "Mesh Optimization (DeepMeshPrior)");
                     break;
                 case MeshRefinementMethod.TripoSF:
                     await RunAIMeshingAsync(MeshingAlgorithm.TripoSF, "Mesh Refinement (TripoSF)");
@@ -1548,16 +1548,21 @@ namespace Deep3DStudio
             RunAIWorkflowAsync(AIModels.WorkflowPipeline.ImageToWonder3D);
         }
 
-        private void OnFlexiCubesExtract(object? sender, EventArgs e)
+        private void OnDeepMeshPriorRefine(object? sender, EventArgs e)
         {
             if (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0)
             {
-                ShowMessage("No Point Cloud", "Please generate a point cloud first using Dust3r or SfM.");
+                ShowMessage("No Mesh", "Please generate a mesh first before optimizing.");
                 return;
             }
 
-            _statusLabel.Text = "Running FlexiCubes mesh extraction...";
-            RunAIWorkflowAsync(AIModels.WorkflowPipeline.Dust3rToFlexiCubes);
+            _statusLabel.Text = "Running DeepMeshPrior optimization...";
+            var pipeline = new AIModels.WorkflowPipeline
+            {
+                Name = "DeepMeshPrior Optimization",
+                Steps = new List<AIModels.WorkflowStep> { AIModels.WorkflowStep.DeepMeshPriorRefinement }
+            };
+            RunAIWorkflowAsync(pipeline);
         }
 
         private void OnTripoSFRefine(object? sender, EventArgs e)
@@ -1579,7 +1584,7 @@ namespace Deep3DStudio
             RunAIWorkflowAsync(pipeline);
         }
 
-        private void OnDust3rFlexiCubesWorkflow(object? sender, EventArgs e)
+        private void OnDust3rDeepMeshPriorWorkflow(object? sender, EventArgs e)
         {
             if (_imagePaths.Count < 2)
             {
@@ -1587,11 +1592,11 @@ namespace Deep3DStudio
                 return;
             }
 
-            _statusLabel.Text = "Running Dust3r → FlexiCubes workflow...";
-            RunAIWorkflowAsync(AIModels.WorkflowPipeline.Dust3rToFlexiCubes);
+            _statusLabel.Text = "Running Dust3r → DeepMeshPrior workflow...";
+            RunAIWorkflowAsync(AIModels.WorkflowPipeline.Dust3rToDeepMeshPrior);
         }
 
-        private void OnDust3rNeRFFlexiCubesWorkflow(object? sender, EventArgs e)
+        private void OnDust3rNeRFDeepMeshPriorWorkflow(object? sender, EventArgs e)
         {
             if (_imagePaths.Count < 2)
             {
@@ -1599,7 +1604,7 @@ namespace Deep3DStudio
                 return;
             }
 
-            _statusLabel.Text = "Running Dust3r → NeRF → FlexiCubes workflow...";
+            _statusLabel.Text = "Running Dust3r → NeRF → DeepMeshPrior workflow...";
             RunAIWorkflowAsync(AIModels.WorkflowPipeline.Dust3rToNeRFToMesh);
         }
 
@@ -1631,7 +1636,7 @@ namespace Deep3DStudio
                 {
                     AIModels.WorkflowStep.SfMReconstruction,
                     AIModels.WorkflowStep.TripoSFRefinement,
-                    AIModels.WorkflowStep.FlexiCubesExtraction
+                    AIModels.WorkflowStep.DeepMeshPriorRefinement
                 }
             };
             RunAIWorkflowAsync(pipeline);
@@ -3024,14 +3029,14 @@ namespace Deep3DStudio
             try
             {
                 var meshingAlgo = IniSettings.Instance.MeshingAlgo;
-                if ((meshingAlgo == MeshingAlgorithm.FlexiCubes || meshingAlgo == MeshingAlgorithm.TripoSF) &&
+                if ((meshingAlgo == MeshingAlgorithm.DeepMeshPrior || meshingAlgo == MeshingAlgorithm.TripoSF) &&
                     (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0))
                 {
                     ShowMessage("No point cloud data available. Please generate a point cloud first or import data.");
                     return;
                 }
 
-                if (meshingAlgo == MeshingAlgorithm.FlexiCubes ||
+                if (meshingAlgo == MeshingAlgorithm.DeepMeshPrior ||
                     meshingAlgo == MeshingAlgorithm.TripoSF ||
                     meshingAlgo == MeshingAlgorithm.TripoSG)
                 {
@@ -3135,11 +3140,11 @@ namespace Deep3DStudio
 
             switch (algorithm)
             {
-                case MeshingAlgorithm.FlexiCubes:
+                case MeshingAlgorithm.DeepMeshPrior:
                     pipeline = new AIModels.WorkflowPipeline
                     {
-                        Name = "FlexiCubes Mesh Extraction",
-                        Steps = new List<AIModels.WorkflowStep> { AIModels.WorkflowStep.FlexiCubesExtraction }
+                        Name = "DeepMeshPrior Optimization",
+                        Steps = new List<AIModels.WorkflowStep> { AIModels.WorkflowStep.DeepMeshPriorRefinement }
                     };
                     break;
                 case MeshingAlgorithm.TripoSF:
@@ -3242,7 +3247,7 @@ namespace Deep3DStudio
                 case MeshingAlgorithm.GreedyMeshing: return new GreedyMesher();
                 case MeshingAlgorithm.SurfaceNets: return new SurfaceNetsMesher();
                 case MeshingAlgorithm.Blocky: return new BlockMesher();
-                case MeshingAlgorithm.FlexiCubes:
+                case MeshingAlgorithm.DeepMeshPrior:
                 case MeshingAlgorithm.TripoSF:
                 case MeshingAlgorithm.TripoSG:
                     Console.WriteLine($"Meshing algorithm {algo} is AI-driven; falling back to MarchingCubes for geometry extraction.");

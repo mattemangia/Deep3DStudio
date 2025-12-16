@@ -32,6 +32,27 @@ namespace Deep3DStudio.Model
                 Vertices[i] = new Vector3(res.X / res.W, res.Y / res.W, res.Z / res.W);
             }
         }
+
+        public MeshData Clone()
+        {
+            var clone = new MeshData();
+            clone.Vertices = new List<Vector3>(Vertices);
+            clone.Colors = new List<Vector3>(Colors);
+            clone.UVs = new List<Vector2>(UVs);
+            clone.Indices = new List<int>(Indices);
+            clone.Texture = Texture; // Shallow copy bitmap ref
+            clone.TextureId = TextureId;
+            if (PixelToVertexIndex != null)
+                clone.PixelToVertexIndex = (int[])PixelToVertexIndex.Clone();
+            return clone;
+        }
+
+        public void RecalculateNormals()
+        {
+            // Simple placeholder for normal recalculation if needed
+            // MeshData doesn't store normals explicitly in this class definition,
+            // but if it did or if this is for rendering updates, logic would go here.
+        }
     }
 
     public static class GeometryUtils

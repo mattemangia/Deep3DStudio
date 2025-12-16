@@ -1,0 +1,147 @@
+using System;
+using System.Collections.Generic;
+using TorchSharp;
+using TorchSharp.Modules;
+using static TorchSharp.torch;
+
+namespace Deep3DStudio.DeepMeshPrior
+{
+    public class DeepMeshPriorNetwork : nn.Module<Tensor, Tensor, Tensor, Tensor>
+    {
+        // GCN layers
+        private List<GCNConv> _convs = new List<GCNConv>();
+        private List<BatchNorm1d> _bns = new List<BatchNorm1d>();
+        private LeakyReLU _activation;
+
+        // Skip connection setting
+        private bool _useSkipConnections;
+        private Linear _finalLinear;
+        private Linear _finalLinear2;
+
+        public DeepMeshPriorNetwork(bool useSkipConnections = false, string name = "DeepMeshPriorNet") : base(name)
+        {
+            _useSkipConnections = useSkipConnections;
+
+            // Channels configuration matching the python reference
+            // h = [16, 32, 64, 128, 256, 256, 512, 512, 256, 256, 128, 64, 32, 32, 16, 3] (Normal)
+            long[] h;
+            if (useSkipConnections)
+            {
+                h = new long[] { 16, 32, 64, 128, 256, 256, 512, 512, 256, 256, 128, 64, 32, 32, 3 };
+                // Encoder
+                AddLayer(h[0], h[1]); // 0 -> 1
+                AddLayer(h[1], h[2]); // 1 -> 2
+                AddLayer(h[2], h[3]); // 2 -> 3
+                AddLayer(h[3], h[4]); // 3 -> 4
+                AddLayer(h[4], h[5]); // 4 -> 5
+                AddLayer(h[5], h[6]); // 5 -> 6
+                AddLayer(h[6], h[7]); // 6 -> 7 (Bottleneck)
+
+                // Decoder with Skips (concatenation)
+                // In python code: conv8 input is h[7]+h[6]
+                AddLayer(h[7] + h[6], h[8]); // 7+6 -> 8
+                AddLayer(h[8] + h[5], h[9]); // 8+5 -> 9
+                AddLayer(h[9] + h[4], h[10]); // 9+4 -> 10
+                AddLayer(h[10] + h[3], h[11]); // 10+3 -> 11
+                AddLayer(h[11] + h[2], h[12]); // 11+2 -> 12
+                AddLayer(h[12] + h[1], h[13]); // 12+1 -> 13
+
+                _finalLinear = nn.Linear(h[13], h[14]);
+                RegisterModule("final_linear", _finalLinear);
+            }
+            else
+            {
+                h = new long[] { 16, 32, 64, 128, 256, 256, 512, 512, 256, 256, 128, 64, 32, 32, 16, 3 };
+                for(int i=0; i<h.Length-2; i++)
+                {
+                    AddLayer(h[i], h[i+1]);
+                }
+
+                _finalLinear = nn.Linear(h[h.Length-2], h[h.Length-1]); // 16 -> 3
+                RegisterModule("final_linear1", _finalLinear);
+                // Python code has two linear layers at the end for normal net: linear1(dx), relu, linear2(dx)
+                // Wait, python code:
+                // self.linear1 = nn.Linear(h[13], h[14]) -> 32 -> 16
+                // self.linear2 = nn.Linear(h[14], h[15]) -> 16 -> 3
+                // I only added up to conv13 (h[12]->h[13])
+
+                // Let's recheck indices carefully.
+                // conv13: h[12]->h[13] (32->32)
+                // linear1: h[13]->h[14] (32->16)
+                // linear2: h[14]->h[15] (16->3)
+
+                _finalLinear2 = nn.Linear(h[14], h[15]);
+                RegisterModule("final_linear2", _finalLinear2);
+            }
+
+            _activation = nn.LeakyReLU();
+            RegisterModule("activation", _activation);
+        }
+
+        private void AddLayer(long inCh, long outCh)
+        {
+            var conv = new GCNConv(inCh, outCh);
+            var bn = nn.BatchNorm1d(outCh);
+
+            _convs.Add(conv);
+            _bns.Add(bn);
+
+            RegisterModule($"conv_{_convs.Count}", conv);
+            RegisterModule($"bn_{_bns.Count}", bn);
+        }
+
+        public override Tensor forward(Tensor x, Tensor edgeIndex, Tensor edgeWeight)
+        {
+            Tensor dx = x;
+
+            if (_useSkipConnections)
+            {
+                var skips = new List<Tensor>();
+
+                // Encoder (7 layers: 0 to 6)
+                for(int i=0; i<7; i++)
+                {
+                    dx = _convs[i].forward(dx, edgeIndex, edgeWeight);
+                    dx = _bns[i].forward(dx);
+                    dx = _activation.forward(dx);
+                    if (i < 6) skips.Add(dx); // Store outputs of conv1..conv6 for skip
+                }
+
+                // Decoder (6 layers: 7 to 12)
+                // Skips are used in reverse: skip6, skip5, ..., skip1
+                for(int i=7; i<13; i++)
+                {
+                    var skip = skips[6 - (i - 6)]; // e.g. i=7 => skip[6-1]=skip[5] which is conv6 output?
+                    // Python:
+                    // dx = conv7...
+                    // cat(dx, skip6) -> conv8 (idx 7)
+                    // skip6 is output of conv6.
+
+                    dx = torch.cat(new [] { dx, skip }, dim: 1);
+                    dx = _convs[i].forward(dx, edgeIndex, edgeWeight);
+                    dx = _bns[i].forward(dx);
+                    dx = _activation.forward(dx);
+                }
+
+                dx = _finalLinear.forward(dx);
+            }
+            else
+            {
+                // Normal sequential
+                // Layers 0 to 12 (13 layers)
+                for(int i=0; i<13; i++)
+                {
+                    dx = _convs[i].forward(dx, edgeIndex, edgeWeight);
+                    dx = _bns[i].forward(dx);
+                    dx = _activation.forward(dx);
+                }
+
+                dx = _finalLinear.forward(dx);
+                dx = _activation.forward(dx);
+                dx = _finalLinear2.forward(dx);
+            }
+
+            return dx; // Delta coordinates
+        }
+    }
+}
