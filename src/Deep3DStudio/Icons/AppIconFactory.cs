@@ -29,6 +29,8 @@ namespace Deep3DStudio.Icons
                         case "select": DrawSelectIcon(cr, size); break;
                         case "texture": DrawTextureIcon(cr, size); break;
                         case "camera": DrawCameraIcon(cr, size); break;
+                        case "rig": DrawRigIcon(cr, size); break;
+                        case "refine": DrawRefineIcon(cr, size); break;
                     }
                 }
 
@@ -267,6 +269,46 @@ namespace Deep3DStudio.Icons
             // Optional: Add a small viewfinder on top of camera
             cr.SetSourceRGB(0.8, 0.6, 0.0);
             cr.Rectangle(camX + camW * 0.3, camY - size * 0.08, camW * 0.4, size * 0.08);
+            cr.Fill();
+        }
+
+        private static void DrawRigIcon(Context cr, int size)
+        {
+            // Simple bone + joint representation
+            cr.SetSourceRGB(0.2, 0.6, 0.9);
+            cr.LineWidth = 3;
+
+            cr.MoveTo(size * 0.25, size * 0.2);
+            cr.LineTo(size * 0.5, size * 0.5);
+            cr.LineTo(size * 0.75, size * 0.2);
+            cr.Stroke();
+
+            cr.SetSourceRGB(0.1, 0.3, 0.6);
+            cr.Arc(size * 0.5, size * 0.5, size * 0.08, 0, 2 * Math.PI);
+            cr.Fill();
+        }
+
+        private static void DrawRefineIcon(Context cr, int size)
+        {
+            // Magic-wand style icon for refinement
+            cr.SetSourceRGB(0.9, 0.7, 0.1);
+            cr.LineWidth = 3;
+            cr.MoveTo(size * 0.25, size * 0.75);
+            cr.LineTo(size * 0.75, size * 0.25);
+            cr.Stroke();
+
+            cr.SetSourceRGB(1.0, 0.9, 0.4);
+            cr.LineWidth = 2;
+            cr.MoveTo(size * 0.55, size * 0.2);
+            cr.LineTo(size * 0.6, size * 0.05);
+            cr.LineTo(size * 0.65, size * 0.2);
+            cr.ClosePath();
+            cr.Fill();
+
+            cr.MoveTo(size * 0.8, size * 0.4);
+            cr.LineTo(size * 0.95, size * 0.45);
+            cr.LineTo(size * 0.8, size * 0.5);
+            cr.ClosePath();
             cr.Fill();
         }
 

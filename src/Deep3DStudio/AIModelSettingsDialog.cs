@@ -14,7 +14,9 @@ namespace Deep3DStudio
 
         // General
         private ComboBoxText _imageTo3DCombo;
-        private ComboBoxText _meshExtractionCombo;
+        private ComboBoxText _reconstructionCombo;
+        private ComboBoxText _meshingModelCombo;
+        private ComboBoxText _meshRefinementCombo;
         private ComboBoxText _riggingCombo;
 
         // Compute Device (for all models)
@@ -96,6 +98,27 @@ namespace Deep3DStudio
 
             int row = 0;
 
+            // Reconstruction model
+            grid.Attach(new Label("Reconstruction Model:") { Halign = Align.Start }, 0, row, 1, 1);
+            _reconstructionCombo = new ComboBoxText();
+            foreach (var name in Enum.GetNames(typeof(ReconstructionMethod)))
+                _reconstructionCombo.AppendText(name);
+            grid.Attach(_reconstructionCombo, 1, row++, 1, 1);
+
+            // Meshing / extraction model
+            grid.Attach(new Label("Meshing Model:") { Halign = Align.Start }, 0, row, 1, 1);
+            _meshingModelCombo = new ComboBoxText();
+            foreach (var name in Enum.GetNames(typeof(MeshingAlgorithm)))
+                _meshingModelCombo.AppendText(name);
+            grid.Attach(_meshingModelCombo, 1, row++, 1, 1);
+
+            // Mesh refinement
+            grid.Attach(new Label("Mesh Refinement:") { Halign = Align.Start }, 0, row, 1, 1);
+            _meshRefinementCombo = new ComboBoxText();
+            foreach (var name in Enum.GetNames(typeof(MeshRefinementMethod)))
+                _meshRefinementCombo.AppendText(name);
+            grid.Attach(_meshRefinementCombo, 1, row++, 1, 1);
+
             // Image to 3D model
             grid.Attach(new Label("Default Image→3D Model:") { Halign = Align.Start }, 0, row, 1, 1);
             _imageTo3DCombo = new ComboBoxText();
@@ -104,14 +127,6 @@ namespace Deep3DStudio
             _imageTo3DCombo.AppendText("TripoSG");
             _imageTo3DCombo.AppendText("Wonder3D");
             grid.Attach(_imageTo3DCombo, 1, row++, 1, 1);
-
-            // Mesh extraction method
-            grid.Attach(new Label("Mesh Extraction Method:") { Halign = Align.Start }, 0, row, 1, 1);
-            _meshExtractionCombo = new ComboBoxText();
-            _meshExtractionCombo.AppendText("Marching Cubes");
-            _meshExtractionCombo.AppendText("FlexiCubes");
-            _meshExtractionCombo.AppendText("TripoSF");
-            grid.Attach(_meshExtractionCombo, 1, row++, 1, 1);
 
             // Rigging method
             grid.Attach(new Label("Rigging Method:") { Halign = Align.Start }, 0, row, 1, 1);
@@ -503,7 +518,9 @@ namespace Deep3DStudio
         {
             // General
             _imageTo3DCombo.Active = (int)_settings.ImageTo3D;
-            _meshExtractionCombo.Active = (int)_settings.MeshExtraction;
+            _reconstructionCombo.Active = (int)_settings.ReconstructionMethod;
+            _meshingModelCombo.Active = (int)_settings.MeshingAlgo;
+            _meshRefinementCombo.Active = (int)_settings.MeshRefinement;
             _riggingCombo.Active = (int)_settings.RiggingModel;
             _computeDeviceCombo.Active = (int)_settings.AIDevice;
 
@@ -544,7 +561,15 @@ namespace Deep3DStudio
         {
             // General
             _settings.ImageTo3D = (ImageTo3DModel)_imageTo3DCombo.Active;
-            _settings.MeshExtraction = (MeshExtractionMethod)_meshExtractionCombo.Active;
+            _settings.ReconstructionMethod = (ReconstructionMethod)_reconstructionCombo.Active;
+            _settings.MeshingAlgo = (MeshingAlgorithm)_meshingModelCombo.Active;
+            _settings.MeshRefinement = (MeshRefinementMethod)_meshRefinementCombo.Active;
+            _settings.MeshExtraction = _settings.MeshingAlgo switch
+            {
+                MeshingAlgorithm.FlexiCubes => MeshExtractionMethod.FlexiCubes,
+                MeshingAlgorithm.TripoSF => MeshExtractionMethod.TripoSF,
+                _ => MeshExtractionMethod.MarchingCubes
+            };
             _settings.RiggingModel = (RiggingMethod)_riggingCombo.Active;
             _settings.AIDevice = (AIComputeDevice)_computeDeviceCombo.Active;
 

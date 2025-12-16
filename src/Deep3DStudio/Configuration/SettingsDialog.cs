@@ -11,6 +11,7 @@ namespace Deep3DStudio.Configuration
         private ComboBoxText _coordCombo;
         private ComboBoxText _bboxCombo;
         private ComboBoxText _reconCombo;
+        private ComboBoxText _meshRefineCombo;
         private ColorButton _bgColorButton;
         private ColorButton _gridColorButton;
 
@@ -50,6 +51,14 @@ namespace Deep3DStudio.Configuration
                 _meshingCombo.AppendText(name);
             _meshingCombo.Active = (int)IniSettings.Instance.MeshingAlgo;
             generalBox.PackStart(_meshingCombo, false, false, 0);
+
+            // Mesh Refinement
+            generalBox.PackStart(new Label("Mesh Refinement:") { Halign = Align.Start }, false, false, 0);
+            _meshRefineCombo = new ComboBoxText();
+            foreach (var name in Enum.GetNames(typeof(MeshRefinementMethod)))
+                _meshRefineCombo.AppendText(name);
+            _meshRefineCombo.Active = (int)IniSettings.Instance.MeshRefinement;
+            generalBox.PackStart(_meshRefineCombo, false, false, 0);
 
             // Reconstruction Method
             generalBox.PackStart(new Label("Reconstruction Method:") { Halign = Align.Start }, false, false, 0);
@@ -208,6 +217,7 @@ namespace Deep3DStudio.Configuration
             _reconCombo.Active = (int)IniSettings.Instance.ReconstructionMethod;
             _coordCombo.Active = (int)IniSettings.Instance.CoordSystem;
             _bboxCombo.Active = (int)IniSettings.Instance.BoundingBoxStyle;
+            _meshRefineCombo.Active = (int)IniSettings.Instance.MeshRefinement;
 
             _nerfIterationsSpin.Value = IniSettings.Instance.NeRFIterations;
             _voxelSizeSpin.Value = IniSettings.Instance.VoxelGridSize;
@@ -243,6 +253,7 @@ namespace Deep3DStudio.Configuration
             settings.ReconstructionMethod = (ReconstructionMethod)_reconCombo.Active;
             settings.CoordSystem = (CoordinateSystem)_coordCombo.Active;
             settings.BoundingBoxStyle = (BoundingBoxMode)_bboxCombo.Active;
+            settings.MeshRefinement = (MeshRefinementMethod)_meshRefineCombo.Active;
 
             // NeRF settings
             settings.NeRFIterations = (int)_nerfIterationsSpin.Value;

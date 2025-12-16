@@ -11,7 +11,6 @@ namespace Deep3DStudio.Configuration
         Dust3r,
         FeatureMatching,
         TripoSR,
-        TripoSG,
         Wonder3D
     }
 
@@ -24,6 +23,13 @@ namespace Deep3DStudio.Configuration
     public enum MeshExtractionMethod
     {
         MarchingCubes,
+        FlexiCubes,
+        TripoSF
+    }
+
+    public enum MeshRefinementMethod
+    {
+        None,
         FlexiCubes,
         TripoSF
     }
@@ -87,6 +93,7 @@ namespace Deep3DStudio.Configuration
         public ImageTo3DModel ImageTo3D { get; set; } = ImageTo3DModel.None;
         public RiggingMethod RiggingModel { get; set; } = RiggingMethod.None;
         public MeshExtractionMethod MeshExtraction { get; set; } = MeshExtractionMethod.MarchingCubes;
+        public MeshRefinementMethod MeshRefinement { get; set; } = MeshRefinementMethod.None;
 
         // TripoSR Settings
         public int TripoSRResolution { get; set; } = 256;
@@ -325,6 +332,7 @@ namespace Deep3DStudio.Configuration
                     writer.WriteLine($"ImageTo3D={ImageTo3D}");
                     writer.WriteLine($"RiggingModel={RiggingModel}");
                     writer.WriteLine($"MeshExtraction={MeshExtraction}");
+                    writer.WriteLine($"MeshRefinement={MeshRefinement}");
                     writer.WriteLine($"ComputeDevice={AIDevice}");
                     writer.WriteLine();
 
@@ -472,6 +480,8 @@ namespace Deep3DStudio.Configuration
                 RiggingModel = rig;
             if (TryGetValue("AIModels", "MeshExtraction", out string? meshExStr) && Enum.TryParse<MeshExtractionMethod>(meshExStr, out var meshEx))
                 MeshExtraction = meshEx;
+            if (TryGetValue("AIModels", "MeshRefinement", out string? meshRefineStr) && Enum.TryParse<MeshRefinementMethod>(meshRefineStr, out var meshRefine))
+                MeshRefinement = meshRefine;
 
             // [TripoSR]
             if (TryGetValue("TripoSR", "Resolution", out string? tsrResStr) && int.TryParse(tsrResStr, out var tsrRes))
@@ -607,6 +617,7 @@ namespace Deep3DStudio.Configuration
             ImageTo3D = ImageTo3DModel.None;
             RiggingModel = RiggingMethod.None;
             MeshExtraction = MeshExtractionMethod.MarchingCubes;
+            MeshRefinement = MeshRefinementMethod.None;
 
             // TripoSR
             TripoSRResolution = 256;
