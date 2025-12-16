@@ -149,7 +149,8 @@ namespace Deep3DStudio.Model.AIModels
 
             // Load image using SkiaSharp or System.Drawing
             // For now, use ImageUtils from existing code
-            return ImageUtils.LoadAndPreprocessImage(imagePath, inputSize, inputSize);
+            var (tensor, _) = ImageUtils.LoadAndPreprocessImage(imagePath, inputSize);
+            return tensor;
         }
 
         private DenseTensor<float> PreprocessImageData(byte[] imageData, int width, int height)

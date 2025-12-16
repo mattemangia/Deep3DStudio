@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Numerics;
 using System.Threading.Tasks;
 using Deep3DStudio.Configuration;
+using OpenTK.Mathematics;
 
 namespace Deep3DStudio.Model.AIModels
 {
@@ -336,13 +336,13 @@ namespace Deep3DStudio.Model.AIModels
                     var points = firstMesh.Vertices;
                     var colors = firstMesh.Colors;
 
-                    if (points == null || points.Length == 0)
+                    if (points == null || points.Count == 0)
                     {
                         statusCallback?.Invoke("No vertices in SfM point cloud");
                         return sfmResult;
                     }
 
-                    statusCallback?.Invoke($"Processing {points.Length} points...");
+                    statusCallback?.Invoke($"Processing {points.Count} points...");
 
                     // Apply mesh extraction based on settings
                     switch (settings.MeshExtraction)
@@ -380,19 +380,16 @@ namespace Deep3DStudio.Model.AIModels
             int[] triangles,
             Action<string>? statusCallback = null)
         {
-            return await Task.Run(() =>
+            try
             {
-                try
-                {
-                    statusCallback?.Invoke("UniRig not yet implemented");
-                    return null;
-                }
-                catch (Exception ex)
-                {
-                    statusCallback?.Invoke($"Error: {ex.Message}");
-                    return null;
-                }
-            });
+                statusCallback?.Invoke("UniRig not yet implemented");
+                return await Task.FromResult<RigResult?>(null);
+            }
+            catch (Exception ex)
+            {
+                statusCallback?.Invoke($"Error: {ex.Message}");
+                return await Task.FromResult<RigResult?>(null);
+            }
         }
 
         #endregion
@@ -586,22 +583,22 @@ namespace Deep3DStudio.Model.AIModels
 
             foreach (var mesh in result.Meshes)
             {
-                if (mesh.Vertices != null)
+                if (mesh.Vertices != null && mesh.Vertices.Count > 0)
                 {
                     allVertices.AddRange(mesh.Vertices);
-                    if (mesh.Colors != null && mesh.Colors.Length == mesh.Vertices.Length)
+                    if (mesh.Colors != null && mesh.Colors.Count == mesh.Vertices.Count)
                         allColors.AddRange(mesh.Colors);
                     else
-                        allColors.AddRange(Enumerable.Repeat(new Vector3(0.5f), mesh.Vertices.Length));
+                        allColors.AddRange(Enumerable.Repeat(new Vector3(0.5f, 0.5f, 0.5f), mesh.Vertices.Count));
                 }
             }
 
             var merged = new SceneResult();
             merged.Meshes.Add(new MeshData
             {
-                Vertices = allVertices.ToArray(),
-                Colors = allColors.ToArray(),
-                Indices = Array.Empty<int>()
+                Vertices = allVertices,
+                Colors = allColors,
+                Indices = new List<int>()
             });
             merged.Poses.AddRange(result.Poses);
 
@@ -680,9 +677,10 @@ namespace Deep3DStudio.Model.AIModels
             {
                 var mesh = new MeshData
                 {
-                    Vertices = aiResult.Vertices,
-                    Colors = aiResult.Colors ?? new Vector3[aiResult.Vertices.Length],
-                    Indices = aiResult.Triangles ?? Array.Empty<int>()
+                    Vertices = aiResult.Vertices.ToList(),
+                    Colors = aiResult.Colors?.ToList() ??
+                             Enumerable.Repeat(new Vector3(0.5f, 0.5f, 0.5f), aiResult.Vertices.Length).ToList(),
+                    Indices = aiResult.Triangles?.ToList() ?? new List<int>()
                 };
                 sceneResult.Meshes.Add(mesh);
             }

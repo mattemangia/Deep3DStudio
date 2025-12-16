@@ -10,6 +10,7 @@ using Deep3DStudio.UI;
 using Deep3DStudio.Scene;
 using Deep3DStudio.IO;
 using Deep3DStudio.Texturing;
+using AIModels = Deep3DStudio.Model.AIModels;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Linq;
@@ -1530,7 +1531,7 @@ namespace Deep3DStudio
 
         private void OnFlexiCubesExtract(object? sender, EventArgs e)
         {
-            if (_lastSceneResult == null || _lastSceneResult.PointClouds.Count == 0)
+            if (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0)
             {
                 ShowMessage("No Point Cloud", "Please generate a point cloud first using Dust3r or SfM.");
                 return;
@@ -1619,7 +1620,7 @@ namespace Deep3DStudio
 
         private void OnPointCloudMergeWorkflow(object? sender, EventArgs e)
         {
-            if (_lastSceneResult == null || _lastSceneResult.PointClouds.Count < 2)
+            if (_lastSceneResult == null || _lastSceneResult.Meshes.Count < 2)
             {
                 ShowMessage("Need More Point Clouds", "Please generate at least 2 point clouds to merge.");
                 return;
@@ -1648,9 +1649,9 @@ namespace Deep3DStudio
                 var manager = AIModels.AIModelManager.Instance;
                 var result = await manager.ExecuteWorkflowAsync(
                     pipeline,
-                    _imagePaths.ToArray(),
+                    _imagePaths,
                     _lastSceneResult,
-                    progress => Application.Invoke((s, e) => _statusLabel.Text = progress)
+                    (message, _) => Application.Invoke((s, e) => _statusLabel.Text = message)
                 );
 
                 if (result != null)
@@ -1680,14 +1681,6 @@ namespace Deep3DStudio
             {
                 var meshObj = new Scene.MeshObject($"Mesh_{_sceneGraph.GetAllObjects().Count}", mesh);
                 _sceneGraph.AddObject(meshObj);
-            }
-
-            // Add new point clouds to scene
-            foreach (var pc in result.PointClouds)
-            {
-                var pcData = new PointCloudData { Points = pc };
-                var pcObj = new Scene.PointCloudObject($"PointCloud_{_sceneGraph.GetAllObjects().Count}", pcData);
-                _sceneGraph.AddObject(pcObj);
             }
 
             _sceneTreeView.RefreshTree();

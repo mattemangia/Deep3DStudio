@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Numerics;
+using OpenTK.Mathematics;
 
 namespace Deep3DStudio.Model.AIModels
 {
@@ -110,7 +110,7 @@ namespace Deep3DStudio.Model.AIModels
         /// </summary>
         /// <param name="imagePath">Path to input image</param>
         /// <returns>3D model result</returns>
-        AIModelResult GenerateFrom Image(string imagePath);
+        AIModelResult GenerateFromImage(string imagePath);
 
         /// <summary>
         /// Generate 3D from image bytes (for in-memory processing).
