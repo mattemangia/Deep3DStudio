@@ -355,7 +355,7 @@ def export_sdf_network(output_path, hidden_dim=256, num_layers=4):
             sdf_path,
             input_names=['query_points'],
             output_names=['sdf_values'],
-            opset_version=14,
+            opset_version=18,
             dynamic_axes={
                 'query_points': {0: 'batch_size', 1: 'num_points'},
                 'sdf_values': {0: 'batch_size', 1: 'num_points'}
@@ -393,7 +393,7 @@ def export_deformation_network(output_path, hidden_dim=128):
             deform_path,
             input_names=['points', 'sdf_values'],
             output_names=['deformation'],
-            opset_version=14,
+            opset_version=18,
             dynamic_axes={
                 'points': {0: 'batch_size', 1: 'num_points'},
                 'sdf_values': {0: 'batch_size', 1: 'num_points'},
@@ -432,7 +432,7 @@ def export_weight_network(output_path, hidden_dim=64):
             weight_path,
             input_names=['cube_features'],
             output_names=['weights'],
-            opset_version=14,
+            opset_version=18,
             dynamic_axes={
                 'cube_features': {0: 'batch_size', 1: 'num_cubes'},
                 'weights': {0: 'batch_size', 1: 'num_cubes'}
@@ -525,6 +525,10 @@ def main():
         output_path = os.path.join(output_path, "flexicubes.onnx")
 
     output_dir = os.path.dirname(os.path.abspath(output_path)) or '.'
+
+    if output_dir and not os.path.exists(output_dir):
+        print(f"Creating output directory: {output_dir}")
+        os.makedirs(output_dir, exist_ok=True)
 
     ensure_dependencies()
     install_flexicubes()
