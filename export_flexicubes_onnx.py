@@ -466,6 +466,14 @@ def generate_tetrahedral_grid_tables(output_dir, resolution=64):
             check_table
         )
 
+        # Convert to numpy arrays if they are lists
+        if isinstance(tet_table, list):
+            tet_table = np.array(tet_table)
+        if isinstance(num_vd_table, list):
+            num_vd_table = np.array(num_vd_table)
+        if isinstance(check_table, list):
+            check_table = np.array(check_table)
+
         # Save tables as numpy files
         np.save(os.path.join(output_dir, "flexicubes_tet_table.npy"), tet_table)
         np.save(os.path.join(output_dir, "flexicubes_num_vd_table.npy"), num_vd_table)
