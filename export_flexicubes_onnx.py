@@ -521,7 +521,9 @@ def main():
     args = parse_args()
     output_path = args.output
 
-    if os.path.isdir(output_path):
+    # Check if output_path is intended as a directory (ends with separator or no extension)
+    _, ext = os.path.splitext(output_path)
+    if os.path.isdir(output_path) or not ext:
         output_path = os.path.join(output_path, "flexicubes.onnx")
 
     output_dir = os.path.dirname(os.path.abspath(output_path)) or '.'
