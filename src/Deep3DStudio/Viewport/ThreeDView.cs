@@ -350,7 +350,9 @@ namespace Deep3DStudio.Viewport
 
                 try
                 {
-                    int profileMask = GL.GetInteger(GetPName.ContextProfileMask);
+                    // OpenTK 4.8.2 does not expose ContextProfileMask on GetPName,
+                    // but the enum value still exists under All, so cast accordingly.
+                    int profileMask = GL.GetInteger((GetPName)All.ContextProfileMask);
                     var profile = (ContextProfileMask)profileMask;
 
                     _legacySupported = (profile & ContextProfileMask.ContextCompatibilityProfileBit) != 0 || profileMask == 0;
