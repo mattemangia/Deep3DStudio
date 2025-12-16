@@ -18,7 +18,10 @@ namespace Deep3DStudio.Configuration
         Poisson,
         GreedyMeshing,
         SurfaceNets,
-        Blocky
+        Blocky,
+        FlexiCubes,
+        TripoSF,
+        TripoSG
     }
 
     public enum CoordinateSystem

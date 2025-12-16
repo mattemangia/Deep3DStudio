@@ -162,8 +162,8 @@ namespace Deep3DStudio.Model.AIModels
 
         public static WorkflowPipeline FullPipeline => new()
         {
-            Name = "Full Pipeline (Images -> Rigged Mesh)",
-            Description = "Complete workflow from images to rigged 3D model",
+            Name = "Full Pipeline (Images -> Mesh)",
+            Description = "Complete workflow from images to a meshed 3D model",
             Steps = new List<WorkflowStep>
             {
                 WorkflowStep.LoadImages,
@@ -171,7 +171,8 @@ namespace Deep3DStudio.Model.AIModels
                 WorkflowStep.NeRFRefinement,
                 WorkflowStep.FlexiCubesExtraction,
                 WorkflowStep.MeshSmoothing,
-                WorkflowStep.UniRigAutoRig
+                WorkflowStep.MeshDecimation,
+                WorkflowStep.MarchingCubes
             }
         };
 
@@ -236,6 +237,7 @@ namespace Deep3DStudio.Model.AIModels
         {
             return new Dictionary<string, bool>
             {
+                { "Dust3r", File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "dust3r.onnx")) },
                 { "TripoSR", _tripoSR?.IsLoaded ?? false },
                 { "TripoSG", false }, // Not yet implemented
                 { "TripoSF", false },
@@ -491,11 +493,13 @@ namespace Deep3DStudio.Model.AIModels
                         msg => progressCallback?.Invoke(msg, 0));
 
                 case WorkflowStep.TripoSFRefinement:
-                    progressCallback?.Invoke("TripoSF refinement not yet implemented", 0);
+                    var tripoSfPath = GetAbsoluteModelPath(IniSettings.Instance.TripoSFModelPath);
+                    progressCallback?.Invoke($"TripoSF refinement (model: {tripoSfPath}) not yet implemented", 0);
                     return currentResult;
 
                 case WorkflowStep.FlexiCubesExtraction:
-                    progressCallback?.Invoke("FlexiCubes extraction not yet implemented", 0);
+                    var flexiPath = GetAbsoluteModelPath(IniSettings.Instance.FlexiCubesModelPath);
+                    progressCallback?.Invoke($"FlexiCubes extraction (model: {flexiPath}) not yet implemented", 0);
                     return currentResult;
 
                 case WorkflowStep.NeRFRefinement:
@@ -552,6 +556,8 @@ namespace Deep3DStudio.Model.AIModels
                 WorkflowStep.MergePointClouds => "Merging point clouds",
                 WorkflowStep.AlignPointClouds => "Aligning point clouds",
                 WorkflowStep.MarchingCubes => "Marching cubes mesh extraction",
+                WorkflowStep.MeshSmoothing => "Mesh smoothing",
+                WorkflowStep.MeshDecimation => "Mesh decimation",
                 WorkflowStep.UniRigAutoRig => "UniRig auto-rigging",
                 _ => step.ToString()
             };
@@ -709,7 +715,13 @@ namespace Deep3DStudio.Model.AIModels
                 _ = TripoSR; // Trigger lazy loading
             }
 
-            // Add other models as implemented
+            // Check for other exported ONNX models so we can surface availability in the UI
+            ModelStatusChanged?.Invoke("Dust3r", File.Exists(GetAbsoluteModelPath("dust3r.onnx")));
+            ModelStatusChanged?.Invoke("TripoSG", Directory.Exists(GetAbsoluteModelPath(settings.TripoSGModelPath)));
+            ModelStatusChanged?.Invoke("TripoSF", Directory.Exists(GetAbsoluteModelPath(settings.TripoSFModelPath)));
+            ModelStatusChanged?.Invoke("Wonder3D", Directory.Exists(GetAbsoluteModelPath(settings.Wonder3DModelPath)));
+            ModelStatusChanged?.Invoke("FlexiCubes", Directory.Exists(GetAbsoluteModelPath(settings.FlexiCubesModelPath)));
+            ModelStatusChanged?.Invoke("UniRig", Directory.Exists(GetAbsoluteModelPath(settings.UniRigModelPath)));
         }
 
         /// <summary>

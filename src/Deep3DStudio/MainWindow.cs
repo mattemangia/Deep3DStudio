@@ -711,7 +711,7 @@ namespace Deep3DStudio
             dust3rNerfFlexiItem.Activated += OnDust3rNeRFFlexiCubesWorkflow;
             workflowsMenu.Append(dust3rNerfFlexiItem);
 
-            var fullPipelineItem = new MenuItem("_Full Pipeline (with Rigging)");
+            var fullPipelineItem = new MenuItem("_Full Pipeline (Mesh Only)");
             fullPipelineItem.Activated += OnFullPipelineWorkflow;
             workflowsMenu.Append(fullPipelineItem);
 
@@ -1407,7 +1407,7 @@ namespace Deep3DStudio
             _workflowCombo.AppendText("Wonder3D (Multi-View)");
             _workflowCombo.AppendText("Dust3r + FlexiCubes");
             _workflowCombo.AppendText("Dust3r + NeRF + FlexiCubes");
-            _workflowCombo.AppendText("Full Pipeline (Rigged)");
+            _workflowCombo.AppendText("Full Pipeline (Mesh Only)");
             _workflowCombo.Active = 0;
             wfBox.PackStart(_workflowCombo, false, false, 0);
             wfItem.Add(wfBox);
@@ -1456,10 +1456,17 @@ namespace Deep3DStudio
                 return;
             }
 
-            _statusLabel.Text = "UniRig auto-rigging not yet implemented...";
+            var rigSetting = IniSettings.Instance.RiggingModel;
+            if (rigSetting != RiggingMethod.UniRig)
+            {
+                ShowMessage("Rigging disabled", "Select UniRig as the rigging model in AI Model Settings to enable rigging.");
+                return;
+            }
+
+            _statusLabel.Text = $"UniRig auto-rigging not yet implemented (model path: {IniSettings.Instance.UniRigModelPath})";
         }
 
-        private void OnAIRefine(object? sender, EventArgs e)
+        private async void OnAIRefine(object? sender, EventArgs e)
         {
             if (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0)
             {
@@ -1467,7 +1474,19 @@ namespace Deep3DStudio
                 return;
             }
 
-            _statusLabel.Text = "AI refinement not yet implemented...";
+            var refineSetting = IniSettings.Instance.MeshRefinement;
+            switch (refineSetting)
+            {
+                case MeshRefinementMethod.FlexiCubes:
+                    await RunAIMeshingAsync(MeshingAlgorithm.FlexiCubes, "Mesh Refinement (FlexiCubes)");
+                    break;
+                case MeshRefinementMethod.TripoSF:
+                    await RunAIMeshingAsync(MeshingAlgorithm.TripoSF, "Mesh Refinement (TripoSF)");
+                    break;
+                default:
+                    ShowMessage("No refinement method selected", "Please choose a mesh refinement model in Settings.");
+                    break;
+            }
         }
 
         private MeshData? GetSelectedMesh()
@@ -1592,7 +1611,7 @@ namespace Deep3DStudio
                 return;
             }
 
-            _statusLabel.Text = "Running full pipeline (reconstruction + rigging)...";
+            _statusLabel.Text = "Running full pipeline (reconstruction + meshing)...";
             RunAIWorkflowAsync(AIModels.WorkflowPipeline.FullPipeline);
         }
 
@@ -2854,14 +2873,18 @@ namespace Deep3DStudio
 
         private async Task<bool> RunPointCloudGeneration()
         {
-            if (_imagePaths.Count < 2)
+            var settings = IniSettings.Instance;
+            bool requiresMultiView = settings.ReconstructionMethod == ReconstructionMethod.Dust3r ||
+                                     settings.ReconstructionMethod == ReconstructionMethod.FeatureMatching;
+            int minImages = requiresMultiView ? 2 : 1;
+
+            if (_imagePaths.Count < minImages)
             {
-                ShowMessage("Please add at least 2 images.");
+                ShowMessage($"Please add at least {minImages} image{(minImages > 1 ? "s" : "")} for {settings.ReconstructionMethod}.");
                 return false;
             }
 
-            var settings = IniSettings.Instance;
-            _statusLabel.Text = $"Estimating Geometry on {settings.Device}...";
+            _statusLabel.Text = $"Estimating Geometry ({settings.ReconstructionMethod}) on {settings.Device}...";
 
             while (Application.EventsPending()) Application.RunIteration();
 
@@ -2869,48 +2892,71 @@ namespace Deep3DStudio
             {
                 SceneResult result = new SceneResult();
 
-                // Determine which reconstruction method to use
-                bool useDust3r = settings.ReconstructionMethod == ReconstructionMethod.Dust3r;
-                if (useDust3r && !_inference.IsLoaded)
+                switch (settings.ReconstructionMethod)
                 {
-                    Console.WriteLine("Dust3r model not found, falling back to Feature Matching SfM.");
-                    useDust3r = false;
-                }
-
-                if (useDust3r)
-                {
-                    _statusLabel.Text = "Estimating Geometry (Dust3r)...";
-                    result = await Task.Run(() => _inference.ReconstructScene(_imagePaths));
-                }
-                else
-                {
-                    _statusLabel.Text = "Estimating Geometry (Feature Matching SfM)...";
-                    var sfm = new Deep3DStudio.Model.SfM.SfMInference();
-                    result = await Task.Run(() => sfm.ReconstructScene(_imagePaths));
-
-                    // Densify the sparse SfM point cloud
-                    if (result.Meshes.Count > 0)
-                    {
-                        var sparseMesh = result.Meshes[0];
-                        Console.WriteLine($"Sparse SfM cloud: {sparseMesh.Vertices.Count} points, {sparseMesh.Colors.Count} colors");
-
-                        _statusLabel.Text = "Densifying Point Cloud...";
-                        while (Application.EventsPending()) Application.RunIteration();
-
-                        var denseMesh = await Task.Run(() => GenerateDensePointCloud(result));
-
-                        // Replace sparse with dense if we got significantly more points
-                        if (denseMesh.Vertices.Count > sparseMesh.Vertices.Count * 1.5)
+                    case ReconstructionMethod.Dust3r:
+                        if (!_inference.IsLoaded)
                         {
-                            Console.WriteLine($"Densification: Using dense cloud ({denseMesh.Vertices.Count} pts) over sparse ({sparseMesh.Vertices.Count} pts)");
-                            result.Meshes.Clear();
-                            result.Meshes.Add(denseMesh);
+                            Console.WriteLine("Dust3r model not found, falling back to Feature Matching SfM.");
+                            goto case ReconstructionMethod.FeatureMatching;
                         }
-                        else
+                        _statusLabel.Text = "Estimating Geometry (Dust3r)...";
+                        result = await Task.Run(() => _inference.ReconstructScene(_imagePaths));
+                        break;
+
+                    case ReconstructionMethod.FeatureMatching:
+                        _statusLabel.Text = "Estimating Geometry (Feature Matching SfM)...";
+                        var sfm = new Deep3DStudio.Model.SfM.SfMInference();
+                        result = await Task.Run(() => sfm.ReconstructScene(_imagePaths));
+
+                        // Densify the sparse SfM point cloud
+                        if (result.Meshes.Count > 0)
                         {
-                            Console.WriteLine($"Densification: Keeping sparse cloud ({sparseMesh.Vertices.Count} pts) - dense only has {denseMesh.Vertices.Count} pts");
+                            var sparseMesh = result.Meshes[0];
+                            Console.WriteLine($"Sparse SfM cloud: {sparseMesh.Vertices.Count} points, {sparseMesh.Colors.Count} colors");
+
+                            _statusLabel.Text = "Densifying Point Cloud...";
+                            while (Application.EventsPending()) Application.RunIteration();
+
+                            var denseMesh = await Task.Run(() => GenerateDensePointCloud(result));
+
+                            // Replace sparse with dense if we got significantly more points
+                            if (denseMesh.Vertices.Count > sparseMesh.Vertices.Count * 1.5)
+                            {
+                                Console.WriteLine($"Densification: Using dense cloud ({denseMesh.Vertices.Count} pts) over sparse ({sparseMesh.Vertices.Count} pts)");
+                                result.Meshes.Clear();
+                                result.Meshes.Add(denseMesh);
+                            }
+                            else
+                            {
+                                Console.WriteLine($"Densification: Keeping sparse cloud ({sparseMesh.Vertices.Count} pts) - dense only has {denseMesh.Vertices.Count} pts");
+                            }
                         }
-                    }
+                        break;
+
+                    case ReconstructionMethod.TripoSR:
+                        _statusLabel.Text = "Estimating Geometry (TripoSR)...";
+                        var tripoResult = await AIModels.AIModelManager.Instance.GenerateFromSingleImageAsync(
+                            _imagePaths[0],
+                            ImageTo3DModel.TripoSR,
+                            msg => Application.Invoke((s, e) => _statusLabel.Text = msg));
+                        if (tripoResult != null)
+                        {
+                            result = tripoResult;
+                        }
+                        break;
+
+                    case ReconstructionMethod.Wonder3D:
+                        _statusLabel.Text = "Estimating Geometry (Wonder3D)...";
+                        var wonderResult = await AIModels.AIModelManager.Instance.GenerateFromSingleImageAsync(
+                            _imagePaths[0],
+                            ImageTo3DModel.Wonder3D,
+                            msg => Application.Invoke((s, e) => _statusLabel.Text = msg));
+                        if (wonderResult != null)
+                        {
+                            result = wonderResult;
+                        }
+                        break;
                 }
 
                 if (result.Meshes.Count == 0)
@@ -2977,6 +3023,26 @@ namespace Deep3DStudio
 
             try
             {
+                var meshingAlgo = IniSettings.Instance.MeshingAlgo;
+                if ((meshingAlgo == MeshingAlgorithm.FlexiCubes || meshingAlgo == MeshingAlgorithm.TripoSF) &&
+                    (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0))
+                {
+                    ShowMessage("No point cloud data available. Please generate a point cloud first or import data.");
+                    return;
+                }
+
+                if (meshingAlgo == MeshingAlgorithm.FlexiCubes ||
+                    meshingAlgo == MeshingAlgorithm.TripoSF ||
+                    meshingAlgo == MeshingAlgorithm.TripoSG)
+                {
+                    bool aiMeshSuccess = await RunAIMeshingAsync(meshingAlgo, "AI Meshing");
+                    if (!aiMeshSuccess)
+                    {
+                        _statusLabel.Text = "AI meshing did not return a result.";
+                    }
+                    return;
+                }
+
                 // Remove reconstruction meshes generated by previous runs to avoid clutter while keeping imported assets.
                 // For simplicity, operations below use the data stored in _lastSceneResult.
 
@@ -3062,6 +3128,59 @@ namespace Deep3DStudio
             }
         }
 
+        private async Task<bool> RunAIMeshingAsync(MeshingAlgorithm algorithm, string? contextLabel = null)
+        {
+            var manager = AIModels.AIModelManager.Instance;
+            AIModels.WorkflowPipeline pipeline;
+
+            switch (algorithm)
+            {
+                case MeshingAlgorithm.FlexiCubes:
+                    pipeline = new AIModels.WorkflowPipeline
+                    {
+                        Name = "FlexiCubes Mesh Extraction",
+                        Steps = new List<AIModels.WorkflowStep> { AIModels.WorkflowStep.FlexiCubesExtraction }
+                    };
+                    break;
+                case MeshingAlgorithm.TripoSF:
+                    pipeline = new AIModels.WorkflowPipeline
+                    {
+                        Name = "TripoSF Mesh Refinement",
+                        Steps = new List<AIModels.WorkflowStep> { AIModels.WorkflowStep.TripoSFRefinement }
+                    };
+                    break;
+                case MeshingAlgorithm.TripoSG:
+                    pipeline = AIModels.WorkflowPipeline.ImageToTripoSG;
+                    break;
+                default:
+                    return false;
+            }
+
+            string label = contextLabel ?? pipeline.Name;
+            _statusLabel.Text = $"{label}...";
+
+            var result = await manager.ExecuteWorkflowAsync(
+                pipeline,
+                _imagePaths,
+                _lastSceneResult,
+                (message, _) => Application.Invoke((s, e) => _statusLabel.Text = message)
+            );
+
+            if (result != null)
+            {
+                Application.Invoke((s, e) =>
+                {
+                    _lastSceneResult = result;
+                    UpdateSceneFromResult(result);
+                    _sceneTreeView.RefreshTree();
+                    _viewport.QueueDraw();
+                });
+                return true;
+            }
+
+            return false;
+        }
+
         private void AddCamerasToScene(SceneResult result)
         {
             var camerasGroup = new GroupObject("Cameras");
@@ -3123,6 +3242,11 @@ namespace Deep3DStudio
                 case MeshingAlgorithm.GreedyMeshing: return new GreedyMesher();
                 case MeshingAlgorithm.SurfaceNets: return new SurfaceNetsMesher();
                 case MeshingAlgorithm.Blocky: return new BlockMesher();
+                case MeshingAlgorithm.FlexiCubes:
+                case MeshingAlgorithm.TripoSF:
+                case MeshingAlgorithm.TripoSG:
+                    Console.WriteLine($"Meshing algorithm {algo} is AI-driven; falling back to MarchingCubes for geometry extraction.");
+                    return new MarchingCubesMesher();
                 case MeshingAlgorithm.MarchingCubes: default: return new MarchingCubesMesher();
             }
         }
