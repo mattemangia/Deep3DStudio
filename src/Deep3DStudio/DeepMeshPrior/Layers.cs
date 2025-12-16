@@ -14,7 +14,7 @@ namespace Deep3DStudio.DeepMeshPrior
             // Linear transformation: X * W
             // Bias is handled by Linear by default
             _linear = nn.Linear(inChannels, outChannels);
-            RegisterModule("linear", _linear);
+            register_module("linear", _linear);
         }
 
         /// <summary>
@@ -36,10 +36,12 @@ namespace Deep3DStudio.DeepMeshPrior
             long numNodes = x.size(0);
 
             // Create sparse adjacency matrix
-            var adj = torch.sparse_coo_tensor(edgeIndex, edgeWeight, new long[] { numNodes, numNodes }, dtype: ScalarType.Float32, device: x.device);
+            // TorchSharp 0.102 syntax might be different for sparse_coo_tensor with dtype
+            // It often infers from values tensor.
+            var adj = torch.sparse_coo_tensor(edgeIndex, edgeWeight, new long[] { numNodes, numNodes }, device: x.device, dtype: x.dtype);
 
             // Sparse MM
-            var outTensor = torch.sparse.mm(adj, xTransformed);
+            var outTensor = torch.matmul(adj, xTransformed);
 
             return outTensor;
         }

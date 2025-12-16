@@ -47,7 +47,7 @@ namespace Deep3DStudio.DeepMeshPrior
                 AddLayer(h[12] + h[1], h[13]); // 12+1 -> 13
 
                 _finalLinear = nn.Linear(h[13], h[14]);
-                RegisterModule("final_linear", _finalLinear);
+                register_module("final_linear", _finalLinear);
             }
             else
             {
@@ -58,7 +58,7 @@ namespace Deep3DStudio.DeepMeshPrior
                 }
 
                 _finalLinear = nn.Linear(h[h.Length-2], h[h.Length-1]); // 16 -> 3
-                RegisterModule("final_linear1", _finalLinear);
+                register_module("final_linear1", _finalLinear);
                 // Python code has two linear layers at the end for normal net: linear1(dx), relu, linear2(dx)
                 // Wait, python code:
                 // self.linear1 = nn.Linear(h[13], h[14]) -> 32 -> 16
@@ -71,11 +71,11 @@ namespace Deep3DStudio.DeepMeshPrior
                 // linear2: h[14]->h[15] (16->3)
 
                 _finalLinear2 = nn.Linear(h[14], h[15]);
-                RegisterModule("final_linear2", _finalLinear2);
+                register_module("final_linear2", _finalLinear2);
             }
 
             _activation = nn.LeakyReLU();
-            RegisterModule("activation", _activation);
+            register_module("activation", _activation);
         }
 
         private void AddLayer(long inCh, long outCh)
@@ -86,8 +86,8 @@ namespace Deep3DStudio.DeepMeshPrior
             _convs.Add(conv);
             _bns.Add(bn);
 
-            RegisterModule($"conv_{_convs.Count}", conv);
-            RegisterModule($"bn_{_bns.Count}", bn);
+            register_module($"conv_{_convs.Count}", conv);
+            register_module($"bn_{_bns.Count}", bn);
         }
 
         public override Tensor forward(Tensor x, Tensor edgeIndex, Tensor edgeWeight)

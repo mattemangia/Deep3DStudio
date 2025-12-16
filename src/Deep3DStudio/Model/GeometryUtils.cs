@@ -11,6 +11,7 @@ namespace Deep3DStudio.Model
     public class MeshData
     {
         public List<Vector3> Vertices { get; set; } = new List<Vector3>();
+        public List<Vector3> Normals { get; set; } = new List<Vector3>();
         public List<Vector3> Colors { get; set; } = new List<Vector3>();
         public List<Vector2> UVs { get; set; } = new List<Vector2>();
         public List<int> Indices { get; set; } = new List<int>();
@@ -37,6 +38,7 @@ namespace Deep3DStudio.Model
         {
             var clone = new MeshData();
             clone.Vertices = new List<Vector3>(Vertices);
+            clone.Normals = new List<Vector3>(Normals);
             clone.Colors = new List<Vector3>(Colors);
             clone.UVs = new List<Vector2>(UVs);
             clone.Indices = new List<int>(Indices);
@@ -49,9 +51,50 @@ namespace Deep3DStudio.Model
 
         public void RecalculateNormals()
         {
-            // Simple placeholder for normal recalculation if needed
-            // MeshData doesn't store normals explicitly in this class definition,
-            // but if it did or if this is for rendering updates, logic would go here.
+            Normals.Clear();
+            if (Vertices.Count == 0) return;
+
+            // Initialize normals with zero vectors
+            for (int i = 0; i < Vertices.Count; i++)
+            {
+                Normals.Add(Vector3.Zero);
+            }
+
+            // Accumulate face normals
+            for (int i = 0; i < Indices.Count; i += 3)
+            {
+                int i1 = Indices[i];
+                int i2 = Indices[i + 1];
+                int i3 = Indices[i + 2];
+
+                if (i1 >= Vertices.Count || i2 >= Vertices.Count || i3 >= Vertices.Count) continue;
+
+                Vector3 v1 = Vertices[i1];
+                Vector3 v2 = Vertices[i2];
+                Vector3 v3 = Vertices[i3];
+
+                Vector3 edge1 = v2 - v1;
+                Vector3 edge2 = v3 - v1;
+                Vector3 normal = Vector3.Cross(edge1, edge2);
+
+                // Add weighted by area (cross product magnitude)
+                Normals[i1] += normal;
+                Normals[i2] += normal;
+                Normals[i3] += normal;
+            }
+
+            // Normalize
+            for (int i = 0; i < Normals.Count; i++)
+            {
+                if (Normals[i].LengthSquared > 1e-6f)
+                {
+                    Normals[i] = Normals[i].Normalized();
+                }
+                else
+                {
+                    Normals[i] = Vector3.UnitY; // Default up
+                }
+            }
         }
     }
 

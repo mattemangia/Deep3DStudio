@@ -123,7 +123,7 @@ namespace Deep3DStudio.Model.AIModels
     }
 
     /// <summary>
-    /// Interface for mesh refinement models (TripoSF, FlexiCubes).
+    /// Interface for mesh refinement models (TripoSF, DeepMeshPrior).
     /// </summary>
     public interface IMeshRefinementModel : IAIModelInference
     {
