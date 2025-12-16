@@ -520,6 +520,16 @@ namespace Deep3DStudio.Scene
             Root = new GroupObject("Scene");
         }
 
+        public IReadOnlyList<SceneObject> GetSelectedObjects()
+        {
+            return SelectedObjects;
+        }
+
+        public List<SceneObject> GetAllObjects()
+        {
+            return GetObjectsRecursive(Root).ToList();
+        }
+
         public void AddObject(SceneObject obj, SceneObject? parent = null)
         {
             var targetParent = parent ?? Root;
