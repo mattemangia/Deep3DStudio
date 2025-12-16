@@ -1,0 +1,244 @@
+================================================================================
+                         TripoSR ONNX Model Specification
+================================================================================
+
+Model: TripoSR (Tripo AI + Stability AI)
+Repository: https://github.com/VAST-AI-Research/TripoSR
+License: MIT
+Task: Fast Single-Image to 3D Reconstruction
+
+================================================================================
+                                  OVERVIEW
+================================================================================
+
+TripoSR is a state-of-the-art feedforward 3D reconstruction model based on the
+Large Reconstruction Model (LRM) architecture. It generates high-quality 3D
+meshes from single images in under 0.5 seconds on an NVIDIA A100 GPU.
+
+The model uses a triplane representation for efficient 3D modeling, combining:
+1. DINOv2 image encoder for robust visual features
+2. Transformer-based tokenizer for triplane generation
+3. NeRF-style decoder for density/color queries
+
+================================================================================
+                               ONNX COMPONENTS
+================================================================================
+
+The export produces the following ONNX file:
+
+triposr_backbone.onnx
+---------------------
+Purpose: Image to triplane token generation (main inference path)
+
+INPUTS:
+  Name: image
+  Shape: (batch_size, 3, height, width)
+  Type: float32
+  Description: RGB image normalized to [0, 1] range
+  Preprocessing:
+    - Resize to 256x256 (or configured resolution)
+    - Normalize: pixel / 255.0
+    - Channel order: RGB (not BGR)
+    - Background removal recommended (use rembg or similar)
+
+OUTPUTS:
+  Name: triplane_tokens
+  Shape: (batch_size, num_tokens, hidden_dim)
+  Type: float32
+  Description: Triplane latent tokens
+  Typical shape: (1, 1024, 1024) for default config
+
+================================================================================
+                            MODEL PARAMETERS
+================================================================================
+
+Default Configuration:
+  - Input resolution: 256x256
+  - Image encoder: DINOv2-base
+  - Hidden dimension: 1024
+  - Number of triplane tokens: 1024
+  - Triplane resolution: 64x64x3 (three planes)
+
+Memory Requirements:
+  - Model size: ~1.2 GB (float32)
+  - Inference VRAM: ~4 GB for single image
+  - Recommended: GPU with 6+ GB VRAM
+
+================================================================================
+                              C# USAGE EXAMPLE
+================================================================================
+
+using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
+
+public class TripoSRInference : IDisposable
+{
+    private InferenceSession _session;
+    private const int INPUT_SIZE = 256;
+
+    public TripoSRInference(string modelPath)
+    {
+        var options = new SessionOptions();
+
+        // Try GPU providers
+        try
+        {
+            options.AppendExecutionProvider_CUDA(0);
+        }
+        catch
+        {
+            try
+            {
+                options.AppendExecutionProvider_DML(0);
+            }
+            catch
+            {
+                // Fall back to CPU
+            }
+        }
+
+        _session = new InferenceSession(modelPath, options);
+    }
+
+    /// <summary>
+    /// Preprocess image for TripoSR input.
+    /// </summary>
+    public DenseTensor<float> PreprocessImage(byte[] imageData, int width, int height)
+    {
+        var tensor = new DenseTensor<float>(new[] { 1, 3, INPUT_SIZE, INPUT_SIZE });
+
+        // Resize image to INPUT_SIZE x INPUT_SIZE
+        // Assuming imageData is already resized RGBA
+
+        for (int y = 0; y < INPUT_SIZE; y++)
+        {
+            for (int x = 0; x < INPUT_SIZE; x++)
+            {
+                int idx = (y * INPUT_SIZE + x) * 4; // RGBA
+
+                // Normalize to [0, 1]
+                tensor[0, 0, y, x] = imageData[idx] / 255.0f;     // R
+                tensor[0, 1, y, x] = imageData[idx + 1] / 255.0f; // G
+                tensor[0, 2, y, x] = imageData[idx + 2] / 255.0f; // B
+            }
+        }
+
+        return tensor;
+    }
+
+    /// <summary>
+    /// Run inference to get triplane tokens.
+    /// </summary>
+    public float[] GetTriplaneTokens(DenseTensor<float> imageTensor)
+    {
+        var inputs = new List<NamedOnnxValue>
+        {
+            NamedOnnxValue.CreateFromTensor("image", imageTensor)
+        };
+
+        using var results = _session.Run(inputs);
+
+        var output = results.First().AsTensor<float>();
+        return output.ToArray();
+    }
+
+    /// <summary>
+    /// Query 3D points from triplane (if decoder exported separately).
+    /// For mesh generation, use marching cubes on the density field.
+    /// </summary>
+    public (float[] density, float[] color) QueryPoints(
+        float[] triplaneTokens,
+        float[,] queryPoints)
+    {
+        // Implementation depends on decoder export
+        // Typically query a grid of points and run marching cubes
+        throw new NotImplementedException(
+            "Point querying requires triplane decoder. " +
+            "Use marching cubes for mesh extraction.");
+    }
+
+    public void Dispose()
+    {
+        _session?.Dispose();
+    }
+}
+
+================================================================================
+                           MESH EXTRACTION IN C#
+================================================================================
+
+Since marching cubes cannot be exported to ONNX, mesh extraction must be
+implemented in C#. Here's the recommended approach:
+
+1. Run the backbone to get triplane tokens
+2. Convert tokens to triplane grid (3 x H x W x D feature grids)
+3. Query density at regular grid points (e.g., 128^3 or 256^3)
+4. Run marching cubes to extract mesh
+5. Query colors at mesh vertex positions
+
+Example Grid Query:
+-------------------
+// Create query grid
+int resolution = 128;
+var points = new float[resolution * resolution * resolution, 3];
+for (int z = 0; z < resolution; z++)
+    for (int y = 0; y < resolution; y++)
+        for (int x = 0; x < resolution; x++)
+        {
+            int idx = z * resolution * resolution + y * resolution + x;
+            points[idx, 0] = (x / (float)(resolution - 1)) * 2 - 1; // [-1, 1]
+            points[idx, 1] = (y / (float)(resolution - 1)) * 2 - 1;
+            points[idx, 2] = (z / (float)(resolution - 1)) * 2 - 1;
+        }
+
+================================================================================
+                             PREPROCESSING NOTES
+================================================================================
+
+Background Removal:
+  - TripoSR expects objects on clean backgrounds
+  - Use rembg or similar for background removal
+  - Replace background with white or neutral color
+
+Image Composition:
+  - Object should be centered
+  - Object should occupy ~80% of image height
+  - Avoid cropped objects
+
+Color Space:
+  - Input: RGB (not BGR)
+  - Range: [0, 1] (normalized from 0-255)
+  - No additional normalization (mean/std) required
+
+================================================================================
+                              ERROR HANDLING
+================================================================================
+
+Common issues and solutions:
+
+1. "Model file not found"
+   - Ensure both .onnx and .onnx.data files are in same directory
+
+2. "Out of memory"
+   - Reduce batch size to 1
+   - Use CPU inference for very large images
+   - Reduce input resolution
+
+3. "Invalid input shape"
+   - Ensure image is exactly 256x256 (or configured resolution)
+   - Check channel order is CHW not HWC
+
+4. "NaN in output"
+   - Check input normalization
+   - Verify image is not all zeros
+
+================================================================================
+                              VERSION INFO
+================================================================================
+
+Export Script Version: 1.0
+ONNX Opset: 14
+PyTorch Version: 2.0+
+Tested ONNX Runtime: 1.17.1
+
+================================================================================

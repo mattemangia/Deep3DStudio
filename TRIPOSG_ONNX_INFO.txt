@@ -1,0 +1,411 @@
+================================================================================
+                         TripoSG ONNX Model Specification
+================================================================================
+
+Model: TripoSG (VAST-AI-Research)
+Repository: https://github.com/VAST-AI-Research/TripoSG
+License: MIT
+Task: Image-to-3D Generation with Rectified Flow Transformer
+
+================================================================================
+                                  OVERVIEW
+================================================================================
+
+TripoSG is a state-of-the-art image-to-3D foundation model with 1.5 billion
+parameters. It generates high-fidelity 3D meshes with sharp geometric features,
+fine surface details, and complex structures using:
+
+1. DINOv2 image encoder for robust visual feature extraction
+2. Rectified Flow Transformer for latent generation via flow matching
+3. SDF-based VAE for high-quality 3D shape representation
+4. Trained on 2M curated Image-SDF pairs
+
+Key Features:
+- High-fidelity mesh generation with sharp features
+- Handles complex topologies and thin structures
+- 2048 latent tokens for detailed representation
+- SDF-based output for clean mesh extraction
+
+================================================================================
+                               ONNX COMPONENTS
+================================================================================
+
+The export produces three ONNX files:
+
+1. triposg_image_encoder.onnx
+-----------------------------
+Purpose: Extract visual features from input image
+
+INPUTS:
+  Name: image
+  Shape: (batch_size, 3, 518, 518)
+  Type: float32
+  Description: RGB image normalized to ImageNet statistics
+  Preprocessing:
+    - Resize to 518x518 (DINOv2 resolution)
+    - Normalize: (pixel / 255.0 - mean) / std
+    - Mean: [0.485, 0.456, 0.406]
+    - Std: [0.229, 0.224, 0.225]
+
+OUTPUTS:
+  Name: image_features
+  Shape: (batch_size, 1370, 1024)
+  Type: float32
+  Description: DINOv2 patch tokens (37x37 patches + CLS token)
+
+
+2. triposg_flow_transformer.onnx
+--------------------------------
+Purpose: Generate latent tokens from image features via flow matching
+
+INPUTS:
+  Name: image_features
+  Shape: (batch_size, 1370, 1024)
+  Type: float32
+  Description: Image features from encoder
+
+  Name: timestep
+  Shape: (batch_size,)
+  Type: float32
+  Description: Flow timestep in range [0, 1]
+
+  Name: noisy_latent
+  Shape: (batch_size, 2048, 64)
+  Type: float32
+  Description: Noisy latent tokens for denoising
+
+OUTPUTS:
+  Name: velocity
+  Shape: (batch_size, 2048, 64)
+  Type: float32
+  Description: Predicted velocity for ODE integration
+
+
+3. triposg_vae_decoder.onnx
+---------------------------
+Purpose: Decode latent tokens to SDF values at query points
+
+INPUTS:
+  Name: latent_tokens
+  Shape: (batch_size, 2048, 64)
+  Type: float32
+  Description: Clean latent tokens from flow transformer
+
+  Name: query_points
+  Shape: (batch_size, num_points, 3)
+  Type: float32
+  Description: 3D query points in [-1, 1] normalized space
+
+OUTPUTS:
+  Name: sdf_values
+  Shape: (batch_size, num_points, 1)
+  Type: float32
+  Description: Signed distance values (negative = inside, positive = outside)
+
+================================================================================
+                            MODEL PARAMETERS
+================================================================================
+
+Architecture:
+  - Image encoder: DINOv2-Large (518x518 input)
+  - Flow transformer: 1.5B parameters, rectified flow
+  - VAE: SDF-based with hybrid supervision
+  - Latent tokens: 2048 tokens x 64 dimensions
+
+Memory Requirements:
+  - Model size: ~6 GB (float32)
+  - Inference VRAM: ~8 GB minimum
+  - Recommended: GPU with 12+ GB VRAM
+
+Inference Configuration:
+  - Flow steps: 25-50 for quality (more = better but slower)
+  - Query resolution: 128^3 to 256^3 for mesh extraction
+  - ISO-surface threshold: 0.0 (SDF zero-crossing)
+
+================================================================================
+                              C# USAGE EXAMPLE
+================================================================================
+
+using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
+
+public class TripoSGInference : IDisposable
+{
+    private InferenceSession _encoderSession;
+    private InferenceSession _transformerSession;
+    private InferenceSession _decoderSession;
+
+    private const int IMAGE_SIZE = 518;
+    private const int NUM_LATENT_TOKENS = 2048;
+    private const int LATENT_DIM = 64;
+    private const int NUM_FLOW_STEPS = 25;
+
+    // ImageNet normalization
+    private static readonly float[] MEAN = { 0.485f, 0.456f, 0.406f };
+    private static readonly float[] STD = { 0.229f, 0.224f, 0.225f };
+
+    public TripoSGInference(string modelDir)
+    {
+        var options = new SessionOptions();
+        try { options.AppendExecutionProvider_CUDA(0); } catch { }
+
+        _encoderSession = new InferenceSession(
+            Path.Combine(modelDir, "triposg_image_encoder.onnx"), options);
+        _transformerSession = new InferenceSession(
+            Path.Combine(modelDir, "triposg_flow_transformer.onnx"), options);
+        _decoderSession = new InferenceSession(
+            Path.Combine(modelDir, "triposg_vae_decoder.onnx"), options);
+    }
+
+    /// <summary>
+    /// Full pipeline: Image -> 3D SDF grid
+    /// </summary>
+    public float[,,] ImageToSDF(byte[] imageData, int resolution = 128)
+    {
+        // 1. Encode image
+        var imageTensor = PreprocessImage(imageData);
+        var imageFeatures = EncodeImage(imageTensor);
+
+        // 2. Generate latent via flow
+        var latentTokens = RunFlowMatching(imageFeatures);
+
+        // 3. Query SDF grid
+        var sdfGrid = QuerySDFGrid(latentTokens, resolution);
+
+        return sdfGrid;
+    }
+
+    private DenseTensor<float> PreprocessImage(byte[] imageData)
+    {
+        var tensor = new DenseTensor<float>(new[] { 1, 3, IMAGE_SIZE, IMAGE_SIZE });
+
+        for (int y = 0; y < IMAGE_SIZE; y++)
+        {
+            for (int x = 0; x < IMAGE_SIZE; x++)
+            {
+                int idx = (y * IMAGE_SIZE + x) * 4;
+
+                // Normalize with ImageNet stats
+                tensor[0, 0, y, x] = (imageData[idx] / 255.0f - MEAN[0]) / STD[0];
+                tensor[0, 1, y, x] = (imageData[idx + 1] / 255.0f - MEAN[1]) / STD[1];
+                tensor[0, 2, y, x] = (imageData[idx + 2] / 255.0f - MEAN[2]) / STD[2];
+            }
+        }
+
+        return tensor;
+    }
+
+    private float[] EncodeImage(DenseTensor<float> imageTensor)
+    {
+        var inputs = new List<NamedOnnxValue>
+        {
+            NamedOnnxValue.CreateFromTensor("image", imageTensor)
+        };
+
+        using var results = _encoderSession.Run(inputs);
+        return results.First().AsTensor<float>().ToArray();
+    }
+
+    private float[] RunFlowMatching(float[] imageFeatures)
+    {
+        // Initialize from noise
+        var random = new Random(42);
+        var latent = new float[NUM_LATENT_TOKENS * LATENT_DIM];
+        for (int i = 0; i < latent.Length; i++)
+        {
+            // Standard normal initialization
+            double u1 = 1.0 - random.NextDouble();
+            double u2 = 1.0 - random.NextDouble();
+            latent[i] = (float)(Math.Sqrt(-2.0 * Math.Log(u1)) *
+                                Math.Sin(2.0 * Math.PI * u2));
+        }
+
+        // ODE integration with Euler method
+        float dt = 1.0f / NUM_FLOW_STEPS;
+
+        for (int step = 0; step < NUM_FLOW_STEPS; step++)
+        {
+            float t = step * dt;
+
+            var inputs = new List<NamedOnnxValue>
+            {
+                NamedOnnxValue.CreateFromTensor("image_features",
+                    new DenseTensor<float>(imageFeatures, new[] { 1, 1370, 1024 })),
+                NamedOnnxValue.CreateFromTensor("timestep",
+                    new DenseTensor<float>(new[] { t }, new[] { 1 })),
+                NamedOnnxValue.CreateFromTensor("noisy_latent",
+                    new DenseTensor<float>(latent, new[] { 1, NUM_LATENT_TOKENS, LATENT_DIM }))
+            };
+
+            using var results = _transformerSession.Run(inputs);
+            var velocity = results.First().AsTensor<float>().ToArray();
+
+            // Euler step: x = x + dt * v
+            for (int i = 0; i < latent.Length; i++)
+            {
+                latent[i] += dt * velocity[i];
+            }
+        }
+
+        return latent;
+    }
+
+    private float[,,] QuerySDFGrid(float[] latentTokens, int resolution)
+    {
+        var sdfGrid = new float[resolution, resolution, resolution];
+        int batchSize = 10000; // Query in batches
+
+        var points = new List<float[]>();
+        var indices = new List<(int, int, int)>();
+
+        // Generate query points
+        for (int z = 0; z < resolution; z++)
+        {
+            for (int y = 0; y < resolution; y++)
+            {
+                for (int x = 0; x < resolution; x++)
+                {
+                    float px = (x / (float)(resolution - 1)) * 2 - 1;
+                    float py = (y / (float)(resolution - 1)) * 2 - 1;
+                    float pz = (z / (float)(resolution - 1)) * 2 - 1;
+                    points.Add(new[] { px, py, pz });
+                    indices.Add((x, y, z));
+                }
+            }
+        }
+
+        // Process in batches
+        for (int i = 0; i < points.Count; i += batchSize)
+        {
+            int count = Math.Min(batchSize, points.Count - i);
+            var batchPoints = new float[count * 3];
+
+            for (int j = 0; j < count; j++)
+            {
+                batchPoints[j * 3] = points[i + j][0];
+                batchPoints[j * 3 + 1] = points[i + j][1];
+                batchPoints[j * 3 + 2] = points[i + j][2];
+            }
+
+            var inputs = new List<NamedOnnxValue>
+            {
+                NamedOnnxValue.CreateFromTensor("latent_tokens",
+                    new DenseTensor<float>(latentTokens,
+                        new[] { 1, NUM_LATENT_TOKENS, LATENT_DIM })),
+                NamedOnnxValue.CreateFromTensor("query_points",
+                    new DenseTensor<float>(batchPoints, new[] { 1, count, 3 }))
+            };
+
+            using var results = _decoderSession.Run(inputs);
+            var sdfValues = results.First().AsTensor<float>().ToArray();
+
+            for (int j = 0; j < count; j++)
+            {
+                var (x, y, z) = indices[i + j];
+                sdfGrid[x, y, z] = sdfValues[j];
+            }
+        }
+
+        return sdfGrid;
+    }
+
+    public void Dispose()
+    {
+        _encoderSession?.Dispose();
+        _transformerSession?.Dispose();
+        _decoderSession?.Dispose();
+    }
+}
+
+================================================================================
+                           MESH EXTRACTION IN C#
+================================================================================
+
+After obtaining the SDF grid, use Marching Cubes to extract the mesh:
+
+public static (Vector3[] vertices, int[] triangles) MarchingCubes(
+    float[,,] sdfGrid,
+    float isoLevel = 0.0f)
+{
+    int resolution = sdfGrid.GetLength(0);
+    var vertices = new List<Vector3>();
+    var triangles = new List<int>();
+
+    // Standard Marching Cubes implementation
+    // Use existing MarchingCubesMesher from Deep3DStudio
+
+    // Scale vertices from [-1,1] to model space
+    float scale = 2.0f / (resolution - 1);
+
+    foreach (ref var v in CollectionsMarshal.AsSpan(vertices))
+    {
+        v = v * scale - Vector3.One;
+    }
+
+    return (vertices.ToArray(), triangles.ToArray());
+}
+
+================================================================================
+                             PREPROCESSING NOTES
+================================================================================
+
+Background Removal:
+  - Use RMBG-1.4 (included in TripoSG pipeline) or rembg
+  - Replace background with white (255, 255, 255)
+
+Image Requirements:
+  - Object centered in frame
+  - Good lighting without harsh shadows
+  - Clean edges for best results
+
+ImageNet Normalization (CRITICAL):
+  - Mean: [0.485, 0.456, 0.406]
+  - Std: [0.229, 0.224, 0.225]
+  - Apply AFTER converting to [0, 1] range
+
+================================================================================
+                              FLOW MATCHING NOTES
+================================================================================
+
+Rectified Flow:
+  - Linear interpolation from noise to data
+  - ODE: dx/dt = v(x, t)
+  - Integration: x(1) = x(0) + integral[v(x(t), t)]dt
+
+Recommended Settings:
+  - Euler solver: 25-50 steps
+  - Heun solver (2nd order): 12-25 steps
+  - Adaptive: best quality, variable steps
+
+For C# Heun solver:
+    k1 = v(x, t)
+    k2 = v(x + dt*k1, t + dt)
+    x_next = x + dt * (k1 + k2) / 2
+
+================================================================================
+                              ERROR HANDLING
+================================================================================
+
+1. "CUDA out of memory"
+   - Reduce query batch size
+   - Use lower resolution grid (64^3 instead of 128^3)
+   - Export with fp16 if supported
+
+2. "NaN in SDF values"
+   - Check ImageNet normalization is applied
+   - Verify latent tokens are finite after flow
+
+3. "Invalid mesh from marching cubes"
+   - Check ISO-level (should be 0.0 for SDF)
+   - Verify grid bounds cover the object
+
+================================================================================
+                              VERSION INFO
+================================================================================
+
+Export Script Version: 1.0
+ONNX Opset: 14
+Model Version: TripoSG (2024)
+Tested ONNX Runtime: 1.17.1
+
+================================================================================
