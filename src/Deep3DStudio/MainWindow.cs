@@ -639,6 +639,101 @@ namespace Deep3DStudio
 
             menuBar.Append(viewMenuItem);
 
+            // AI Models Menu
+            var aiMenu = new Menu();
+            var aiMenuItem = new MenuItem("_AI Models");
+            aiMenuItem.Submenu = aiMenu;
+
+            // Image to 3D submenu
+            var imageTo3DMenu = new Menu();
+            var imageTo3DMenuItem = new MenuItem("_Image to 3D");
+            imageTo3DMenuItem.Submenu = imageTo3DMenu;
+
+            var tripoSRItem = new MenuItem("_TripoSR (Fast)");
+            tripoSRItem.Activated += OnTripoSRGenerate;
+            imageTo3DMenu.Append(tripoSRItem);
+
+            var tripoSGItem = new MenuItem("Tripo_SG (High Quality)");
+            tripoSGItem.Activated += OnTripoSGGenerate;
+            imageTo3DMenu.Append(tripoSGItem);
+
+            var wonder3DItem = new MenuItem("_Wonder3D (Multi-View)");
+            wonder3DItem.Activated += OnWonder3DGenerate;
+            imageTo3DMenu.Append(wonder3DItem);
+
+            aiMenu.Append(imageTo3DMenuItem);
+
+            // Mesh Processing submenu
+            var meshProcessingMenu = new Menu();
+            var meshProcessingMenuItem = new MenuItem("_Mesh Processing");
+            meshProcessingMenuItem.Submenu = meshProcessingMenu;
+
+            var flexiCubesItem = new MenuItem("_FlexiCubes Extraction");
+            flexiCubesItem.Activated += OnFlexiCubesExtract;
+            meshProcessingMenu.Append(flexiCubesItem);
+
+            var tripoSFItem = new MenuItem("Tripo_SF Refinement");
+            tripoSFItem.Activated += OnTripoSFRefine;
+            meshProcessingMenu.Append(tripoSFItem);
+
+            meshProcessingMenu.Append(new SeparatorMenuItem());
+
+            var aiDecimateItem = new MenuItem("_Decimate & Optimize");
+            aiDecimateItem.Activated += (s, e) => OnDecimateClicked(null, EventArgs.Empty);
+            meshProcessingMenu.Append(aiDecimateItem);
+
+            aiMenu.Append(meshProcessingMenuItem);
+
+            // Rigging submenu
+            var riggingMenu = new Menu();
+            var riggingMenuItem = new MenuItem("_Rigging");
+            riggingMenuItem.Submenu = riggingMenu;
+
+            var uniRigItem = new MenuItem("_UniRig Auto Rig");
+            uniRigItem.Activated += OnAutoRig;
+            riggingMenu.Append(uniRigItem);
+
+            aiMenu.Append(riggingMenuItem);
+
+            aiMenu.Append(new SeparatorMenuItem());
+
+            // Workflows submenu
+            var workflowsMenu = new Menu();
+            var workflowsMenuItem = new MenuItem("_Workflows");
+            workflowsMenuItem.Submenu = workflowsMenu;
+
+            var dust3rFlexiItem = new MenuItem("_Dust3r → FlexiCubes");
+            dust3rFlexiItem.Activated += OnDust3rFlexiCubesWorkflow;
+            workflowsMenu.Append(dust3rFlexiItem);
+
+            var dust3rNerfFlexiItem = new MenuItem("Dust3r → _NeRF → FlexiCubes");
+            dust3rNerfFlexiItem.Activated += OnDust3rNeRFFlexiCubesWorkflow;
+            workflowsMenu.Append(dust3rNerfFlexiItem);
+
+            var fullPipelineItem = new MenuItem("_Full Pipeline (with Rigging)");
+            fullPipelineItem.Activated += OnFullPipelineWorkflow;
+            workflowsMenu.Append(fullPipelineItem);
+
+            workflowsMenu.Append(new SeparatorMenuItem());
+
+            var sfmToAIItem = new MenuItem("_SfM → AI Refinement");
+            sfmToAIItem.Activated += OnSfMToAIWorkflow;
+            workflowsMenu.Append(sfmToAIItem);
+
+            var pointCloudMergeItem = new MenuItem("_Point Cloud Merge & Refine");
+            pointCloudMergeItem.Activated += OnPointCloudMergeWorkflow;
+            workflowsMenu.Append(pointCloudMergeItem);
+
+            aiMenu.Append(workflowsMenuItem);
+
+            aiMenu.Append(new SeparatorMenuItem());
+
+            var aiSettingsItem = new MenuItem("AI Model _Settings...");
+            aiSettingsItem.Activated += OnAIModelSettings;
+            aiMenu.Append(aiSettingsItem);
+
+            menuBar.Append(aiMenuItem);
+
             // Window Menu
             var windowMenu = new Menu();
             var windowMenuItem = new MenuItem("_Window");
@@ -1306,10 +1401,18 @@ namespace Deep3DStudio
             _workflowCombo.AppendText("Dust3r (Fast)");
             _workflowCombo.AppendText("NeRF (Refined)");
             _workflowCombo.AppendText("Interior Scan");
+            _workflowCombo.AppendText("TripoSR (Single Image)");
+            _workflowCombo.AppendText("TripoSG (High Quality)");
+            _workflowCombo.AppendText("Wonder3D (Multi-View)");
+            _workflowCombo.AppendText("Dust3r + FlexiCubes");
+            _workflowCombo.AppendText("Dust3r + NeRF + FlexiCubes");
+            _workflowCombo.AppendText("Full Pipeline (Rigged)");
             _workflowCombo.Active = 0;
             wfBox.PackStart(_workflowCombo, false, false, 0);
             wfItem.Add(wfBox);
             toolbar.Insert(wfItem, -1);
+
+            toolbar.Insert(new SeparatorToolItem(), -1);
 
             // Run
             var runPointsBtn = new ToolButton(AppIconFactory.GenerateIcon("pointcloud", iconSize), "Gen Points");
@@ -1327,8 +1430,273 @@ namespace Deep3DStudio
             runBtn.Clicked += OnRunInference;
             toolbar.Insert(runBtn, -1);
 
+            toolbar.Insert(new SeparatorToolItem(), -1);
+
+            // AI Model Operations
+            var aiRigBtn = new ToolButton(AppIconFactory.GenerateIcon("rig", iconSize), "Auto Rig");
+            aiRigBtn.TooltipText = "Auto-rig mesh with UniRig";
+            aiRigBtn.Clicked += OnAutoRig;
+            toolbar.Insert(aiRigBtn, -1);
+
+            var aiRefineBtn = new ToolButton(AppIconFactory.GenerateIcon("refine", iconSize), "AI Refine");
+            aiRefineBtn.TooltipText = "Refine mesh with AI models (TripoSF/FlexiCubes)";
+            aiRefineBtn.Clicked += OnAIRefine;
+            toolbar.Insert(aiRefineBtn, -1);
+
             return toolbar;
         }
+
+        private void OnAutoRig(object? sender, EventArgs e)
+        {
+            var selectedMesh = GetSelectedMesh();
+            if (selectedMesh == null)
+            {
+                ShowMessage("No mesh selected", "Please select a mesh to rig.");
+                return;
+            }
+
+            _statusLabel.Text = "UniRig auto-rigging not yet implemented...";
+        }
+
+        private void OnAIRefine(object? sender, EventArgs e)
+        {
+            if (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0)
+            {
+                ShowMessage("No geometry", "Please generate a point cloud or mesh first.");
+                return;
+            }
+
+            _statusLabel.Text = "AI refinement not yet implemented...";
+        }
+
+        private MeshData? GetSelectedMesh()
+        {
+            var selected = _sceneGraph.GetSelectedObjects();
+            foreach (var obj in selected)
+            {
+                if (obj is Scene.MeshObject meshObj)
+                {
+                    return meshObj.MeshData;
+                }
+            }
+            return null;
+        }
+
+        private void ShowMessage(string title, string message)
+        {
+            var dialog = new MessageDialog(this, DialogFlags.Modal, MessageType.Info, ButtonsType.Ok, message);
+            dialog.Title = title;
+            dialog.Run();
+            dialog.Destroy();
+        }
+
+        #region AI Model Menu Handlers
+
+        private void OnTripoSRGenerate(object? sender, EventArgs e)
+        {
+            if (_imagePaths.Count == 0)
+            {
+                ShowMessage("No Images", "Please load at least one image for TripoSR generation.");
+                return;
+            }
+
+            _statusLabel.Text = "Running TripoSR single-image 3D generation...";
+            RunAIWorkflowAsync(AIModels.WorkflowPipeline.ImageToTripoSR);
+        }
+
+        private void OnTripoSGGenerate(object? sender, EventArgs e)
+        {
+            if (_imagePaths.Count == 0)
+            {
+                ShowMessage("No Images", "Please load at least one image for TripoSG generation.");
+                return;
+            }
+
+            _statusLabel.Text = "Running TripoSG high-quality 3D generation...";
+            RunAIWorkflowAsync(AIModels.WorkflowPipeline.ImageToTripoSG);
+        }
+
+        private void OnWonder3DGenerate(object? sender, EventArgs e)
+        {
+            if (_imagePaths.Count == 0)
+            {
+                ShowMessage("No Images", "Please load at least one image for Wonder3D generation.");
+                return;
+            }
+
+            _statusLabel.Text = "Running Wonder3D multi-view 3D generation...";
+            RunAIWorkflowAsync(AIModels.WorkflowPipeline.ImageToWonder3D);
+        }
+
+        private void OnFlexiCubesExtract(object? sender, EventArgs e)
+        {
+            if (_lastSceneResult == null || _lastSceneResult.PointClouds.Count == 0)
+            {
+                ShowMessage("No Point Cloud", "Please generate a point cloud first using Dust3r or SfM.");
+                return;
+            }
+
+            _statusLabel.Text = "Running FlexiCubes mesh extraction...";
+            RunAIWorkflowAsync(AIModels.WorkflowPipeline.Dust3rToFlexiCubes);
+        }
+
+        private void OnTripoSFRefine(object? sender, EventArgs e)
+        {
+            var selectedMesh = GetSelectedMesh();
+            if (selectedMesh == null && (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0))
+            {
+                ShowMessage("No Mesh", "Please generate or select a mesh to refine with TripoSF.");
+                return;
+            }
+
+            _statusLabel.Text = "Running TripoSF mesh refinement...";
+            // Create a custom workflow for TripoSF refinement
+            var pipeline = new AIModels.WorkflowPipeline
+            {
+                Name = "TripoSF Refinement",
+                Steps = new List<AIModels.WorkflowStep> { AIModels.WorkflowStep.TripoSFRefinement }
+            };
+            RunAIWorkflowAsync(pipeline);
+        }
+
+        private void OnDust3rFlexiCubesWorkflow(object? sender, EventArgs e)
+        {
+            if (_imagePaths.Count < 2)
+            {
+                ShowMessage("Need More Images", "Please load at least 2 images for Dust3r reconstruction.");
+                return;
+            }
+
+            _statusLabel.Text = "Running Dust3r → FlexiCubes workflow...";
+            RunAIWorkflowAsync(AIModels.WorkflowPipeline.Dust3rToFlexiCubes);
+        }
+
+        private void OnDust3rNeRFFlexiCubesWorkflow(object? sender, EventArgs e)
+        {
+            if (_imagePaths.Count < 2)
+            {
+                ShowMessage("Need More Images", "Please load at least 2 images for this workflow.");
+                return;
+            }
+
+            _statusLabel.Text = "Running Dust3r → NeRF → FlexiCubes workflow...";
+            RunAIWorkflowAsync(AIModels.WorkflowPipeline.Dust3rToNeRFToMesh);
+        }
+
+        private void OnFullPipelineWorkflow(object? sender, EventArgs e)
+        {
+            if (_imagePaths.Count < 2)
+            {
+                ShowMessage("Need More Images", "Please load at least 2 images for the full pipeline.");
+                return;
+            }
+
+            _statusLabel.Text = "Running full pipeline (reconstruction + rigging)...";
+            RunAIWorkflowAsync(AIModels.WorkflowPipeline.FullPipeline);
+        }
+
+        private void OnSfMToAIWorkflow(object? sender, EventArgs e)
+        {
+            if (_imagePaths.Count < 2)
+            {
+                ShowMessage("Need More Images", "Please load at least 2 images for SfM reconstruction.");
+                return;
+            }
+
+            _statusLabel.Text = "Running SfM → AI refinement workflow...";
+            var pipeline = new AIModels.WorkflowPipeline
+            {
+                Name = "SfM to AI Refinement",
+                Steps = new List<AIModels.WorkflowStep>
+                {
+                    AIModels.WorkflowStep.SfMReconstruction,
+                    AIModels.WorkflowStep.TripoSFRefinement,
+                    AIModels.WorkflowStep.FlexiCubesExtraction
+                }
+            };
+            RunAIWorkflowAsync(pipeline);
+        }
+
+        private void OnPointCloudMergeWorkflow(object? sender, EventArgs e)
+        {
+            if (_lastSceneResult == null || _lastSceneResult.PointClouds.Count < 2)
+            {
+                ShowMessage("Need More Point Clouds", "Please generate at least 2 point clouds to merge.");
+                return;
+            }
+
+            _statusLabel.Text = "Running point cloud merge and refinement...";
+            RunAIWorkflowAsync(AIModels.WorkflowPipeline.PointCloudMergeRefine);
+        }
+
+        private void OnAIModelSettings(object? sender, EventArgs e)
+        {
+            var dialog = new AIModelSettingsDialog(this, IniSettings.Instance);
+            if (dialog.Run() == (int)ResponseType.Ok)
+            {
+                dialog.ApplySettings();
+                IniSettings.Instance.Save();
+                _statusLabel.Text = "AI model settings saved.";
+            }
+            dialog.Destroy();
+        }
+
+        private async void RunAIWorkflowAsync(AIModels.WorkflowPipeline pipeline)
+        {
+            try
+            {
+                var manager = AIModels.AIModelManager.Instance;
+                var result = await manager.ExecuteWorkflowAsync(
+                    pipeline,
+                    _imagePaths.ToArray(),
+                    _lastSceneResult,
+                    progress => Application.Invoke((s, e) => _statusLabel.Text = progress)
+                );
+
+                if (result != null)
+                {
+                    Application.Invoke((s, e) =>
+                    {
+                        _lastSceneResult = result;
+                        UpdateSceneFromResult(result);
+                        _statusLabel.Text = $"Workflow '{pipeline.Name}' completed successfully.";
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Application.Invoke((s, e) =>
+                {
+                    ShowMessage("Workflow Error", $"Error running workflow: {ex.Message}");
+                    _statusLabel.Text = "Workflow failed.";
+                });
+            }
+        }
+
+        private void UpdateSceneFromResult(SceneResult result)
+        {
+            // Add new meshes to scene
+            foreach (var mesh in result.Meshes)
+            {
+                var meshObj = new Scene.MeshObject($"Mesh_{_sceneGraph.GetAllObjects().Count}", mesh);
+                _sceneGraph.AddObject(meshObj);
+            }
+
+            // Add new point clouds to scene
+            foreach (var pc in result.PointClouds)
+            {
+                var pcData = new PointCloudData { Points = pc };
+                var pcObj = new Scene.PointCloudObject($"PointCloud_{_sceneGraph.GetAllObjects().Count}", pcData);
+                _sceneGraph.AddObject(pcObj);
+            }
+
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        #endregion
 
         #region Menu Actions
 

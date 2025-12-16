@@ -9,7 +9,38 @@ namespace Deep3DStudio.Configuration
     public enum ReconstructionMethod
     {
         Dust3r,
-        FeatureMatching
+        FeatureMatching,
+        TripoSR,
+        TripoSG,
+        Wonder3D
+    }
+
+    public enum RiggingMethod
+    {
+        None,
+        UniRig
+    }
+
+    public enum MeshExtractionMethod
+    {
+        MarchingCubes,
+        FlexiCubes,
+        TripoSF
+    }
+
+    public enum ImageTo3DModel
+    {
+        None,
+        TripoSR,
+        TripoSG,
+        Wonder3D
+    }
+
+    public enum AIComputeDevice
+    {
+        CPU,
+        CUDA,
+        DirectML  // For AMD/Intel GPUs on Windows
     }
 
     /// <summary>
@@ -51,6 +82,56 @@ namespace Deep3DStudio.Configuration
         public int NeRFIterations { get; set; } = 50;
         public int VoxelGridSize { get; set; } = 128;
         public float NeRFLearningRate { get; set; } = 0.1f;
+
+        // AI Model Settings
+        public ImageTo3DModel ImageTo3D { get; set; } = ImageTo3DModel.None;
+        public RiggingMethod RiggingModel { get; set; } = RiggingMethod.None;
+        public MeshExtractionMethod MeshExtraction { get; set; } = MeshExtractionMethod.MarchingCubes;
+
+        // TripoSR Settings
+        public int TripoSRResolution { get; set; } = 256;
+        public int TripoSRMarchingCubesRes { get; set; } = 128;
+
+        // TripoSG Settings
+        public int TripoSGFlowSteps { get; set; } = 25;
+        public int TripoSGQueryResolution { get; set; } = 128;
+
+        // Wonder3D Settings
+        public int Wonder3DDiffusionSteps { get; set; } = 50;
+        public float Wonder3DCFGScale { get; set; } = 3.0f;
+
+        // UniRig Settings
+        public int UniRigMaxJoints { get; set; } = 64;
+        public int UniRigMaxBonesPerVertex { get; set; } = 4;
+
+        // FlexiCubes Settings
+        public int FlexiCubesResolution { get; set; } = 64;
+        public bool FlexiCubesUseDeformation { get; set; } = true;
+
+        // TripoSF Settings
+        public int TripoSFResolution { get; set; } = 512;
+        public int TripoSFSparseDilation { get; set; } = 1;
+
+        // AI Model Paths (relative to app directory or absolute)
+        public string TripoSRModelPath { get; set; } = "models/triposr";
+        public string TripoSGModelPath { get; set; } = "models/triposg";
+        public string Wonder3DModelPath { get; set; } = "models/wonder3d";
+        public string UniRigModelPath { get; set; } = "models/unirig";
+        public string FlexiCubesModelPath { get; set; } = "models/flexicubes";
+        public string TripoSFModelPath { get; set; } = "models/triposf";
+
+        // Additional AI Model Settings
+        public AIComputeDevice AIDevice { get; set; } = AIComputeDevice.CUDA;
+        public bool UseCudaForAI { get => AIDevice == AIComputeDevice.CUDA; set => AIDevice = value ? AIComputeDevice.CUDA : AIComputeDevice.CPU; }
+        public int TripoSGResolution { get; set; } = 512;
+        public int Wonder3DSteps { get; set; } = 50;
+        public float Wonder3DGuidanceScale { get; set; } = 3.0f;
+
+        // Point Cloud Merger Settings
+        public float MergerVoxelSize { get; set; } = 0.02f;
+        public int MergerMaxIterations { get; set; } = 50;
+        public float MergerConvergenceThreshold { get; set; } = 1e-6f;
+        public float MergerOutlierThreshold { get; set; } = 2.0f;
 
         // UI Settings
         public bool ShowGrid { get; set; } = true;
@@ -239,6 +320,67 @@ namespace Deep3DStudio.Configuration
                     writer.WriteLine($"LearningRate={NeRFLearningRate.ToString("F3", CultureInfo.InvariantCulture)}");
                     writer.WriteLine();
 
+                    // [AIModels] section
+                    writer.WriteLine("[AIModels]");
+                    writer.WriteLine($"ImageTo3D={ImageTo3D}");
+                    writer.WriteLine($"RiggingModel={RiggingModel}");
+                    writer.WriteLine($"MeshExtraction={MeshExtraction}");
+                    writer.WriteLine($"ComputeDevice={AIDevice}");
+                    writer.WriteLine();
+
+                    // [TripoSR] section
+                    writer.WriteLine("[TripoSR]");
+                    writer.WriteLine($"Resolution={TripoSRResolution}");
+                    writer.WriteLine($"MarchingCubesRes={TripoSRMarchingCubesRes}");
+                    writer.WriteLine($"ModelPath={TripoSRModelPath}");
+                    writer.WriteLine();
+
+                    // [TripoSG] section
+                    writer.WriteLine("[TripoSG]");
+                    writer.WriteLine($"FlowSteps={TripoSGFlowSteps}");
+                    writer.WriteLine($"QueryResolution={TripoSGQueryResolution}");
+                    writer.WriteLine($"Resolution={TripoSGResolution}");
+                    writer.WriteLine($"ModelPath={TripoSGModelPath}");
+                    writer.WriteLine();
+
+                    // [Wonder3D] section
+                    writer.WriteLine("[Wonder3D]");
+                    writer.WriteLine($"DiffusionSteps={Wonder3DDiffusionSteps}");
+                    writer.WriteLine($"Steps={Wonder3DSteps}");
+                    writer.WriteLine($"CFGScale={Wonder3DCFGScale.ToString("F2", CultureInfo.InvariantCulture)}");
+                    writer.WriteLine($"GuidanceScale={Wonder3DGuidanceScale.ToString("F2", CultureInfo.InvariantCulture)}");
+                    writer.WriteLine($"ModelPath={Wonder3DModelPath}");
+                    writer.WriteLine();
+
+                    // [UniRig] section
+                    writer.WriteLine("[UniRig]");
+                    writer.WriteLine($"MaxJoints={UniRigMaxJoints}");
+                    writer.WriteLine($"MaxBonesPerVertex={UniRigMaxBonesPerVertex}");
+                    writer.WriteLine($"ModelPath={UniRigModelPath}");
+                    writer.WriteLine();
+
+                    // [FlexiCubes] section
+                    writer.WriteLine("[FlexiCubes]");
+                    writer.WriteLine($"Resolution={FlexiCubesResolution}");
+                    writer.WriteLine($"UseDeformation={FlexiCubesUseDeformation}");
+                    writer.WriteLine($"ModelPath={FlexiCubesModelPath}");
+                    writer.WriteLine();
+
+                    // [TripoSF] section
+                    writer.WriteLine("[TripoSF]");
+                    writer.WriteLine($"Resolution={TripoSFResolution}");
+                    writer.WriteLine($"SparseDilation={TripoSFSparseDilation}");
+                    writer.WriteLine($"ModelPath={TripoSFModelPath}");
+                    writer.WriteLine();
+
+                    // [PointCloudMerger] section
+                    writer.WriteLine("[PointCloudMerger]");
+                    writer.WriteLine($"VoxelSize={MergerVoxelSize.ToString("F4", CultureInfo.InvariantCulture)}");
+                    writer.WriteLine($"MaxIterations={MergerMaxIterations}");
+                    writer.WriteLine($"ConvergenceThreshold={MergerConvergenceThreshold.ToString("E2", CultureInfo.InvariantCulture)}");
+                    writer.WriteLine($"OutlierThreshold={MergerOutlierThreshold.ToString("F2", CultureInfo.InvariantCulture)}");
+                    writer.WriteLine();
+
                     // [Window] section
                     writer.WriteLine("[Window]");
                     writer.WriteLine($"Width={LastWindowWidth}");
@@ -322,6 +464,88 @@ namespace Deep3DStudio.Configuration
                 LastWindowHeight = Math.Clamp(h, 600, 3000);
             if (TryGetValue("Window", "PanelWidth", out string? pwStr) && int.TryParse(pwStr, out var pw))
                 LastPanelWidth = Math.Clamp(pw, 100, 600);
+
+            // [AIModels]
+            if (TryGetValue("AIModels", "ImageTo3D", out string? img3dStr) && Enum.TryParse<ImageTo3DModel>(img3dStr, out var img3d))
+                ImageTo3D = img3d;
+            if (TryGetValue("AIModels", "RiggingModel", out string? rigStr) && Enum.TryParse<RiggingMethod>(rigStr, out var rig))
+                RiggingModel = rig;
+            if (TryGetValue("AIModels", "MeshExtraction", out string? meshExStr) && Enum.TryParse<MeshExtractionMethod>(meshExStr, out var meshEx))
+                MeshExtraction = meshEx;
+
+            // [TripoSR]
+            if (TryGetValue("TripoSR", "Resolution", out string? tsrResStr) && int.TryParse(tsrResStr, out var tsrRes))
+                TripoSRResolution = Math.Clamp(tsrRes, 128, 512);
+            if (TryGetValue("TripoSR", "MarchingCubesRes", out string? tsrMcStr) && int.TryParse(tsrMcStr, out var tsrMc))
+                TripoSRMarchingCubesRes = Math.Clamp(tsrMc, 64, 256);
+            if (TryGetValue("TripoSR", "ModelPath", out string? tsrPath))
+                TripoSRModelPath = tsrPath ?? TripoSRModelPath;
+
+            // [TripoSG]
+            if (TryGetValue("TripoSG", "FlowSteps", out string? tsgFlowStr) && int.TryParse(tsgFlowStr, out var tsgFlow))
+                TripoSGFlowSteps = Math.Clamp(tsgFlow, 10, 100);
+            if (TryGetValue("TripoSG", "QueryResolution", out string? tsgQryStr) && int.TryParse(tsgQryStr, out var tsgQry))
+                TripoSGQueryResolution = Math.Clamp(tsgQry, 64, 256);
+            if (TryGetValue("TripoSG", "ModelPath", out string? tsgPath))
+                TripoSGModelPath = tsgPath ?? TripoSGModelPath;
+
+            // [Wonder3D]
+            if (TryGetValue("Wonder3D", "DiffusionSteps", out string? w3dStepsStr) && int.TryParse(w3dStepsStr, out var w3dSteps))
+                Wonder3DDiffusionSteps = Math.Clamp(w3dSteps, 20, 100);
+            if (TryGetValue("Wonder3D", "CFGScale", out string? w3dCfgStr) && float.TryParse(w3dCfgStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var w3dCfg))
+                Wonder3DCFGScale = Math.Clamp(w3dCfg, 1.0f, 10.0f);
+            if (TryGetValue("Wonder3D", "ModelPath", out string? w3dPath))
+                Wonder3DModelPath = w3dPath ?? Wonder3DModelPath;
+
+            // [UniRig]
+            if (TryGetValue("UniRig", "MaxJoints", out string? urJointsStr) && int.TryParse(urJointsStr, out var urJoints))
+                UniRigMaxJoints = Math.Clamp(urJoints, 16, 256);
+            if (TryGetValue("UniRig", "MaxBonesPerVertex", out string? urBpvStr) && int.TryParse(urBpvStr, out var urBpv))
+                UniRigMaxBonesPerVertex = Math.Clamp(urBpv, 1, 8);
+            if (TryGetValue("UniRig", "ModelPath", out string? urPath))
+                UniRigModelPath = urPath ?? UniRigModelPath;
+
+            // [FlexiCubes]
+            if (TryGetValue("FlexiCubes", "Resolution", out string? fcResStr) && int.TryParse(fcResStr, out var fcRes))
+                FlexiCubesResolution = Math.Clamp(fcRes, 32, 256);
+            if (TryGetValue("FlexiCubes", "UseDeformation", out string? fcDefStr) && bool.TryParse(fcDefStr, out var fcDef))
+                FlexiCubesUseDeformation = fcDef;
+            if (TryGetValue("FlexiCubes", "ModelPath", out string? fcPath))
+                FlexiCubesModelPath = fcPath ?? FlexiCubesModelPath;
+
+            // [TripoSF]
+            if (TryGetValue("TripoSF", "Resolution", out string? tsfResStr) && int.TryParse(tsfResStr, out var tsfRes))
+                TripoSFResolution = Math.Clamp(tsfRes, 256, 1024);
+            if (TryGetValue("TripoSF", "SparseDilation", out string? tsfDilStr) && int.TryParse(tsfDilStr, out var tsfDil))
+                TripoSFSparseDilation = Math.Clamp(tsfDil, 0, 3);
+            if (TryGetValue("TripoSF", "ModelPath", out string? tsfPath))
+                TripoSFModelPath = tsfPath ?? TripoSFModelPath;
+
+            // [AIModels] additional settings
+            if (TryGetValue("AIModels", "ComputeDevice", out string? aiDevStr) && Enum.TryParse<AIComputeDevice>(aiDevStr, out var aiDev))
+                AIDevice = aiDev;
+            else if (TryGetValue("AIModels", "UseCuda", out string? useCudaStr) && bool.TryParse(useCudaStr, out var useCuda))
+                AIDevice = useCuda ? AIComputeDevice.CUDA : AIComputeDevice.CPU;
+
+            // [TripoSG] additional settings
+            if (TryGetValue("TripoSG", "Resolution", out string? tsgResStr) && int.TryParse(tsgResStr, out var tsgRes))
+                TripoSGResolution = Math.Clamp(tsgRes, 256, 1024);
+
+            // [Wonder3D] additional settings
+            if (TryGetValue("Wonder3D", "Steps", out string? w3dSteps2Str) && int.TryParse(w3dSteps2Str, out var w3dSteps2))
+                Wonder3DSteps = Math.Clamp(w3dSteps2, 10, 100);
+            if (TryGetValue("Wonder3D", "GuidanceScale", out string? w3dGsStr) && float.TryParse(w3dGsStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var w3dGs))
+                Wonder3DGuidanceScale = Math.Clamp(w3dGs, 1.0f, 20.0f);
+
+            // [PointCloudMerger]
+            if (TryGetValue("PointCloudMerger", "VoxelSize", out string? pcmVoxStr) && float.TryParse(pcmVoxStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var pcmVox))
+                MergerVoxelSize = Math.Clamp(pcmVox, 0.001f, 0.5f);
+            if (TryGetValue("PointCloudMerger", "MaxIterations", out string? pcmIterStr) && int.TryParse(pcmIterStr, out var pcmIter))
+                MergerMaxIterations = Math.Clamp(pcmIter, 10, 200);
+            if (TryGetValue("PointCloudMerger", "ConvergenceThreshold", out string? pcmConvStr) && float.TryParse(pcmConvStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var pcmConv))
+                MergerConvergenceThreshold = Math.Clamp(pcmConv, 1e-8f, 1e-4f);
+            if (TryGetValue("PointCloudMerger", "OutlierThreshold", out string? pcmOutStr) && float.TryParse(pcmOutStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var pcmOut))
+                MergerOutlierThreshold = Math.Clamp(pcmOut, 1.0f, 5.0f);
         }
 
         /// <summary>
@@ -378,6 +602,41 @@ namespace Deep3DStudio.Configuration
             LastWindowWidth = 1400;
             LastWindowHeight = 900;
             LastPanelWidth = 250;
+
+            // AI Model Settings
+            ImageTo3D = ImageTo3DModel.None;
+            RiggingModel = RiggingMethod.None;
+            MeshExtraction = MeshExtractionMethod.MarchingCubes;
+
+            // TripoSR
+            TripoSRResolution = 256;
+            TripoSRMarchingCubesRes = 128;
+            TripoSRModelPath = "models/triposr";
+
+            // TripoSG
+            TripoSGFlowSteps = 25;
+            TripoSGQueryResolution = 128;
+            TripoSGModelPath = "models/triposg";
+
+            // Wonder3D
+            Wonder3DDiffusionSteps = 50;
+            Wonder3DCFGScale = 3.0f;
+            Wonder3DModelPath = "models/wonder3d";
+
+            // UniRig
+            UniRigMaxJoints = 64;
+            UniRigMaxBonesPerVertex = 4;
+            UniRigModelPath = "models/unirig";
+
+            // FlexiCubes
+            FlexiCubesResolution = 64;
+            FlexiCubesUseDeformation = true;
+            FlexiCubesModelPath = "models/flexicubes";
+
+            // TripoSF
+            TripoSFResolution = 512;
+            TripoSFSparseDilation = 1;
+            TripoSFModelPath = "models/triposf";
         }
     }
 }
