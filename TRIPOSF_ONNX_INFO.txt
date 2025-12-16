@@ -1,0 +1,400 @@
+================================================================================
+                         TripoSF ONNX Model Specification
+================================================================================
+
+Model: TripoSF (VAST-AI-Research)
+Repository: https://github.com/VAST-AI-Research/TripoSF
+License: MIT
+Task: Ultra-High Resolution 3D Shape Reconstruction with SparseFlex
+
+================================================================================
+                                  OVERVIEW
+================================================================================
+
+TripoSF is a 3D shape modeling system combining high-resolution capabilities
+(up to 1024^3) with arbitrary topology support using the SparseFlex representation.
+
+Key Features:
+- Ultra-high resolution: Up to 1024^3 voxel resolution
+- Open surfaces: Naturally handles cloth, leaves, thin structures
+- Sparse computation: Focuses resources on surface-adjacent regions
+- Efficient memory: Only stores surface-adjacent voxels
+
+SparseFlex Design:
+- Sparse voxel structure near surfaces only
+- Self-pruning upsampling maintains sparsity
+- Enables complex topology handling (open surfaces, thin sheets)
+
+================================================================================
+                               ONNX COMPONENTS
+================================================================================
+
+The export produces the following ONNX files:
+
+1. triposf_encoder.onnx
+-----------------------
+Purpose: Encode point cloud to latent representation
+
+INPUTS:
+  Name: points
+  Shape: (batch_size, num_points, 3)
+  Type: float32
+  Description: Input point cloud in normalized [-1, 1] space
+  Preprocessing:
+    - Center point cloud at origin
+    - Scale to fit in [-1, 1] bounding box
+    - Typical num_points: 10,000 - 100,000
+
+OUTPUTS:
+  Name: latent
+  Shape: (batch_size, latent_dim)
+  Type: float32
+  Description: Compressed latent representation
+  Typical latent_dim: 512
+
+
+2. triposf_decoder.onnx
+-----------------------
+Purpose: Decode latent to SparseFlex parameters at query locations
+
+INPUTS:
+  Name: latent
+  Shape: (batch_size, latent_dim)
+  Type: float32
+  Description: Latent from encoder
+
+  Name: query_coords
+  Shape: (batch_size, num_query, 3)
+  Type: float32
+  Description: Sparse voxel coordinates to query
+  Note: Only query surface-adjacent voxels for efficiency
+
+OUTPUTS:
+  Name: flex_params
+  Shape: (batch_size, num_query, param_dim)
+  Type: float32
+  Description: SparseFlex parameters for mesh extraction
+  param_dim typically includes: SDF, offset, features
+
+
+3. triposf_vae.onnx (Combined)
+------------------------------
+Purpose: Full encode-decode pipeline
+
+INPUTS:
+  Name: points
+  Shape: (batch_size, num_points, 3)
+  Type: float32
+
+  Name: query_coords
+  Shape: (batch_size, num_query, 3)
+  Type: float32
+
+OUTPUTS:
+  Name: flex_params
+  Shape: (batch_size, num_query, param_dim)
+  Type: float32
+
+================================================================================
+                            MODEL PARAMETERS
+================================================================================
+
+Architecture Configuration:
+  - Encoder: Sparse transformer
+  - Decoder: Self-pruning upsampling modules
+  - Latent dimension: 512
+  - Max resolution: 1024^3
+
+Resolution Settings:
+  - 256^3: ~4GB VRAM, fast inference
+  - 512^3: ~8GB VRAM, balanced
+  - 1024^3: ~12GB VRAM, highest quality
+
+Memory Usage (approximate):
+  - Model weights: ~500 MB
+  - 256^3 inference: 4 GB VRAM
+  - 512^3 inference: 8 GB VRAM
+  - 1024^3 inference: 12+ GB VRAM
+
+================================================================================
+                              C# USAGE EXAMPLE
+================================================================================
+
+using Microsoft.ML.OnnxRuntime;
+using Microsoft.ML.OnnxRuntime.Tensors;
+using System.Numerics;
+
+public class TripoSFInference : IDisposable
+{
+    private InferenceSession _encoderSession;
+    private InferenceSession _decoderSession;
+
+    private const int LATENT_DIM = 512;
+
+    public TripoSFInference(string modelDir)
+    {
+        var options = new SessionOptions();
+        try { options.AppendExecutionProvider_CUDA(0); } catch { }
+
+        _encoderSession = new InferenceSession(
+            Path.Combine(modelDir, "triposf_encoder.onnx"), options);
+        _decoderSession = new InferenceSession(
+            Path.Combine(modelDir, "triposf_decoder.onnx"), options);
+    }
+
+    /// <summary>
+    /// Reconstruct mesh from point cloud.
+    /// </summary>
+    public (Vector3[] vertices, int[] triangles) ReconstructMesh(
+        Vector3[] pointCloud,
+        int resolution = 256)
+    {
+        // 1. Normalize point cloud
+        var normalizedPoints = NormalizePointCloud(pointCloud);
+
+        // 2. Encode to latent
+        var latent = Encode(normalizedPoints);
+
+        // 3. Generate sparse query grid
+        var (sparseCoords, sparseIndices) = GenerateSparseGrid(
+            normalizedPoints, resolution);
+
+        // 4. Decode at sparse locations
+        var flexParams = Decode(latent, sparseCoords);
+
+        // 5. Extract mesh using FlexiCubes or Marching Cubes
+        return ExtractMesh(flexParams, sparseIndices, resolution);
+    }
+
+    private float[] NormalizePointCloud(Vector3[] points)
+    {
+        // Find bounding box
+        Vector3 min = new Vector3(float.MaxValue);
+        Vector3 max = new Vector3(float.MinValue);
+
+        foreach (var p in points)
+        {
+            min = Vector3.Min(min, p);
+            max = Vector3.Max(max, p);
+        }
+
+        Vector3 center = (min + max) / 2;
+        float scale = Math.Max(Math.Max(max.X - min.X, max.Y - min.Y), max.Z - min.Z) / 2;
+
+        // Normalize to [-1, 1]
+        var normalized = new float[points.Length * 3];
+        for (int i = 0; i < points.Length; i++)
+        {
+            var p = (points[i] - center) / scale;
+            normalized[i * 3] = p.X;
+            normalized[i * 3 + 1] = p.Y;
+            normalized[i * 3 + 2] = p.Z;
+        }
+
+        return normalized;
+    }
+
+    private float[] Encode(float[] points)
+    {
+        int numPoints = points.Length / 3;
+        var tensor = new DenseTensor<float>(points, new[] { 1, numPoints, 3 });
+
+        var inputs = new List<NamedOnnxValue>
+        {
+            NamedOnnxValue.CreateFromTensor("points", tensor)
+        };
+
+        using var results = _encoderSession.Run(inputs);
+        return results.First().AsTensor<float>().ToArray();
+    }
+
+    private (float[] coords, List<(int, int, int)> indices) GenerateSparseGrid(
+        float[] normalizedPoints,
+        int resolution)
+    {
+        // Create sparse grid around surface points
+        var occupiedVoxels = new HashSet<(int, int, int)>();
+
+        int numPoints = normalizedPoints.Length / 3;
+        for (int i = 0; i < numPoints; i++)
+        {
+            // Convert point to voxel coordinates
+            int vx = (int)((normalizedPoints[i * 3] + 1) * 0.5f * (resolution - 1));
+            int vy = (int)((normalizedPoints[i * 3 + 1] + 1) * 0.5f * (resolution - 1));
+            int vz = (int)((normalizedPoints[i * 3 + 2] + 1) * 0.5f * (resolution - 1));
+
+            // Add voxel and neighbors (dilation for coverage)
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    for (int dz = -1; dz <= 1; dz++)
+                    {
+                        int nx = Math.Clamp(vx + dx, 0, resolution - 1);
+                        int ny = Math.Clamp(vy + dy, 0, resolution - 1);
+                        int nz = Math.Clamp(vz + dz, 0, resolution - 1);
+                        occupiedVoxels.Add((nx, ny, nz));
+                    }
+                }
+            }
+        }
+
+        // Convert to coordinate array
+        var indices = occupiedVoxels.ToList();
+        var coords = new float[indices.Count * 3];
+
+        for (int i = 0; i < indices.Count; i++)
+        {
+            var (vx, vy, vz) = indices[i];
+            // Convert back to [-1, 1] space
+            coords[i * 3] = vx / (float)(resolution - 1) * 2 - 1;
+            coords[i * 3 + 1] = vy / (float)(resolution - 1) * 2 - 1;
+            coords[i * 3 + 2] = vz / (float)(resolution - 1) * 2 - 1;
+        }
+
+        return (coords, indices);
+    }
+
+    private float[] Decode(float[] latent, float[] queryCoords)
+    {
+        int numQuery = queryCoords.Length / 3;
+        int batchSize = 50000; // Process in batches to avoid OOM
+
+        var allResults = new List<float>();
+
+        for (int start = 0; start < numQuery; start += batchSize)
+        {
+            int count = Math.Min(batchSize, numQuery - start);
+            var batchCoords = new float[count * 3];
+            Array.Copy(queryCoords, start * 3, batchCoords, 0, count * 3);
+
+            var inputs = new List<NamedOnnxValue>
+            {
+                NamedOnnxValue.CreateFromTensor("latent",
+                    new DenseTensor<float>(latent, new[] { 1, LATENT_DIM })),
+                NamedOnnxValue.CreateFromTensor("query_coords",
+                    new DenseTensor<float>(batchCoords, new[] { 1, count, 3 }))
+            };
+
+            using var results = _decoderSession.Run(inputs);
+            var batchOutput = results.First().AsTensor<float>().ToArray();
+            allResults.AddRange(batchOutput);
+        }
+
+        return allResults.ToArray();
+    }
+
+    private (Vector3[] vertices, int[] triangles) ExtractMesh(
+        float[] flexParams,
+        List<(int, int, int)> sparseIndices,
+        int resolution)
+    {
+        // SparseFlex parameters typically include SDF and vertex offsets
+        // Use FlexiCubes or modified Marching Cubes for extraction
+
+        // For simplicity, using standard Marching Cubes on sparse grid
+        // In production, use FlexiCubes for better quality
+
+        // Build sparse SDF grid
+        var sdfValues = new Dictionary<(int, int, int), float>();
+        int paramDim = flexParams.Length / sparseIndices.Count;
+
+        for (int i = 0; i < sparseIndices.Count; i++)
+        {
+            // First parameter is typically SDF
+            sdfValues[sparseIndices[i]] = flexParams[i * paramDim];
+        }
+
+        // Run Marching Cubes on sparse grid
+        // (Implementation depends on your meshing library)
+
+        throw new NotImplementedException(
+            "Use MarchingCubesMesher or FlexiCubes for mesh extraction");
+    }
+
+    public void Dispose()
+    {
+        _encoderSession?.Dispose();
+        _decoderSession?.Dispose();
+    }
+}
+
+================================================================================
+                          SPARSEFLEX MESH EXTRACTION
+================================================================================
+
+SparseFlex Parameters:
+- SDF value (signed distance)
+- Vertex offset (displacement from grid corner)
+- Optional: surface features, normals
+
+FlexiCubes Algorithm (Recommended):
+- Dual marching cubes variant
+- Uses vertex offsets for sharper features
+- Better topology than standard MC
+
+Sparse Processing:
+- Only process voxels with surface crossings
+- SDF sign change indicates surface
+- Significant memory savings at high resolution
+
+Example Surface Detection:
+    bool hasSurface = false;
+    for each edge of voxel:
+        if (sdf[v0] * sdf[v1] < 0)  // Sign change
+            hasSurface = true;
+
+================================================================================
+                             PREPROCESSING NOTES
+================================================================================
+
+Point Cloud Input:
+  - Minimum points: 1,000 (for reasonable coverage)
+  - Recommended: 10,000 - 50,000 points
+  - Maximum: Limited by GPU memory
+
+Point Cloud Sources:
+  - Depth cameras (RealSense, Kinect)
+  - LiDAR scans
+  - Photogrammetry output
+  - Mesh sampling
+
+Normalization:
+  - Center at origin
+  - Scale to [-1, 1] bounding box
+  - Preserve aspect ratio
+
+================================================================================
+                              ERROR HANDLING
+================================================================================
+
+1. "CUDA out of memory"
+   - Reduce resolution (512 -> 256)
+   - Reduce batch size in decoder
+   - Use sparse grid more aggressively
+
+2. "Empty mesh output"
+   - Check SDF values are not all positive/negative
+   - Verify sparse grid covers the surface
+   - Increase dilation radius
+
+3. "Mesh has holes"
+   - Increase sparse grid density
+   - Use larger dilation in grid generation
+   - Check point cloud coverage
+
+4. "Slow inference"
+   - Enable CUDA execution provider
+   - Reduce query batch size
+   - Use lower resolution for preview
+
+================================================================================
+                              VERSION INFO
+================================================================================
+
+Export Script Version: 1.0
+ONNX Opset: 14
+Supported Resolutions: 256, 512, 1024
+Tested ONNX Runtime: 1.17.1
+
+================================================================================
