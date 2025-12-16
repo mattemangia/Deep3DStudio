@@ -28,6 +28,7 @@ namespace Deep3DStudio.Model.AIModels
         // Refinement steps
         TripoSFRefinement,
         DeepMeshPriorRefinement,
+        GaussianSDFRefinement,
         NeRFRefinement,
 
         // Point cloud operations
@@ -123,6 +124,20 @@ namespace Deep3DStudio.Model.AIModels
             }
         };
 
+        public static WorkflowPipeline Dust3rToGaussianSDF => new()
+        {
+            Name = "Images -> Dust3r -> Gaussian SDF",
+            Description = "Multi-view with Gaussian SDF refinement (GSurf-inspired)",
+            Steps = new List<WorkflowStep>
+            {
+                WorkflowStep.LoadImages,
+                WorkflowStep.Dust3rReconstruction,
+                WorkflowStep.VoxelizePointCloud,
+                WorkflowStep.MarchingCubes,
+                WorkflowStep.GaussianSDFRefinement
+            }
+        };
+
         public static WorkflowPipeline Dust3rToNeRFToMesh => new()
         {
             Name = "Images -> Dust3r -> NeRF -> Mesh",
@@ -185,6 +200,7 @@ namespace Deep3DStudio.Model.AIModels
             ImageToTripoSG,
             ImageToWonder3D,
             Dust3rToDeepMeshPrior,
+            Dust3rToGaussianSDF,
             Dust3rToNeRFToMesh,
             PointCloudMergeRefine,
             MeshToRig,
@@ -364,6 +380,12 @@ namespace Deep3DStudio.Model.AIModels
                             break;
                     }
 
+                    // Also check for Refinement settings
+                    if (settings.MeshRefinement == MeshRefinementMethod.GaussianSDF)
+                    {
+                         statusCallback?.Invoke("Gaussian SDF refinement selected for post-process");
+                    }
+
                     // For now, return the original SfM result
                     // In the future, this will apply AI refinement
                     return sfmResult;
@@ -503,6 +525,10 @@ namespace Deep3DStudio.Model.AIModels
                     progressCallback?.Invoke("Running DeepMeshPrior refinement...", 0);
                     return await RefineWithDeepMeshPrior(currentResult, progressCallback);
 
+                case WorkflowStep.GaussianSDFRefinement:
+                    progressCallback?.Invoke("Running Gaussian SDF refinement...", 0);
+                    return await RefineWithGaussianSDF(currentResult, progressCallback);
+
                 case WorkflowStep.NeRFRefinement:
                     progressCallback?.Invoke("Running NeRF refinement...", 0);
                     // This would use existing VoxelGridNeRF
@@ -553,6 +579,7 @@ namespace Deep3DStudio.Model.AIModels
                 WorkflowStep.Wonder3DGeneration => "Wonder3D multi-view generation",
                 WorkflowStep.TripoSFRefinement => "TripoSF mesh refinement",
                 WorkflowStep.DeepMeshPriorRefinement => "DeepMeshPrior refinement",
+                WorkflowStep.GaussianSDFRefinement => "Gaussian SDF refinement",
                 WorkflowStep.NeRFRefinement => "NeRF refinement",
                 WorkflowStep.MergePointClouds => "Merging point clouds",
                 WorkflowStep.AlignPointClouds => "Aligning point clouds",
@@ -740,6 +767,22 @@ namespace Deep3DStudio.Model.AIModels
                 result.Meshes[0] = refinedMesh;
             }
 
+            return result;
+        }
+
+        private async Task<SceneResult?> RefineWithGaussianSDF(SceneResult? result, Action<string, float>? progressCallback)
+        {
+            if (result == null || result.Meshes.Count == 0)
+                return result;
+
+            var mesh = result.Meshes[0];
+            var mesher = new Meshing.GaussianSDFRefiner();
+            var refinedMesh = await mesher.RefineMeshAsync(mesh, progressCallback);
+
+            if (refinedMesh != null)
+            {
+                result.Meshes[0] = refinedMesh;
+            }
             return result;
         }
 

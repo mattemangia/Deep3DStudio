@@ -96,6 +96,22 @@ namespace Deep3DStudio.Model
                 }
             }
         }
+
+        public Box3 GetBounds()
+        {
+            if (Vertices.Count == 0)
+                return new Box3(Vector3.Zero, Vector3.Zero);
+
+            Vector3 min = new Vector3(float.MaxValue);
+            Vector3 max = new Vector3(float.MinValue);
+
+            foreach (var v in Vertices)
+            {
+                min = Vector3.ComponentMin(min, v);
+                max = Vector3.ComponentMax(max, v);
+            }
+            return new Box3(min, max);
+        }
     }
 
     public static class GeometryUtils
@@ -656,8 +672,28 @@ namespace Deep3DStudio.Model
              c = c1 + mu * (c2 - c1);
         }
 
+        public static int[] GetMarchingCubesEdges(int cubeIndex)
+        {
+            var edges = new List<int>();
+            for (int i = 0; i < 15; i++)
+            {
+                int edge = triTable[cubeIndex, i];
+                if (edge == -1) break;
+                edges.Add(edge);
+            }
+            // Pad with -1 if needed, or return exact list.
+            // But the caller expects array.
+            // And usually we iterate by 3.
+
+            // To match caller expectation:
+            var result = new int[edges.Count + 1];
+            for(int i=0; i<edges.Count; i++) result[i] = edges[i];
+            result[edges.Count] = -1;
+            return result;
+        }
+
         // Tables from Paul Bourke's implementation
-        private static int[] edgeTable = new int[]{
+        public static int[] edgeTable = new int[]{
 
             0x0, 0x109, 0x203, 0x30a, 0x406, 0x50f, 0x605, 0x70c, 0x80c, 0x905, 0xa0f, 0xb06, 0xc0a, 0xd03, 0xe09, 0xf00,
             0x190, 0x99, 0x393, 0x29a, 0x596, 0x49f, 0x795, 0x69c, 0x99c, 0x895, 0xb9f, 0xa96, 0xd9a, 0xc93, 0xf99, 0xe90,
@@ -680,7 +716,7 @@ namespace Deep3DStudio.Model
         // Complete Marching Cubes triTable with all 256 entries
         // Each row corresponds to a cube configuration (0-255) based on which corners are inside the surface
         // Each row contains up to 5 triangles (15 edge indices), terminated by -1
-        private static int[,] triTable = new int[256, 16]{
+        public static int[,] triTable = new int[256, 16]{
             {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
             {0, 8, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
             {0, 1, 9, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},

@@ -31,7 +31,8 @@ namespace Deep3DStudio.Configuration
     {
         None,
         DeepMeshPrior,
-        TripoSF
+        TripoSF,
+        GaussianSDF
     }
 
     public enum ImageTo3DModel
@@ -115,6 +116,12 @@ namespace Deep3DStudio.Configuration
         public int DeepMeshPriorIterations { get; set; } = 500;
         public float DeepMeshPriorLearningRate { get; set; } = 0.01f;
         public float DeepMeshPriorLaplacianWeight { get; set; } = 1.4f;
+
+        // Gaussian SDF Refiner Settings
+        public int GaussianSDFGridResolution { get; set; } = 128;
+        public float GaussianSDFSigma { get; set; } = 1.0f;
+        public int GaussianSDFIterations { get; set; } = 1;
+        public float GaussianSDFIsoLevel { get; set; } = 0.0f;
 
         // TripoSF Settings
         public int TripoSFResolution { get; set; } = 512;
@@ -374,6 +381,14 @@ namespace Deep3DStudio.Configuration
                     writer.WriteLine($"LaplacianWeight={DeepMeshPriorLaplacianWeight.ToString("F3", CultureInfo.InvariantCulture)}");
                     writer.WriteLine();
 
+                    // [GaussianSDF] section
+                    writer.WriteLine("[GaussianSDF]");
+                    writer.WriteLine($"GridResolution={GaussianSDFGridResolution}");
+                    writer.WriteLine($"Sigma={GaussianSDFSigma.ToString("F3", CultureInfo.InvariantCulture)}");
+                    writer.WriteLine($"Iterations={GaussianSDFIterations}");
+                    writer.WriteLine($"IsoLevel={GaussianSDFIsoLevel.ToString("F3", CultureInfo.InvariantCulture)}");
+                    writer.WriteLine();
+
                     // [TripoSF] section
                     writer.WriteLine("[TripoSF]");
                     writer.WriteLine($"Resolution={TripoSFResolution}");
@@ -523,6 +538,16 @@ namespace Deep3DStudio.Configuration
             if (TryGetValue("DeepMeshPrior", "LaplacianWeight", out string? dmpLapStr) && float.TryParse(dmpLapStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var dmpLap))
                 DeepMeshPriorLaplacianWeight = Math.Clamp(dmpLap, 0.0f, 10.0f);
 
+            // [GaussianSDF]
+            if (TryGetValue("GaussianSDF", "GridResolution", out string? gsGridStr) && int.TryParse(gsGridStr, out var gsGrid))
+                GaussianSDFGridResolution = Math.Clamp(gsGrid, 32, 512);
+            if (TryGetValue("GaussianSDF", "Sigma", out string? gsSigmaStr) && float.TryParse(gsSigmaStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var gsSigma))
+                GaussianSDFSigma = Math.Clamp(gsSigma, 0.1f, 10.0f);
+            if (TryGetValue("GaussianSDF", "Iterations", out string? gsIterStr) && int.TryParse(gsIterStr, out var gsIter))
+                GaussianSDFIterations = Math.Clamp(gsIter, 0, 10);
+            if (TryGetValue("GaussianSDF", "IsoLevel", out string? gsIsoStr) && float.TryParse(gsIsoStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var gsIso))
+                GaussianSDFIsoLevel = Math.Clamp(gsIso, -1.0f, 1.0f);
+
             // [TripoSF]
             if (TryGetValue("TripoSF", "Resolution", out string? tsfResStr) && int.TryParse(tsfResStr, out var tsfRes))
                 TripoSFResolution = Math.Clamp(tsfRes, 256, 1024);
@@ -643,6 +668,12 @@ namespace Deep3DStudio.Configuration
             DeepMeshPriorIterations = 500;
             DeepMeshPriorLearningRate = 0.01f;
             DeepMeshPriorLaplacianWeight = 1.4f;
+
+            // GaussianSDF
+            GaussianSDFGridResolution = 128;
+            GaussianSDFSigma = 1.0f;
+            GaussianSDFIterations = 1;
+            GaussianSDFIsoLevel = 0.0f;
 
             // TripoSF
             TripoSFResolution = 512;
