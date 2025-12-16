@@ -27,7 +27,7 @@ namespace Deep3DStudio.Model.AIModels
 
         // Refinement steps
         TripoSFRefinement,
-        FlexiCubesExtraction,
+        DeepMeshPriorRefinement,
         NeRFRefinement,
 
         // Point cloud operations
@@ -109,15 +109,17 @@ namespace Deep3DStudio.Model.AIModels
             }
         };
 
-        public static WorkflowPipeline Dust3rToFlexiCubes => new()
+        public static WorkflowPipeline Dust3rToDeepMeshPrior => new()
         {
-            Name = "Images -> Dust3r -> FlexiCubes",
-            Description = "Multi-view with FlexiCubes mesh extraction",
+            Name = "Images -> Dust3r -> DeepMeshPrior",
+            Description = "Multi-view with DeepMeshPrior refinement",
             Steps = new List<WorkflowStep>
             {
                 WorkflowStep.LoadImages,
                 WorkflowStep.Dust3rReconstruction,
-                WorkflowStep.FlexiCubesExtraction
+                WorkflowStep.VoxelizePointCloud,
+                WorkflowStep.MarchingCubes,
+                WorkflowStep.DeepMeshPriorRefinement
             }
         };
 
@@ -169,10 +171,10 @@ namespace Deep3DStudio.Model.AIModels
                 WorkflowStep.LoadImages,
                 WorkflowStep.Dust3rReconstruction,
                 WorkflowStep.NeRFRefinement,
-                WorkflowStep.FlexiCubesExtraction,
-                WorkflowStep.MeshSmoothing,
-                WorkflowStep.MeshDecimation,
-                WorkflowStep.MarchingCubes
+                WorkflowStep.VoxelizePointCloud,
+                WorkflowStep.MarchingCubes,
+                WorkflowStep.DeepMeshPriorRefinement,
+                WorkflowStep.MeshDecimation
             }
         };
 
@@ -182,7 +184,7 @@ namespace Deep3DStudio.Model.AIModels
             ImageToTripoSR,
             ImageToTripoSG,
             ImageToWonder3D,
-            Dust3rToFlexiCubes,
+            Dust3rToDeepMeshPrior,
             Dust3rToNeRFToMesh,
             PointCloudMergeRefine,
             MeshToRig,
@@ -243,7 +245,7 @@ namespace Deep3DStudio.Model.AIModels
                 { "TripoSF", false },
                 { "Wonder3D", false },
                 { "UniRig", false },
-                { "FlexiCubes", false }
+                { "DeepMeshPrior", true } // Always available as C# implementation
             };
         }
 
@@ -349,8 +351,8 @@ namespace Deep3DStudio.Model.AIModels
                     // Apply mesh extraction based on settings
                     switch (settings.MeshExtraction)
                     {
-                        case MeshExtractionMethod.FlexiCubes:
-                            statusCallback?.Invoke("FlexiCubes refinement not yet implemented");
+                        case MeshExtractionMethod.DeepMeshPrior:
+                            statusCallback?.Invoke("DeepMeshPrior refinement requires initial mesh");
                             break;
 
                         case MeshExtractionMethod.TripoSF:
@@ -497,10 +499,9 @@ namespace Deep3DStudio.Model.AIModels
                     progressCallback?.Invoke($"TripoSF refinement (model: {tripoSfPath}) not yet implemented", 0);
                     return currentResult;
 
-                case WorkflowStep.FlexiCubesExtraction:
-                    var flexiPath = GetAbsoluteModelPath(IniSettings.Instance.FlexiCubesModelPath);
-                    progressCallback?.Invoke($"FlexiCubes extraction (model: {flexiPath}) not yet implemented", 0);
-                    return currentResult;
+                case WorkflowStep.DeepMeshPriorRefinement:
+                    progressCallback?.Invoke("Running DeepMeshPrior refinement...", 0);
+                    return await RefineWithDeepMeshPrior(currentResult, progressCallback);
 
                 case WorkflowStep.NeRFRefinement:
                     progressCallback?.Invoke("Running NeRF refinement...", 0);
@@ -551,7 +552,7 @@ namespace Deep3DStudio.Model.AIModels
                 WorkflowStep.TripoSGGeneration => "TripoSG 3D generation",
                 WorkflowStep.Wonder3DGeneration => "Wonder3D multi-view generation",
                 WorkflowStep.TripoSFRefinement => "TripoSF mesh refinement",
-                WorkflowStep.FlexiCubesExtraction => "FlexiCubes mesh extraction",
+                WorkflowStep.DeepMeshPriorRefinement => "DeepMeshPrior refinement",
                 WorkflowStep.NeRFRefinement => "NeRF refinement",
                 WorkflowStep.MergePointClouds => "Merging point clouds",
                 WorkflowStep.AlignPointClouds => "Aligning point clouds",
@@ -720,8 +721,26 @@ namespace Deep3DStudio.Model.AIModels
             ModelStatusChanged?.Invoke("TripoSG", Directory.Exists(GetAbsoluteModelPath(settings.TripoSGModelPath)));
             ModelStatusChanged?.Invoke("TripoSF", Directory.Exists(GetAbsoluteModelPath(settings.TripoSFModelPath)));
             ModelStatusChanged?.Invoke("Wonder3D", Directory.Exists(GetAbsoluteModelPath(settings.Wonder3DModelPath)));
-            ModelStatusChanged?.Invoke("FlexiCubes", Directory.Exists(GetAbsoluteModelPath(settings.FlexiCubesModelPath)));
+            ModelStatusChanged?.Invoke("DeepMeshPrior", true);
             ModelStatusChanged?.Invoke("UniRig", Directory.Exists(GetAbsoluteModelPath(settings.UniRigModelPath)));
+        }
+
+        private async Task<SceneResult?> RefineWithDeepMeshPrior(SceneResult? result, Action<string, float>? progressCallback)
+        {
+            if (result == null || result.Meshes.Count == 0)
+                return result;
+
+            // Use the first mesh for now
+            var mesh = result.Meshes[0];
+            var mesher = new Meshing.DeepMeshPriorMesher();
+            var refinedMesh = await mesher.RefineMeshAsync(mesh, progressCallback);
+
+            if (refinedMesh != null)
+            {
+                result.Meshes[0] = refinedMesh;
+            }
+
+            return result;
         }
 
         /// <summary>

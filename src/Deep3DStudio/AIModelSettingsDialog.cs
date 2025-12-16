@@ -40,9 +40,10 @@ namespace Deep3DStudio
         private SpinButton _tripoSFResolution;
         private Entry _tripoSFModelPath;
 
-        // FlexiCubes
-        private SpinButton _flexiCubesResolution;
-        private Entry _flexiCubesModelPath;
+        // DeepMeshPrior
+        private SpinButton _deepMeshPriorIterations;
+        private SpinButton _deepMeshPriorLearningRate;
+        private SpinButton _deepMeshPriorLaplacianWeight;
 
         // UniRig
         private SpinButton _uniRigMaxJoints;
@@ -71,7 +72,7 @@ namespace Deep3DStudio
             notebook.AppendPage(CreateTripoSGTab(), new Label("TripoSG"));
             notebook.AppendPage(CreateWonder3DTab(), new Label("Wonder3D"));
             notebook.AppendPage(CreateTripoSFTab(), new Label("TripoSF"));
-            notebook.AppendPage(CreateFlexiCubesTab(), new Label("FlexiCubes"));
+            notebook.AppendPage(CreateDeepMeshPriorTab(), new Label("DeepMeshPrior"));
             notebook.AppendPage(CreateUniRigTab(), new Label("UniRig"));
             notebook.AppendPage(CreateMergerTab(), new Label("Point Cloud"));
 
@@ -357,7 +358,7 @@ namespace Deep3DStudio
             return grid;
         }
 
-        private Widget CreateFlexiCubesTab()
+        private Widget CreateDeepMeshPriorTab()
         {
             var grid = new Grid
             {
@@ -370,28 +371,29 @@ namespace Deep3DStudio
 
             int row = 0;
 
-            var header = new Label("<b>FlexiCubes - Differentiable Mesh Extraction</b>") { UseMarkup = true, Halign = Align.Start };
+            var header = new Label("<b>DeepMeshPrior - Mesh Denoising & Optimization</b>") { UseMarkup = true, Halign = Align.Start };
             grid.Attach(header, 0, row++, 2, 1);
 
-            grid.Attach(new Label("Grid Resolution:") { Halign = Align.Start }, 0, row, 1, 1);
-            _flexiCubesResolution = new SpinButton(32, 256, 16);
-            grid.Attach(_flexiCubesResolution, 1, row++, 1, 1);
+            grid.Attach(new Label("Iterations:") { Halign = Align.Start }, 0, row, 1, 1);
+            _deepMeshPriorIterations = new SpinButton(100, 5000, 100);
+            grid.Attach(_deepMeshPriorIterations, 1, row++, 1, 1);
 
-            grid.Attach(new Label("Model Path:") { Halign = Align.Start }, 0, row, 1, 1);
-            var pathBox = new Box(Orientation.Horizontal, 5);
-            _flexiCubesModelPath = new Entry { WidthChars = 40 };
-            var browseBtn = new Button("...");
-            browseBtn.Clicked += (s, e) => BrowseFolder(_flexiCubesModelPath);
-            pathBox.PackStart(_flexiCubesModelPath, true, true, 0);
-            pathBox.PackStart(browseBtn, false, false, 0);
-            grid.Attach(pathBox, 1, row++, 1, 1);
+            grid.Attach(new Label("Learning Rate:") { Halign = Align.Start }, 0, row, 1, 1);
+            _deepMeshPriorLearningRate = new SpinButton(0.0001, 0.1, 0.001);
+            _deepMeshPriorLearningRate.Digits = 4;
+            grid.Attach(_deepMeshPriorLearningRate, 1, row++, 1, 1);
+
+            grid.Attach(new Label("Laplacian Weight:") { Halign = Align.Start }, 0, row, 1, 1);
+            _deepMeshPriorLaplacianWeight = new SpinButton(0.0, 10.0, 0.1);
+            _deepMeshPriorLaplacianWeight.Digits = 2;
+            grid.Attach(_deepMeshPriorLaplacianWeight, 1, row++, 1, 1);
 
             row++;
             var info = new Label(
-                "FlexiCubes extracts high-quality meshes from SDFs\n" +
-                "using tetrahedral grids with adaptive deformation.\n\n" +
-                "Resolution: Higher = more detail.\n" +
-                "Better than Marching Cubes for sharp features.")
+                "DeepMeshPrior uses a Graph Convolutional Network (GCN)\n" +
+                "to optimize the mesh structure and remove noise.\n\n" +
+                "Iterations: More = smoother but slower.\n" +
+                "Laplacian Weight: Controls smoothness strength.")
             {
                 Halign = Align.Start,
                 Wrap = true,
@@ -542,9 +544,10 @@ namespace Deep3DStudio
             _tripoSFResolution.Value = _settings.TripoSFResolution;
             _tripoSFModelPath.Text = _settings.TripoSFModelPath;
 
-            // FlexiCubes
-            _flexiCubesResolution.Value = _settings.FlexiCubesResolution;
-            _flexiCubesModelPath.Text = _settings.FlexiCubesModelPath;
+            // DeepMeshPrior
+            _deepMeshPriorIterations.Value = _settings.DeepMeshPriorIterations;
+            _deepMeshPriorLearningRate.Value = _settings.DeepMeshPriorLearningRate;
+            _deepMeshPriorLaplacianWeight.Value = _settings.DeepMeshPriorLaplacianWeight;
 
             // UniRig
             _uniRigMaxJoints.Value = _settings.UniRigMaxJoints;
@@ -566,7 +569,7 @@ namespace Deep3DStudio
             _settings.MeshRefinement = (MeshRefinementMethod)_meshRefinementCombo.Active;
             _settings.MeshExtraction = _settings.MeshingAlgo switch
             {
-                MeshingAlgorithm.FlexiCubes => MeshExtractionMethod.FlexiCubes,
+                MeshingAlgorithm.DeepMeshPrior => MeshExtractionMethod.DeepMeshPrior,
                 MeshingAlgorithm.TripoSF => MeshExtractionMethod.TripoSF,
                 _ => MeshExtractionMethod.MarchingCubes
             };
@@ -591,9 +594,10 @@ namespace Deep3DStudio
             _settings.TripoSFResolution = (int)_tripoSFResolution.Value;
             _settings.TripoSFModelPath = _tripoSFModelPath.Text;
 
-            // FlexiCubes
-            _settings.FlexiCubesResolution = (int)_flexiCubesResolution.Value;
-            _settings.FlexiCubesModelPath = _flexiCubesModelPath.Text;
+            // DeepMeshPrior
+            _settings.DeepMeshPriorIterations = (int)_deepMeshPriorIterations.Value;
+            _settings.DeepMeshPriorLearningRate = (float)_deepMeshPriorLearningRate.Value;
+            _settings.DeepMeshPriorLaplacianWeight = (float)_deepMeshPriorLaplacianWeight.Value;
 
             // UniRig
             _settings.UniRigMaxJoints = (int)_uniRigMaxJoints.Value;

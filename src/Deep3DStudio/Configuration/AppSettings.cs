@@ -19,7 +19,7 @@ namespace Deep3DStudio.Configuration
         GreedyMeshing,
         SurfaceNets,
         Blocky,
-        FlexiCubes,
+        DeepMeshPrior,
         TripoSF,
         TripoSG
     }

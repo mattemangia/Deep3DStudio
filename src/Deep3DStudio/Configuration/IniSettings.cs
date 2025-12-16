@@ -23,14 +23,14 @@ namespace Deep3DStudio.Configuration
     public enum MeshExtractionMethod
     {
         MarchingCubes,
-        FlexiCubes,
+        DeepMeshPrior,
         TripoSF
     }
 
     public enum MeshRefinementMethod
     {
         None,
-        FlexiCubes,
+        DeepMeshPrior,
         TripoSF
     }
 
@@ -111,9 +111,10 @@ namespace Deep3DStudio.Configuration
         public int UniRigMaxJoints { get; set; } = 64;
         public int UniRigMaxBonesPerVertex { get; set; } = 4;
 
-        // FlexiCubes Settings
-        public int FlexiCubesResolution { get; set; } = 64;
-        public bool FlexiCubesUseDeformation { get; set; } = true;
+        // DeepMeshPrior Settings
+        public int DeepMeshPriorIterations { get; set; } = 500;
+        public float DeepMeshPriorLearningRate { get; set; } = 0.01f;
+        public float DeepMeshPriorLaplacianWeight { get; set; } = 1.4f;
 
         // TripoSF Settings
         public int TripoSFResolution { get; set; } = 512;
@@ -124,7 +125,6 @@ namespace Deep3DStudio.Configuration
         public string TripoSGModelPath { get; set; } = "models/triposg";
         public string Wonder3DModelPath { get; set; } = "models/wonder3d";
         public string UniRigModelPath { get; set; } = "models/unirig";
-        public string FlexiCubesModelPath { get; set; } = "models/flexicubes";
         public string TripoSFModelPath { get; set; } = "models/triposf";
 
         // Additional AI Model Settings
@@ -367,11 +367,11 @@ namespace Deep3DStudio.Configuration
                     writer.WriteLine($"ModelPath={UniRigModelPath}");
                     writer.WriteLine();
 
-                    // [FlexiCubes] section
-                    writer.WriteLine("[FlexiCubes]");
-                    writer.WriteLine($"Resolution={FlexiCubesResolution}");
-                    writer.WriteLine($"UseDeformation={FlexiCubesUseDeformation}");
-                    writer.WriteLine($"ModelPath={FlexiCubesModelPath}");
+                    // [DeepMeshPrior] section
+                    writer.WriteLine("[DeepMeshPrior]");
+                    writer.WriteLine($"Iterations={DeepMeshPriorIterations}");
+                    writer.WriteLine($"LearningRate={DeepMeshPriorLearningRate.ToString("F3", CultureInfo.InvariantCulture)}");
+                    writer.WriteLine($"LaplacianWeight={DeepMeshPriorLaplacianWeight.ToString("F3", CultureInfo.InvariantCulture)}");
                     writer.WriteLine();
 
                     // [TripoSF] section
@@ -515,13 +515,13 @@ namespace Deep3DStudio.Configuration
             if (TryGetValue("UniRig", "ModelPath", out string? urPath))
                 UniRigModelPath = urPath ?? UniRigModelPath;
 
-            // [FlexiCubes]
-            if (TryGetValue("FlexiCubes", "Resolution", out string? fcResStr) && int.TryParse(fcResStr, out var fcRes))
-                FlexiCubesResolution = Math.Clamp(fcRes, 32, 256);
-            if (TryGetValue("FlexiCubes", "UseDeformation", out string? fcDefStr) && bool.TryParse(fcDefStr, out var fcDef))
-                FlexiCubesUseDeformation = fcDef;
-            if (TryGetValue("FlexiCubes", "ModelPath", out string? fcPath))
-                FlexiCubesModelPath = fcPath ?? FlexiCubesModelPath;
+            // [DeepMeshPrior]
+            if (TryGetValue("DeepMeshPrior", "Iterations", out string? dmpIterStr) && int.TryParse(dmpIterStr, out var dmpIter))
+                DeepMeshPriorIterations = Math.Clamp(dmpIter, 100, 5000);
+            if (TryGetValue("DeepMeshPrior", "LearningRate", out string? dmpLrStr) && float.TryParse(dmpLrStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var dmpLr))
+                DeepMeshPriorLearningRate = Math.Clamp(dmpLr, 0.0001f, 0.1f);
+            if (TryGetValue("DeepMeshPrior", "LaplacianWeight", out string? dmpLapStr) && float.TryParse(dmpLapStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var dmpLap))
+                DeepMeshPriorLaplacianWeight = Math.Clamp(dmpLap, 0.0f, 10.0f);
 
             // [TripoSF]
             if (TryGetValue("TripoSF", "Resolution", out string? tsfResStr) && int.TryParse(tsfResStr, out var tsfRes))
@@ -639,10 +639,10 @@ namespace Deep3DStudio.Configuration
             UniRigMaxBonesPerVertex = 4;
             UniRigModelPath = "models/unirig";
 
-            // FlexiCubes
-            FlexiCubesResolution = 64;
-            FlexiCubesUseDeformation = true;
-            FlexiCubesModelPath = "models/flexicubes";
+            // DeepMeshPrior
+            DeepMeshPriorIterations = 500;
+            DeepMeshPriorLearningRate = 0.01f;
+            DeepMeshPriorLaplacianWeight = 1.4f;
 
             // TripoSF
             TripoSFResolution = 512;
