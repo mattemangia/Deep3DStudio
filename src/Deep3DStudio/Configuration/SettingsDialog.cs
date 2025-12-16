@@ -131,6 +131,56 @@ namespace Deep3DStudio.Configuration
 
             notebook.AppendPage(nerfBox, new Label("NeRF"));
 
+            // ===== Gaussian SDF Tab =====
+            var gsBox = new Box(Orientation.Vertical, 8);
+            gsBox.Margin = 10;
+
+            gsBox.PackStart(new Label("<b>Gaussian SDF Refiner Parameters</b>") { UseMarkup = true, Halign = Align.Start }, false, false, 5);
+
+            // Grid Resolution
+            var gsResBox = new Box(Orientation.Horizontal, 10);
+            gsResBox.PackStart(new Label("Grid Resolution:") { Halign = Align.Start }, false, false, 0);
+            var _gsResSpin = new SpinButton(32, 512, 16);
+            _gsResSpin.Value = IniSettings.Instance.GaussianSDFGridResolution;
+            _gsResSpin.TooltipText = "Resolution of the voxel grid (default: 128).";
+            _gsResSpin.ValueChanged += (s, e) => IniSettings.Instance.GaussianSDFGridResolution = (int)_gsResSpin.Value;
+            gsResBox.PackEnd(_gsResSpin, false, false, 0);
+            gsBox.PackStart(gsResBox, false, false, 0);
+
+            // Sigma
+            var gsSigmaBox = new Box(Orientation.Horizontal, 10);
+            gsSigmaBox.PackStart(new Label("Gaussian Sigma:") { Halign = Align.Start }, false, false, 0);
+            var _gsSigmaSpin = new SpinButton(0.1, 10.0, 0.1);
+            _gsSigmaSpin.Digits = 2;
+            _gsSigmaSpin.Value = IniSettings.Instance.GaussianSDFSigma;
+            _gsSigmaSpin.TooltipText = "Standard deviation of the Gaussian smoothing kernel.";
+            _gsSigmaSpin.ValueChanged += (s, e) => IniSettings.Instance.GaussianSDFSigma = (float)_gsSigmaSpin.Value;
+            gsSigmaBox.PackEnd(_gsSigmaSpin, false, false, 0);
+            gsBox.PackStart(gsSigmaBox, false, false, 0);
+
+            // Iterations
+            var gsIterBox = new Box(Orientation.Horizontal, 10);
+            gsIterBox.PackStart(new Label("Smoothing Iterations:") { Halign = Align.Start }, false, false, 0);
+            var _gsIterSpin = new SpinButton(0, 10, 1);
+            _gsIterSpin.Value = IniSettings.Instance.GaussianSDFIterations;
+            _gsIterSpin.TooltipText = "Number of smoothing passes (default: 1).";
+            _gsIterSpin.ValueChanged += (s, e) => IniSettings.Instance.GaussianSDFIterations = (int)_gsIterSpin.Value;
+            gsIterBox.PackEnd(_gsIterSpin, false, false, 0);
+            gsBox.PackStart(gsIterBox, false, false, 0);
+
+            // Iso Level
+            var gsIsoBox = new Box(Orientation.Horizontal, 10);
+            gsIsoBox.PackStart(new Label("Iso Level:") { Halign = Align.Start }, false, false, 0);
+            var _gsIsoSpin = new SpinButton(-1.0, 1.0, 0.05);
+            _gsIsoSpin.Digits = 2;
+            _gsIsoSpin.Value = IniSettings.Instance.GaussianSDFIsoLevel;
+            _gsIsoSpin.TooltipText = "Surface extraction iso-level (default: 0.0).";
+            _gsIsoSpin.ValueChanged += (s, e) => IniSettings.Instance.GaussianSDFIsoLevel = (float)_gsIsoSpin.Value;
+            gsIsoBox.PackEnd(_gsIsoSpin, false, false, 0);
+            gsBox.PackStart(gsIsoBox, false, false, 0);
+
+            notebook.AppendPage(gsBox, new Label("Gaussian SDF"));
+
             // ===== Viewport Tab =====
             var viewportBox = new Box(Orientation.Vertical, 8);
             viewportBox.Margin = 10;
