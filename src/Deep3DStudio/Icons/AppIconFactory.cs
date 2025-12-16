@@ -28,6 +28,7 @@ namespace Deep3DStudio.Icons
                         case "depthmap": DrawDepthMapIcon(cr, size); break;
                         case "select": DrawSelectIcon(cr, size); break;
                         case "texture": DrawTextureIcon(cr, size); break;
+                        case "camera": DrawCameraIcon(cr, size); break;
                     }
                 }
 
@@ -219,6 +220,54 @@ namespace Deep3DStudio.Icons
             cr.LineWidth = 1;
             cr.Rectangle(size * 0.2, size * 0.2, size * 0.6, size * 0.6);
             cr.Stroke();
+        }
+
+        private static void DrawCameraIcon(Context cr, int size)
+        {
+            // Camera frustum icon - represents camera viewing cone
+            cr.SetSourceRGB(1.0, 0.8, 0.0); // Yellow-orange (matches frustum color in viewport)
+            cr.LineWidth = 2;
+
+            // Camera body (small rectangle at top-left representing camera position)
+            double camX = size * 0.2;
+            double camY = size * 0.25;
+            double camW = size * 0.2;
+            double camH = size * 0.15;
+
+            cr.Rectangle(camX, camY, camW, camH);
+            cr.Fill();
+
+            // Lens circle
+            cr.Arc(camX + camW + size * 0.05, camY + camH / 2, size * 0.08, 0, 2 * Math.PI);
+            cr.Fill();
+
+            // Frustum lines (viewing cone radiating from camera)
+            double frustumStartX = camX + camW + size * 0.1;
+            double frustumStartY = camY + camH / 2;
+            double frustumEndX = size * 0.85;
+
+            cr.SetSourceRGB(1.0, 0.8, 0.0);
+            cr.LineWidth = 1.5;
+
+            // Top frustum line
+            cr.MoveTo(frustumStartX, frustumStartY);
+            cr.LineTo(frustumEndX, size * 0.15);
+            cr.Stroke();
+
+            // Bottom frustum line
+            cr.MoveTo(frustumStartX, frustumStartY);
+            cr.LineTo(frustumEndX, size * 0.85);
+            cr.Stroke();
+
+            // Far plane (vertical line at end of frustum)
+            cr.MoveTo(frustumEndX, size * 0.15);
+            cr.LineTo(frustumEndX, size * 0.85);
+            cr.Stroke();
+
+            // Optional: Add a small viewfinder on top of camera
+            cr.SetSourceRGB(0.8, 0.6, 0.0);
+            cr.Rectangle(camX + camW * 0.3, camY - size * 0.08, camW * 0.4, size * 0.08);
+            cr.Fill();
         }
 
     }
