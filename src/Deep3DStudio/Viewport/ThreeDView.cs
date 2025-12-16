@@ -69,6 +69,8 @@ namespace Deep3DStudio.Viewport
         private int _axesVao, _axesVbo;
         private int _cameraVao, _cameraVbo;
         private bool _useModernGL = false;
+        private bool _legacySupported = true;
+        private bool _legacyWarningLogged = false;
 
         // Point cloud modern GL buffers (key = object Id)
         private Dictionary<int, (int vao, int vbo, int count)> _pointCloudBuffers = new Dictionary<int, (int, int, int)>();
@@ -138,6 +140,19 @@ namespace Deep3DStudio.Viewport
 
             UpdateCropCorners();
             _frameTimer.Start();
+        }
+
+        private bool EnsureLegacySupport(string feature)
+        {
+            if (_legacySupported) return true;
+
+            if (!_legacyWarningLogged)
+            {
+                Console.WriteLine("Legacy OpenGL not available (core profile). Skipping legacy rendering paths to avoid driver crashes.");
+                _legacyWarningLogged = true;
+            }
+
+            return false;
         }
 
         #region Public Methods
@@ -333,6 +348,24 @@ namespace Deep3DStudio.Viewport
                 string version = GL.GetString(StringName.Version);
                 Console.WriteLine($"GL Version: {version}");
 
+                try
+                {
+                    int profileMask = GL.GetInteger(GetPName.ContextProfileMask);
+                    var profile = (ContextProfileMask)profileMask;
+
+                    _legacySupported = (profile & ContextProfileMask.ContextCompatibilityProfileBit) != 0 || profileMask == 0;
+
+                    if (!_legacySupported)
+                    {
+                        Console.WriteLine("Warning: Core profile detected. Disabling legacy immediate-mode rendering.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Warning: Unable to determine OpenGL profile. Assuming legacy support. Details: {ex.Message}");
+                    _legacySupported = true;
+                }
+
                 // Heuristic: If version >= 3.2 and we suspect Core profile (or just to be safe), init modern GL
                 // Note: On some drivers, Compatibility profile is available even in 4.x
                 // We will try to init modern GL resources for grid/axes just in case.
@@ -474,6 +507,12 @@ namespace Deep3DStudio.Viewport
         {
             if (!_loaded) return;
 
+            if (!_useModernGL && !_legacySupported)
+            {
+                if (EnsureLegacySupport("render")) return;
+                return;
+            }
+
             UpdateFPS();
             this.MakeCurrent();
 
@@ -600,6 +639,8 @@ namespace Deep3DStudio.Viewport
 
         private void DrawGrid()
         {
+            if (!EnsureLegacySupport("grid")) return;
+
             GL.Begin(PrimitiveType.Lines);
 
             int size = 10;
@@ -632,6 +673,8 @@ namespace Deep3DStudio.Viewport
 
         private void DrawAxesEnhanced()
         {
+            if (!EnsureLegacySupport("axes")) return;
+
             float axisLength = 1.5f;
             float arrowSize = 0.1f;
 
@@ -665,6 +708,8 @@ namespace Deep3DStudio.Viewport
 
         private void DrawArrowHead(Vector3 tip, Vector3 direction, float size, Vector3 color)
         {
+            if (!EnsureLegacySupport("axis arrow")) return;
+
             direction = direction.Normalized();
 
             // Find perpendicular vectors
@@ -703,6 +748,13 @@ namespace Deep3DStudio.Viewport
 
                 if (obj is MeshObject meshObj)
                 {
+                    if (!_legacySupported)
+                    {
+                        EnsureLegacySupport("mesh rendering");
+                        GL.PopMatrix();
+                        continue;
+                    }
+
                     bool isSelected = obj.Selected;
 
                     if (settings.ShowWireframe || meshObj.ShowWireframe)
@@ -752,6 +804,8 @@ namespace Deep3DStudio.Viewport
 
         private void DrawLegacyMeshes()
         {
+            if (!EnsureLegacySupport("legacy meshes")) return;
+
             var settings = IniSettings.Instance;
 
             if (settings.ShowWireframe)
@@ -781,6 +835,12 @@ namespace Deep3DStudio.Viewport
 
         private void DrawPointCloud(MeshData mesh, bool isSelected)
         {
+            if (!_legacySupported)
+            {
+                EnsureLegacySupport("mesh point cloud");
+                return;
+            }
+
             if (mesh.Vertices.Count == 0) return;
 
             var settings = IniSettings.Instance;
@@ -814,6 +874,12 @@ namespace Deep3DStudio.Viewport
 
         private void DrawPointCloudDepthMap(MeshData mesh)
         {
+            if (!_legacySupported)
+            {
+                EnsureLegacySupport("mesh point cloud depth map");
+                return;
+            }
+
             if (mesh.Vertices.Count == 0) return;
 
             float minDist = float.MaxValue;
@@ -856,6 +922,8 @@ namespace Deep3DStudio.Viewport
             }
 
             // Legacy fixed-function path (requires Compatibility profile)
+            if (!EnsureLegacySupport("point cloud")) return;
+
             GL.Begin(PrimitiveType.Points);
 
             bool hasColors = pc.Colors.Count >= pc.Points.Count;
@@ -1006,6 +1074,8 @@ namespace Deep3DStudio.Viewport
             }
 
             // Legacy path
+            if (!EnsureLegacySupport("point cloud bounding box")) return;
+
             GL.Color4(color.X, color.Y, color.Z, 0.6f);
 
             GL.Begin(PrimitiveType.Lines);
@@ -1104,6 +1174,8 @@ namespace Deep3DStudio.Viewport
 
         private void DrawMesh(MeshData mesh, bool isSelected)
         {
+            if (!EnsureLegacySupport("mesh")) return;
+
             if (mesh.Vertices.Count == 0 || mesh.Indices.Count == 0) return;
 
             bool useTexture = IniSettings.Instance.ShowTexture && mesh.Texture != null;
@@ -1190,6 +1262,8 @@ namespace Deep3DStudio.Viewport
 
         private void DrawSelectionOutline(SceneObject obj)
         {
+            if (!EnsureLegacySupport("selection outline")) return;
+
             var (min, max) = (obj.BoundsMin, obj.BoundsMax);
 
             GL.LineWidth(2.0f);
@@ -1234,6 +1308,8 @@ namespace Deep3DStudio.Viewport
 
         private void DrawCornerBox(Vector3 min, Vector3 max, float s)
         {
+            if (!EnsureLegacySupport("corner box")) return;
+
             // Bottom-Left-Front
             GL.Vertex3(min.X, min.Y, min.Z); GL.Vertex3(min.X + s, min.Y, min.Z);
             GL.Vertex3(min.X, min.Y, min.Z); GL.Vertex3(min.X, min.Y + s, min.Z);
@@ -1284,6 +1360,8 @@ namespace Deep3DStudio.Viewport
                 DrawCamerasModern();
                 return;
             }
+
+            if (!EnsureLegacySupport("camera frustums")) return;
 
             foreach (var cam in _sceneGraph.GetObjectsOfType<CameraObject>())
             {
@@ -1359,6 +1437,8 @@ namespace Deep3DStudio.Viewport
 
         private void DrawCameraFrustum(CameraObject cam)
         {
+            if (!EnsureLegacySupport("camera frustum")) return;
+
             Vector3 pos = cam.Position;
             if (cam.Pose != null)
             {
@@ -1428,6 +1508,8 @@ namespace Deep3DStudio.Viewport
         /// </summary>
         private void DrawSelectedTriangles()
         {
+            if (!EnsureLegacySupport("triangle highlight")) return;
+
             var vertices = _meshEditingTool.GetSelectedTriangleVertices();
             if (vertices.Count == 0)
                 return;
@@ -1473,6 +1555,8 @@ namespace Deep3DStudio.Viewport
 
         private void DrawGizmo()
         {
+            if (!EnsureLegacySupport("gizmo")) return;
+
             if (_sceneGraph == null || _sceneGraph.SelectedObjects.Count == 0) return;
 
             // Calculate gizmo center (centroid of selected objects)
@@ -1662,6 +1746,8 @@ namespace Deep3DStudio.Viewport
 
         private void DrawCropBox()
         {
+            if (!EnsureLegacySupport("crop box")) return;
+
             float s = _cropSize;
 
             GL.Color4(1.0f, 1.0f, 0.0f, 0.8f);
@@ -1707,6 +1793,8 @@ namespace Deep3DStudio.Viewport
 
         private void DrawInfoOverlay(int width, int height)
         {
+            if (!EnsureLegacySupport("info overlay")) return;
+
             // Setup 2D projection
             GL.MatrixMode(MatrixMode.Projection);
             GL.PushMatrix();
