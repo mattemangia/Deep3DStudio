@@ -404,12 +404,25 @@ def setup_cpu_only_environment(verbose=True):
     triton_mock.heuristics = MagicMock(side_effect=lambda kwargs: lambda fn: fn)
     triton_mock.Config = MagicMock()
 
+    # Create triton.backends mock with compiler submodule (needed by torch._inductor)
+    triton_backends_mock = MagicMock()
+    triton_backends_compiler_mock = MagicMock()
+    triton_backends_mock.compiler = triton_backends_compiler_mock
+
+    triton_mock.backends = triton_backends_mock
+
     sys.modules['triton'] = triton_mock
     sys.modules['triton.language'] = triton_language_mock
     sys.modules['triton.runtime'] = MagicMock()
+    sys.modules['triton.runtime.jit'] = MagicMock()
+    sys.modules['triton.runtime.autotuner'] = MagicMock()
     sys.modules['triton.compiler'] = MagicMock()
     sys.modules['triton.ops'] = MagicMock()
     sys.modules['triton.testing'] = MagicMock()
+    sys.modules['triton.backends'] = triton_backends_mock
+    sys.modules['triton.backends.compiler'] = triton_backends_compiler_mock
+    sys.modules['triton.backends.nvidia'] = MagicMock()
+    sys.modules['triton.backends.amd'] = MagicMock()
 
     if verbose:
         print("  [OK] triton mocked")

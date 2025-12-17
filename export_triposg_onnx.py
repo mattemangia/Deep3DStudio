@@ -372,6 +372,84 @@ def verify_onnx_has_weights(onnx_path):
         return True
 
 
+def export_with_fallback(model, args, output_path, input_names, output_names, dynamic_axes, component_name):
+    """
+    Export model to ONNX with multi-strategy fallback (like dust3r).
+
+    Strategy 1: Try dynamo-based export (default in PyTorch 2.x)
+    Strategy 2: Try legacy TorchScript-based export with dynamo=False
+    Strategy 3: Try fixed shapes export (no dynamic axes)
+    """
+    export_success = False
+
+    # --- Strategy 1: Try dynamo-based export ---
+    print(f"  Attempting export with dynamo-based exporter...")
+    try:
+        torch.onnx.export(
+            model,
+            args,
+            output_path,
+            input_names=input_names,
+            output_names=output_names,
+            opset_version=14,
+            dynamic_axes=dynamic_axes,
+            export_params=True,
+        )
+        export_success = True
+        print(f"  Success with dynamo-based exporter!")
+    except Exception as e:
+        print(f"  Dynamo-based export failed: {e}")
+
+    # --- Strategy 2: Try legacy TorchScript-based export ---
+    if not export_success:
+        print(f"  Attempting fallback with legacy TorchScript-based exporter (dynamo=False)...")
+        try:
+            with torch.no_grad():
+                torch.onnx.export(
+                    model,
+                    args,
+                    output_path,
+                    input_names=input_names,
+                    output_names=output_names,
+                    opset_version=14,
+                    dynamic_axes=dynamic_axes,
+                    do_constant_folding=True,
+                    export_params=True,
+                    dynamo=False,  # Force legacy exporter
+                )
+            export_success = True
+            print(f"  Success with legacy exporter!")
+        except Exception as e2:
+            print(f"  Legacy export failed: {e2}")
+
+    # --- Strategy 3: Try fixed shapes export (no dynamic axes) ---
+    if not export_success:
+        print(f"  Attempting export with fixed shapes (no dynamic axes)...")
+        fixed_output_path = output_path.replace('.onnx', '_fixed.onnx')
+        try:
+            with torch.no_grad():
+                torch.onnx.export(
+                    model,
+                    args,
+                    fixed_output_path,
+                    input_names=input_names,
+                    output_names=output_names,
+                    opset_version=14,
+                    do_constant_folding=True,
+                    export_params=True,
+                    dynamo=False,  # Force legacy exporter
+                )
+            export_success = True
+            output_path = fixed_output_path
+            print(f"  Success with fixed shapes! Output: {fixed_output_path}")
+        except Exception as e3:
+            print(f"  Fixed shapes export also failed: {e3}")
+            import traceback
+            traceback.print_exc()
+
+    return output_path if export_success else None
+
+
 def export_image_encoder(model, output_path, resolution=518):
     """Export the image encoder component."""
     print(f"\nExporting TripoSG Image Encoder...")
@@ -399,30 +477,32 @@ def export_image_encoder(model, output_path, resolution=518):
 
         dummy_input = torch.randn(1, 3, resolution, resolution)
 
-        torch.onnx.export(
+        result_path = export_with_fallback(
             encoder,
             dummy_input,
             encoder_path,
             input_names=['image'],
             output_names=['image_features'],
-            opset_version=14,
             dynamic_axes={
                 'image': {0: 'batch_size'},
                 'image_features': {0: 'batch_size'}
             },
-            export_params=True
+            component_name="Image Encoder"
         )
 
-        file_size = os.path.getsize(encoder_path) / (1024*1024)
-        if file_size > 1800:
-            save_onnx_with_external_data(encoder_path)
+        if result_path is None:
+            return None
 
-        print(f"Image encoder exported to {encoder_path}")
-        verify_onnx_model(encoder_path)
-        if not verify_onnx_has_weights(encoder_path):
-            save_onnx_with_external_data(encoder_path)
-            verify_onnx_has_weights(encoder_path)
-        return encoder_path
+        file_size = os.path.getsize(result_path) / (1024*1024)
+        if file_size > 1800:
+            save_onnx_with_external_data(result_path)
+
+        print(f"Image encoder exported to {result_path}")
+        verify_onnx_model(result_path)
+        if not verify_onnx_has_weights(result_path):
+            save_onnx_with_external_data(result_path)
+            verify_onnx_has_weights(result_path)
+        return result_path
 
     except Exception as e:
         print(f"Image encoder export failed: {e}")
@@ -458,31 +538,33 @@ def export_vae_decoder(model, output_path, num_latent_tokens=2048, latent_dim=64
         dummy_latent = torch.randn(1, num_latent_tokens, latent_dim)
         dummy_points = torch.randn(1, 10000, 3)  # Query points
 
-        torch.onnx.export(
+        result_path = export_with_fallback(
             decoder,
             (dummy_latent, dummy_points),
             decoder_path,
             input_names=['latent_tokens', 'query_points'],
             output_names=['sdf_values'],
-            opset_version=14,
             dynamic_axes={
                 'latent_tokens': {0: 'batch_size'},
                 'query_points': {0: 'batch_size', 1: 'num_points'},
                 'sdf_values': {0: 'batch_size', 1: 'num_points'}
             },
-            export_params=True
+            component_name="VAE Decoder"
         )
 
-        file_size = os.path.getsize(decoder_path) / (1024*1024)
-        if file_size > 1800:
-            save_onnx_with_external_data(decoder_path)
+        if result_path is None:
+            return None
 
-        print(f"VAE decoder exported to {decoder_path}")
-        verify_onnx_model(decoder_path)
-        if not verify_onnx_has_weights(decoder_path):
-            save_onnx_with_external_data(decoder_path)
-            verify_onnx_has_weights(decoder_path)
-        return decoder_path
+        file_size = os.path.getsize(result_path) / (1024*1024)
+        if file_size > 1800:
+            save_onnx_with_external_data(result_path)
+
+        print(f"VAE decoder exported to {result_path}")
+        verify_onnx_model(result_path)
+        if not verify_onnx_has_weights(result_path):
+            save_onnx_with_external_data(result_path)
+            verify_onnx_has_weights(result_path)
+        return result_path
 
     except Exception as e:
         print(f"VAE decoder export failed: {e}")
@@ -521,31 +603,33 @@ def export_flow_transformer(model, output_path, num_tokens=2048, hidden_dim=1024
         dummy_timestep = torch.tensor([0.5])  # Mid-diffusion timestep
         dummy_noisy_latent = torch.randn(1, num_tokens, hidden_dim)
 
-        torch.onnx.export(
+        result_path = export_with_fallback(
             transformer,
             (dummy_image_features, dummy_timestep, dummy_noisy_latent),
             transformer_path,
             input_names=['image_features', 'timestep', 'noisy_latent'],
             output_names=['velocity'],
-            opset_version=14,
             dynamic_axes={
                 'image_features': {0: 'batch_size'},
                 'noisy_latent': {0: 'batch_size'},
                 'velocity': {0: 'batch_size'}
             },
-            export_params=True
+            component_name="Flow Transformer"
         )
 
-        file_size = os.path.getsize(transformer_path) / (1024*1024)
-        if file_size > 1800:
-            save_onnx_with_external_data(transformer_path)
+        if result_path is None:
+            return None
 
-        print(f"Flow transformer exported to {transformer_path}")
-        verify_onnx_model(transformer_path)
-        if not verify_onnx_has_weights(transformer_path):
-            save_onnx_with_external_data(transformer_path)
-            verify_onnx_has_weights(transformer_path)
-        return transformer_path
+        file_size = os.path.getsize(result_path) / (1024*1024)
+        if file_size > 1800:
+            save_onnx_with_external_data(result_path)
+
+        print(f"Flow transformer exported to {result_path}")
+        verify_onnx_model(result_path)
+        if not verify_onnx_has_weights(result_path):
+            save_onnx_with_external_data(result_path)
+            verify_onnx_has_weights(result_path)
+        return result_path
 
     except Exception as e:
         print(f"Flow transformer export failed: {e}")
