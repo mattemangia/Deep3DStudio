@@ -601,9 +601,22 @@ def mock_flash_attn():
     sys.modules['flash_attn.bert_padding'] = mock_module
 
 
+def force_cpu_if_requested(device):
+    """Force PyTorch to think CUDA is unavailable if device is cpu."""
+    if device == 'cpu':
+        print("Forcing CPU execution by patching torch.cuda.is_available()...")
+        try:
+            torch.cuda.is_available = lambda: False
+        except Exception as e:
+            print(f"Warning: Could not patch torch.cuda.is_available: {e}")
+
 def main():
     args = parse_args()
     output_path = resolve_output_path(args.output, "triposg.onnx")
+    device = args.device
+
+    # Force CPU if requested
+    force_cpu_if_requested(device)
 
     ensure_dependencies()
     install_triposg()

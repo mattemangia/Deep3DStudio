@@ -768,8 +768,20 @@ def mock_cuda_modules():
         sys.modules['xformers'] = mock_xf
         sys.modules['xformers.ops'] = mock_xf
 
+def force_cpu_if_requested():
+    """Force PyTorch to think CUDA is unavailable to prevent accidental CUDA calls."""
+    print("Forcing CPU execution by patching torch.cuda.is_available()...")
+    try:
+        torch.cuda.is_available = lambda: False
+    except Exception as e:
+        print(f"Warning: Could not patch torch.cuda.is_available: {e}")
+
 def main():
     args = parse_args()
+
+    # Force CPU to be safe
+    force_cpu_if_requested()
+
     onnx_output_path = resolve_output_path(args.output, "dust3r.onnx")
 
     ensure_dependencies()

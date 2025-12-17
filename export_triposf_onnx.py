@@ -558,9 +558,22 @@ def mock_flash_attn():
     sys.modules['flash_attn.layers.rotary'] = mock_module
 
 
+def force_cpu_if_requested(device):
+    """Force PyTorch to think CUDA is unavailable if device is cpu."""
+    if device == 'cpu':
+        print("Forcing CPU execution by patching torch.cuda.is_available()...")
+        try:
+            torch.cuda.is_available = lambda: False
+        except Exception as e:
+            print(f"Warning: Could not patch torch.cuda.is_available: {e}")
+
 def main():
     args = parse_args()
     output_path = resolve_output_path(args.output, "triposf.onnx")
+    device = args.device
+
+    # Force CPU before any significant imports if requested
+    force_cpu_if_requested(device)
 
     ensure_dependencies()
     install_triposf()
@@ -569,7 +582,6 @@ def main():
     mock_flash_attn()
 
     print(f"\nLoading TripoSF model...")
-    device = args.device
 
     # Try to import and load the model
     try:
@@ -621,6 +633,29 @@ def main():
 
             # Override with TripoSFVAEInference.Config defaults
             cfg = OmegaConf.merge(OmegaConf.structured(TripoSFVAEInference.Config), config)
+
+            # Force device in config if possible or via monkey patching
+            # The error usually comes from FlexiCubes using a default device or one from config
+            # We'll monkey patch the Config class or the init if needed,
+            # but patching torch.cuda.is_available() at start should handle most cases.
+
+            # Additionally, let's patch FlexiCubes just in case
+            try:
+                from triposf.representations.mesh.flexicubes.flexicubes import FlexiCubes
+                original_init = FlexiCubes.__init__
+                def new_init(self, device='cpu', *args, **kwargs):
+                    if args and len(args) > 0:
+                        # If device is passed as arg, override it
+                        # But arguments are usually keyword args in this codebase
+                        pass
+                    # Force CPU device
+                    return original_init(self, device='cpu', *args, **kwargs)
+                FlexiCubes.__init__ = new_init
+                print("Patched FlexiCubes to force CPU device.")
+            except Exception:
+                # If import fails (e.g. paths not set yet), we might be too early or paths differ
+                # We can try to patch via sys.modules if it's already imported
+                pass
 
             # Initialize model
             model = TripoSFVAEInference(cfg)

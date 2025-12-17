@@ -593,9 +593,22 @@ def mock_cuda_modules():
         spconv.SparseSequential = nn.Sequential
 
 
+def force_cpu_if_requested(device):
+    """Force PyTorch to think CUDA is unavailable if device is cpu."""
+    if device == 'cpu':
+        print("Forcing CPU execution by patching torch.cuda.is_available()...")
+        try:
+            torch.cuda.is_available = lambda: False
+        except Exception as e:
+            print(f"Warning: Could not patch torch.cuda.is_available: {e}")
+
 def main():
     args = parse_args()
     output_path = resolve_output_path(args.output, "unirig.onnx")
+    device = args.device
+
+    # Force CPU before any significant imports if requested
+    force_cpu_if_requested(device)
 
     ensure_dependencies()
     install_unirig()
@@ -604,7 +617,6 @@ def main():
     mock_cuda_modules()
 
     print(f"\nLoading UniRig model...")
-    device = args.device
 
     # Try to load the model
     try:
