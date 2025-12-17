@@ -146,7 +146,10 @@ def install_triposg():
             with open(req_file, 'r') as f:
                 lines = f.readlines()
 
-            filtered_lines = [l for l in lines if 'flash-attn' not in l and 'xformers' not in l]
+            filtered_lines = [
+                l for l in lines
+                if 'flash-attn' not in l and 'xformers' not in l and 'spconv' not in l
+            ]
 
             with open(req_file, 'w') as f:
                 f.writelines(filtered_lines)
@@ -586,19 +589,36 @@ def resolve_output_path(output_path, default_name="triposg.onnx"):
     return output_path
 
 
-def mock_flash_attn():
-    """Mock flash_attn module to allow CPU execution."""
+def mock_cuda_modules():
+    """Mock CUDA-only modules (flash_attn, xformers, spconv) to allow CPU execution."""
     import sys
     from unittest.mock import MagicMock
+    import torch.nn as nn
 
-    if 'flash_attn' in sys.modules:
-        return
+    print("Mocking CUDA-only modules for CPU execution...")
 
-    print("Mocking flash_attn for CPU execution...")
-    mock_module = MagicMock()
-    sys.modules['flash_attn'] = mock_module
-    sys.modules['flash_attn.flash_attn_interface'] = mock_module
-    sys.modules['flash_attn.bert_padding'] = mock_module
+    # Mock flash_attn
+    if 'flash_attn' not in sys.modules:
+        mock_fa = MagicMock()
+        sys.modules['flash_attn'] = mock_fa
+        sys.modules['flash_attn.flash_attn_interface'] = mock_fa
+        sys.modules['flash_attn.bert_padding'] = mock_fa
+
+    # Mock spconv
+    if 'spconv' not in sys.modules:
+        spconv = MagicMock()
+        sys.modules['spconv'] = spconv
+        sys.modules['spconv.pytorch'] = spconv
+
+        class MockSparseConv3d(nn.Module):
+            def __init__(self, *args, **kwargs):
+                super().__init__()
+            def forward(self, x): return x
+
+        spconv.SparseConv3d = MockSparseConv3d
+        spconv.SubMConv3d = MockSparseConv3d
+        spconv.SparseModule = nn.Module
+        spconv.SparseSequential = nn.Sequential
 
 
 def force_cpu_if_requested(device):
@@ -621,8 +641,8 @@ def main():
     ensure_dependencies()
     install_triposg()
 
-    # Mock flash_attn
-    mock_flash_attn()
+    # Mock CUDA modules
+    mock_cuda_modules()
 
     print(f"\nLoading TripoSG model...")
     print("Note: TripoSG is a 1.5B parameter model, loading may take time...")
