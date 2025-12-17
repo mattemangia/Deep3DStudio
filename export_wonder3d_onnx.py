@@ -82,7 +82,7 @@ def ensure_dependencies():
     """Ensure required packages are installed."""
     required_packages = [
         'huggingface_hub', 'einops', 'onnx', 'pillow',
-        'diffusers', 'transformers', 'accelerate', 'safetensors'
+        'diffusers', 'transformers', 'accelerate', 'safetensors', 'scipy', 'numpy'
     ]
     missing_packages = []
 
@@ -560,12 +560,39 @@ def parse_args():
     return parser.parse_args()
 
 
+def resolve_output_path(output_path, default_name="wonder3d.onnx"):
+    """Resolve output path, handling directory paths that may not exist yet."""
+    # Check if path ends with / or \ (indicating directory intent)
+    is_dir_path = output_path.endswith('/') or output_path.endswith('\\')
+
+    # Check if it's an existing directory
+    if os.path.isdir(output_path) or is_dir_path:
+        # Create directory if it doesn't exist
+        dir_path = output_path.rstrip('/\\')
+        if not os.path.exists(dir_path):
+            os.makedirs(dir_path, exist_ok=True)
+            print(f"Created output directory: {dir_path}")
+        return os.path.join(dir_path, default_name)
+
+    # If path doesn't end with .onnx, treat as directory
+    if not output_path.lower().endswith('.onnx'):
+        if not os.path.exists(output_path):
+            os.makedirs(output_path, exist_ok=True)
+            print(f"Created output directory: {output_path}")
+        return os.path.join(output_path, default_name)
+
+    # It's a file path - ensure parent directory exists
+    parent_dir = os.path.dirname(output_path)
+    if parent_dir and not os.path.exists(parent_dir):
+        os.makedirs(parent_dir, exist_ok=True)
+        print(f"Created parent directory: {parent_dir}")
+
+    return output_path
+
+
 def main():
     args = parse_args()
-    output_path = args.output
-
-    if os.path.isdir(output_path):
-        output_path = os.path.join(output_path, "wonder3d.onnx")
+    output_path = resolve_output_path(args.output, "wonder3d.onnx")
 
     ensure_dependencies()
     install_wonder3d()
