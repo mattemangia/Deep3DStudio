@@ -603,31 +603,33 @@ def export_flow_transformer(model, output_path, num_tokens=2048, hidden_dim=1024
         dummy_timestep = torch.tensor([0.5])  # Mid-diffusion timestep
         dummy_noisy_latent = torch.randn(1, num_tokens, hidden_dim)
 
-        torch.onnx.export(
+        result_path = export_with_fallback(
             transformer,
             (dummy_image_features, dummy_timestep, dummy_noisy_latent),
             transformer_path,
             input_names=['image_features', 'timestep', 'noisy_latent'],
             output_names=['velocity'],
-            opset_version=14,
             dynamic_axes={
                 'image_features': {0: 'batch_size'},
                 'noisy_latent': {0: 'batch_size'},
                 'velocity': {0: 'batch_size'}
             },
-            export_params=True
+            component_name="Flow Transformer"
         )
 
-        file_size = os.path.getsize(transformer_path) / (1024*1024)
-        if file_size > 1800:
-            save_onnx_with_external_data(transformer_path)
+        if result_path is None:
+            return None
 
-        print(f"Flow transformer exported to {transformer_path}")
-        verify_onnx_model(transformer_path)
-        if not verify_onnx_has_weights(transformer_path):
-            save_onnx_with_external_data(transformer_path)
-            verify_onnx_has_weights(transformer_path)
-        return transformer_path
+        file_size = os.path.getsize(result_path) / (1024*1024)
+        if file_size > 1800:
+            save_onnx_with_external_data(result_path)
+
+        print(f"Flow transformer exported to {result_path}")
+        verify_onnx_model(result_path)
+        if not verify_onnx_has_weights(result_path):
+            save_onnx_with_external_data(result_path)
+            verify_onnx_has_weights(result_path)
+        return result_path
 
     except Exception as e:
         print(f"Flow transformer export failed: {e}")
