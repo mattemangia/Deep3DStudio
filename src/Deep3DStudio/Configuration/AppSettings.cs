@@ -21,7 +21,8 @@ namespace Deep3DStudio.Configuration
         Blocky,
         DeepMeshPrior,
         TripoSF,
-        TripoSG
+        TripoSG,
+        GaussianSDF
     }
 
     public enum CoordinateSystem

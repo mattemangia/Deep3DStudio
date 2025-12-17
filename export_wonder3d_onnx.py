@@ -258,7 +258,7 @@ def save_onnx_with_external_data(onnx_path):
 
 
 def verify_onnx_model(onnx_path):
-    """Verify the exported ONNX model."""
+    """Verify the exported ONNX model structure."""
     try:
         import onnx
 
@@ -267,21 +267,63 @@ def verify_onnx_model(onnx_path):
 
         model = onnx.load(onnx_path, load_external_data=has_external)
         onnx.checker.check_model(model)
-
-        num_initializers = len(model.graph.initializer)
-        file_size = os.path.getsize(onnx_path) / (1024*1024)
-
-        print(f"\nONNX Model Verification:")
-        print(f"  - Model valid: Yes")
-        print(f"  - Initializers: {num_initializers}")
-        print(f"  - File size: {file_size:.2f} MB")
-        if has_external:
-            print(f"  - External data: {os.path.getsize(data_path) / (1024*1024):.2f} MB")
-
+        print(f"ONNX model structure valid: {onnx_path}")
         return True
     except Exception as e:
         print(f"Verification failed: {e}")
         return False
+
+
+def verify_onnx_has_weights(onnx_path):
+    """Verify that the exported ONNX model contains weight initializers."""
+    try:
+        import onnx
+
+        data_path = onnx_path + ".data"
+        has_external_data = os.path.exists(data_path)
+
+        if has_external_data:
+            model = onnx.load(onnx_path, load_external_data=True)
+        else:
+            model = onnx.load(onnx_path)
+
+        num_initializers = len(model.graph.initializer)
+        total_weight_size = sum(
+            init.ByteSize() for init in model.graph.initializer
+        )
+
+        onnx_file_size = os.path.getsize(onnx_path) / (1024*1024)
+        total_file_size = onnx_file_size
+        if has_external_data:
+            total_file_size += os.path.getsize(data_path) / (1024*1024)
+
+        print(f"\n{'='*60}")
+        print(f"ONNX Model Verification:")
+        print(f"  - Number of initializers (weights): {num_initializers}")
+        print(f"  - Total weight data size: {total_weight_size / (1024*1024):.2f} MB")
+        print(f"  - ONNX file size: {onnx_file_size:.2f} MB")
+        if has_external_data:
+            print(f"  - External data file: {os.path.getsize(data_path) / (1024*1024):.2f} MB")
+        print(f"  - Total file size: {total_file_size:.2f} MB")
+        print(f"  - External data format: {'Yes' if has_external_data else 'No'}")
+        print(f"{'='*60}\n")
+
+        if num_initializers == 0:
+            print("WARNING: Model has no weight initializers!")
+            return False
+
+        if not has_external_data and total_file_size < total_weight_size / (1024*1024) * 0.5:
+            print("WARNING: File size is much smaller than weight data!")
+            print("This may indicate weights were not properly saved.")
+            print("Will attempt to convert to external data format...")
+            return False
+
+        return True
+    except Exception as e:
+        print(f"Could not verify ONNX model: {e}")
+        import traceback
+        traceback.print_exc()
+        return True
 
 
 def export_vae_encoder(vae, output_path, resolution=256):
@@ -327,6 +369,9 @@ def export_vae_encoder(vae, output_path, resolution=256):
 
         print(f"VAE encoder exported to {encoder_path}")
         verify_onnx_model(encoder_path)
+        if not verify_onnx_has_weights(encoder_path):
+            save_onnx_with_external_data(encoder_path)
+            verify_onnx_has_weights(encoder_path)
         return encoder_path
 
     except Exception as e:
@@ -377,6 +422,9 @@ def export_vae_decoder(vae, output_path, latent_size=32):
 
         print(f"VAE decoder exported to {decoder_path}")
         verify_onnx_model(decoder_path)
+        if not verify_onnx_has_weights(decoder_path):
+            save_onnx_with_external_data(decoder_path)
+            verify_onnx_has_weights(decoder_path)
         return decoder_path
 
     except Exception as e:
@@ -436,6 +484,9 @@ def export_unet(unet, output_path, num_views=6, latent_size=32, hidden_dim=768):
 
         print(f"UNet exported to {unet_path}")
         verify_onnx_model(unet_path)
+        if not verify_onnx_has_weights(unet_path):
+            save_onnx_with_external_data(unet_path)
+            verify_onnx_has_weights(unet_path)
         return unet_path
 
     except Exception as e:
@@ -485,6 +536,9 @@ def export_image_encoder(encoder, output_path, resolution=224):
 
         print(f"Image encoder exported to {encoder_path}")
         verify_onnx_model(encoder_path)
+        if not verify_onnx_has_weights(encoder_path):
+            save_onnx_with_external_data(encoder_path)
+            verify_onnx_has_weights(encoder_path)
         return encoder_path
 
     except Exception as e:

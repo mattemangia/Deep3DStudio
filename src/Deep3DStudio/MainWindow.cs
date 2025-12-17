@@ -677,6 +677,10 @@ namespace Deep3DStudio
             tripoSFItem.Activated += OnTripoSFRefine;
             meshProcessingMenu.Append(tripoSFItem);
 
+            var gaussianSDFItem = new MenuItem("_GaussianSDF Refinement");
+            gaussianSDFItem.Activated += OnGaussianSDFRefine;
+            meshProcessingMenu.Append(gaussianSDFItem);
+
             meshProcessingMenu.Append(new SeparatorMenuItem());
 
             var aiDecimateItem = new MenuItem("_Decimate & Optimize");
@@ -1440,7 +1444,7 @@ namespace Deep3DStudio
             toolbar.Insert(aiRigBtn, -1);
 
             var aiRefineBtn = new ToolButton(AppIconFactory.GenerateIcon("refine", iconSize), "AI Refine");
-            aiRefineBtn.TooltipText = "Refine mesh with AI models (TripoSF/DeepMeshPrior)";
+            aiRefineBtn.TooltipText = "Refine mesh with AI models (TripoSF/DeepMeshPrior/GaussianSDF)";
             aiRefineBtn.Clicked += OnAIRefine;
             toolbar.Insert(aiRefineBtn, -1);
 
@@ -1482,6 +1486,9 @@ namespace Deep3DStudio
                     break;
                 case MeshRefinementMethod.TripoSF:
                     await RunAIMeshingAsync(MeshingAlgorithm.TripoSF, "Mesh Refinement (TripoSF)");
+                    break;
+                case MeshRefinementMethod.GaussianSDF:
+                    await RunAIMeshingAsync(MeshingAlgorithm.GaussianSDF, "Mesh Refinement (GaussianSDF)");
                     break;
                 default:
                     ShowMessage("No refinement method selected", "Please choose a mesh refinement model in Settings.");
@@ -1580,6 +1587,24 @@ namespace Deep3DStudio
             {
                 Name = "TripoSF Refinement",
                 Steps = new List<AIModels.WorkflowStep> { AIModels.WorkflowStep.TripoSFRefinement }
+            };
+            RunAIWorkflowAsync(pipeline);
+        }
+
+        private void OnGaussianSDFRefine(object? sender, EventArgs e)
+        {
+            var selectedMesh = GetSelectedMesh();
+            if (selectedMesh == null && (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0))
+            {
+                ShowMessage("No Mesh", "Please generate or select a mesh to refine with GaussianSDF.");
+                return;
+            }
+
+            _statusLabel.Text = "Running GaussianSDF mesh refinement...";
+            var pipeline = new AIModels.WorkflowPipeline
+            {
+                Name = "GaussianSDF Refinement",
+                Steps = new List<AIModels.WorkflowStep> { AIModels.WorkflowStep.GaussianSDFRefinement }
             };
             RunAIWorkflowAsync(pipeline);
         }
@@ -3156,6 +3181,13 @@ namespace Deep3DStudio
                     break;
                 case MeshingAlgorithm.TripoSG:
                     pipeline = AIModels.WorkflowPipeline.ImageToTripoSG;
+                    break;
+                case MeshingAlgorithm.GaussianSDF:
+                    pipeline = new AIModels.WorkflowPipeline
+                    {
+                        Name = "GaussianSDF Mesh Refinement",
+                        Steps = new List<AIModels.WorkflowStep> { AIModels.WorkflowStep.GaussianSDFRefinement }
+                    };
                     break;
                 default:
                     return false;

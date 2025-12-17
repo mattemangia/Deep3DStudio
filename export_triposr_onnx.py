@@ -324,7 +324,7 @@ def save_onnx_with_external_data(onnx_path):
 
 
 def verify_onnx_model(onnx_path):
-    """Verify the exported ONNX model."""
+    """Verify the exported ONNX model structure."""
     try:
         import onnx
 
@@ -333,21 +333,67 @@ def verify_onnx_model(onnx_path):
 
         model = onnx.load(onnx_path, load_external_data=has_external)
         onnx.checker.check_model(model)
-
-        num_initializers = len(model.graph.initializer)
-        file_size = os.path.getsize(onnx_path) / (1024*1024)
-
-        print(f"\nONNX Model Verification:")
-        print(f"  - Model valid: Yes")
-        print(f"  - Initializers: {num_initializers}")
-        print(f"  - File size: {file_size:.2f} MB")
-        if has_external:
-            print(f"  - External data: {os.path.getsize(data_path) / (1024*1024):.2f} MB")
-
+        print(f"ONNX model structure valid: {onnx_path}")
         return True
     except Exception as e:
         print(f"Verification failed: {e}")
         return False
+
+
+def verify_onnx_has_weights(onnx_path):
+    """Verify that the exported ONNX model contains weight initializers."""
+    try:
+        import onnx
+
+        # Check if external data file exists
+        data_path = onnx_path + ".data"
+        has_external_data = os.path.exists(data_path)
+
+        if has_external_data:
+            # Load with external data
+            model = onnx.load(onnx_path, load_external_data=True)
+        else:
+            model = onnx.load(onnx_path)
+
+        # Count initializers (weights)
+        num_initializers = len(model.graph.initializer)
+        total_weight_size = sum(
+            init.ByteSize() for init in model.graph.initializer
+        )
+
+        onnx_file_size = os.path.getsize(onnx_path) / (1024*1024)
+        total_file_size = onnx_file_size
+        if has_external_data:
+            total_file_size += os.path.getsize(data_path) / (1024*1024)
+
+        print(f"\n{'='*60}")
+        print(f"ONNX Model Verification:")
+        print(f"  - Number of initializers (weights): {num_initializers}")
+        print(f"  - Total weight data size: {total_weight_size / (1024*1024):.2f} MB")
+        print(f"  - ONNX file size: {onnx_file_size:.2f} MB")
+        if has_external_data:
+            print(f"  - External data file: {os.path.getsize(data_path) / (1024*1024):.2f} MB")
+        print(f"  - Total file size: {total_file_size:.2f} MB")
+        print(f"  - External data format: {'Yes' if has_external_data else 'No'}")
+        print(f"{'='*60}\n")
+
+        if num_initializers == 0:
+            print("WARNING: Model has no weight initializers!")
+            return False
+
+        # Check if file size is reasonable (should be close to weight size for non-external)
+        if not has_external_data and total_file_size < total_weight_size / (1024*1024) * 0.5:
+            print("WARNING: File size is much smaller than weight data!")
+            print("This may indicate weights were not properly saved.")
+            print("Will attempt to convert to external data format...")
+            return False
+
+        return True
+    except Exception as e:
+        print(f"Could not verify ONNX model: {e}")
+        import traceback
+        traceback.print_exc()
+        return True  # Don't fail if verification itself fails
 
 
 def export_triposr_encoder(model, output_path, resolution=256):
@@ -386,6 +432,9 @@ def export_triposr_encoder(model, output_path, resolution=256):
         )
         print(f"Encoder exported to {encoder_path}")
         verify_onnx_model(encoder_path)
+        if not verify_onnx_has_weights(encoder_path):
+            save_onnx_with_external_data(encoder_path)
+            verify_onnx_has_weights(encoder_path)
         return encoder_path
     except Exception as e:
         print(f"Encoder export failed: {e}")
@@ -436,6 +485,9 @@ def export_triposr_backbone(model, output_path, resolution=256):
             save_onnx_with_external_data(backbone_path)
 
         verify_onnx_model(backbone_path)
+        if not verify_onnx_has_weights(backbone_path):
+            save_onnx_with_external_data(backbone_path)
+            verify_onnx_has_weights(backbone_path)
         return backbone_path
     except Exception as e:
         print(f"Backbone export failed: {e}")
