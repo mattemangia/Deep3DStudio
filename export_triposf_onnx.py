@@ -84,7 +84,7 @@ def ensure_dependencies():
     """Ensure required packages are installed."""
     required_packages = [
         'huggingface_hub', 'einops', 'onnx', 'pillow',
-        'trimesh', 'safetensors', 'accelerate', 'easydict', 'scipy', 'numpy'
+        'trimesh', 'safetensors', 'accelerate', 'easydict', 'scipy', 'numpy', 'omegaconf'
     ]
     missing_packages = []
 
@@ -155,6 +155,8 @@ class TripoSFPointCloudEncoder(nn.Module):
         Returns:
             latent: (B, L, D) latent representation
         """
+        # Note: TripoSF encoder expects sparse tensor input or specific format
+        # This wrapper needs to match what the model expects
         if features is None:
             return self.encoder(points)
         return self.encoder(points, features)
@@ -327,6 +329,8 @@ def export_encoder(model, output_path, num_points=10000, point_dim=3):
             self.encoder = model.encoder if hasattr(model, 'encoder') else model
 
         def forward(self, points):
+            # This is simplified - actual model might need sparse tensors
+            # For ONNX, we might need to export the dense components
             return self.encoder(points)
 
     try:
@@ -539,32 +543,58 @@ def main():
         sys.path.insert(0, os.path.abspath(REPO_DIR))
 
         from huggingface_hub import snapshot_download
+        from omegaconf import OmegaConf
 
         # Download model files
         print("Downloading model from HuggingFace...")
         model_dir = snapshot_download(repo_id=MODEL_ID, local_dir=os.path.join(REPO_DIR, "pretrained"))
 
-        # Try to import TripoSF
+        # Import TripoSF
         try:
-            from triposf.models import SparseFlex
-            from triposf.inference import load_model
+            # TripoSF uses 'inference.py' in root which defines 'TripoSFVAEInference'
+            from inference import TripoSFVAEInference
 
-            model = load_model(model_dir, device=device)
-        except ImportError:
-            # Alternative: try to load weights directly
-            print("Standard import failed, trying alternative loading...")
-            from safetensors.torch import load_file
+            # Load configuration
+            config_path = os.path.join(REPO_DIR, "configs", "TripoSFVAE_1024.yaml")
+            if not os.path.exists(config_path):
+                 # Fallback if config is in different location or filename
+                 config_path = os.path.join(REPO_DIR, "configs", "triposf_1024.yaml")
 
+            if not os.path.exists(config_path):
+                print(f"Warning: Config file not found at {config_path}")
+                # Create a minimal config object if file missing, or try to find it
+                found_configs = [f for f in os.listdir(os.path.join(REPO_DIR, "configs")) if f.endswith(".yaml")]
+                if found_configs:
+                    config_path = os.path.join(REPO_DIR, "configs", found_configs[0])
+                    print(f"Using config: {config_path}")
+
+            # Instantiate model from config
+            print(f"Loading model with config: {config_path}")
+
+            # We need to manually inject weight path into config if it's not set correctly
+            # The inference script uses 'TripoSFVAEInference.from_config'
+
+            # Load the config first to inject weights
+            config = OmegaConf.load(config_path)
+
+            # Check for weight file
             weights_path = os.path.join(model_dir, "model.safetensors")
             if not os.path.exists(weights_path):
                 weights_path = os.path.join(model_dir, "pytorch_model.bin")
 
             if os.path.exists(weights_path):
                 print(f"Found weights at {weights_path}")
-                # Create model architecture and load weights
-                raise ImportError("Need to implement model architecture loading")
-            else:
-                raise FileNotFoundError(f"No model weights found in {model_dir}")
+                config.weight = weights_path
+
+            # Override with TripoSFVAEInference.Config defaults
+            cfg = OmegaConf.merge(OmegaConf.structured(TripoSFVAEInference.Config), config)
+
+            # Initialize model
+            model = TripoSFVAEInference(cfg)
+
+        except ImportError as e:
+            print(f"Import failed: {e}")
+            raise
 
     except Exception as e:
         print(f"Failed to load TripoSF model: {e}")
@@ -636,6 +666,7 @@ Please follow these steps:
    git clone https://github.com/VAST-AI-Research/TripoSF.git
    cd TripoSF
    pip install -r requirements.txt
+   pip install omegaconf
 
 3. Download model weights:
    python -c "from huggingface_hub import snapshot_download; snapshot_download('VAST-AI/TripoSF')"
