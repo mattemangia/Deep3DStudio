@@ -98,7 +98,7 @@ def ensure_dependencies():
     required_packages = [
         'huggingface_hub', 'einops', 'onnx', 'pillow',
         'trimesh', 'safetensors', 'accelerate', 'transformers',
-        'easydict', 'scipy', 'numpy'
+        'easydict', 'scipy', 'numpy', 'diffusers'
     ]
     missing_packages = []
 
@@ -358,7 +358,14 @@ def export_image_encoder(model, output_path, resolution=518):
     class ImageEncoderWrapper(nn.Module):
         def __init__(self, model):
             super().__init__()
-            self.image_encoder = model.image_encoder if hasattr(model, 'image_encoder') else model
+            # TripoSG uses DINOv2 or CLIP, check model structure
+            if hasattr(model, 'image_encoder'):
+                self.image_encoder = model.image_encoder
+            elif hasattr(model, 'model') and hasattr(model.model, 'image_encoder'):
+                self.image_encoder = model.model.image_encoder
+            else:
+                 # Fallback, assume model itself is encoder or has it
+                 self.image_encoder = model
 
         def forward(self, image):
             return self.image_encoder(image)
@@ -410,7 +417,12 @@ def export_vae_decoder(model, output_path, num_latent_tokens=2048, latent_dim=64
     class VAEDecoderWrapper(nn.Module):
         def __init__(self, model):
             super().__init__()
-            self.decoder = model.vae.decoder if hasattr(model, 'vae') else model
+            if hasattr(model, 'vae'):
+                self.decoder = model.vae.decoder
+            elif hasattr(model, 'decoder'):
+                self.decoder = model.decoder
+            else:
+                raise ValueError("Could not locate VAE decoder in model")
 
         def forward(self, latent_tokens, query_points):
             return self.decoder(latent_tokens, query_points)
@@ -465,7 +477,10 @@ def export_flow_transformer(model, output_path, num_tokens=2048, hidden_dim=1024
     class FlowTransformerWrapper(nn.Module):
         def __init__(self, model):
             super().__init__()
-            self.transformer = model.transformer if hasattr(model, 'transformer') else model
+            if hasattr(model, 'transformer'):
+                self.transformer = model.transformer
+            else:
+                raise ValueError("Could not locate transformer in model")
 
         def forward(self, image_features, timestep, noisy_latent):
             return self.transformer(
@@ -583,15 +598,20 @@ def main():
 
         # Import TripoSG modules
         try:
+            # Correct import path for TripoSG pipeline
+            from triposg.pipelines.pipeline_triposg import TripoSGPipeline
+
+            pipeline = TripoSGPipeline.from_pretrained(model_dir)
+            pipeline.to(device)
+            model = pipeline
+
+        except ImportError:
+            # Fallback
+            print("Standard import failed, trying alternative...")
             from triposg.pipelines import TripoSGPipeline
             pipeline = TripoSGPipeline.from_pretrained(model_dir)
             pipeline.to(device)
             model = pipeline
-        except ImportError:
-            # Alternative import path
-            print("Trying alternative import...")
-            from inference import load_model
-            model = load_model(model_dir, device=device)
 
     except Exception as e:
         print(f"Failed to load TripoSG model: {e}")
@@ -656,7 +676,7 @@ Please follow these steps:
 
 1. Install dependencies:
    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-   pip install huggingface_hub safetensors accelerate transformers
+   pip install huggingface_hub safetensors accelerate transformers diffusers
 
 2. Clone and setup TripoSG:
    git clone https://github.com/VAST-AI-Research/TripoSG.git

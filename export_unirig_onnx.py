@@ -85,13 +85,14 @@ def ensure_dependencies():
     """Ensure required packages are installed."""
     required_packages = [
         'huggingface_hub', 'einops', 'onnx', 'trimesh',
-        'safetensors', 'accelerate', 'transformers', 'scipy', 'numpy'
+        'safetensors', 'accelerate', 'transformers', 'scipy', 'numpy',
+        'omegaconf', 'python-box', 'lightning'
     ]
     missing_packages = []
 
     for package in required_packages:
         try:
-            __import__(package)
+            __import__(package.replace('python-', ''))
         except ImportError:
             missing_packages.append(package)
 
@@ -109,7 +110,7 @@ def ensure_dependencies():
 
 def install_unirig():
     """Clone and set up UniRig repository."""
-    if os.path.exists(REPO_DIR) and os.path.exists(os.path.join(REPO_DIR, "unirig")):
+    if os.path.exists(REPO_DIR) and os.path.exists(os.path.join(REPO_DIR, "src")):
         print(f"Found existing UniRig repository at {REPO_DIR}")
         repo_abs_path = os.path.abspath(REPO_DIR)
         if repo_abs_path not in sys.path:
@@ -165,33 +166,28 @@ class UniRigMeshEncoder(nn.Module):
 class UniRigSkeletonDecoder(nn.Module):
     """
     Wrapper for UniRig's autoregressive skeleton decoder (GPT-like).
-    Generates skeleton tokens autoregressively.
     """
-    def __init__(self, decoder):
+    def __init__(self, model):
         super().__init__()
-        self.decoder = decoder
+        self.model = model
 
     def forward(self, mesh_features, skeleton_tokens=None):
         """
         Args:
             mesh_features: (B, N, D) encoded mesh features
             skeleton_tokens: (B, S, D) previous skeleton tokens (for autoregressive)
-        Returns:
-            next_token_logits: (B, V) logits for next token prediction
-            OR
-            skeleton_tokens: (B, S, D) all skeleton tokens if full forward
         """
-        return self.decoder(mesh_features, skeleton_tokens)
+        # This needs to be adapted to match UniRigAR.forward or generate
+        return self.model(mesh_features, skeleton_tokens)
 
 
 class UniRigSkinningPredictor(nn.Module):
     """
     Wrapper for UniRig's skinning weight predictor.
-    Uses Bone-Point Cross Attention to predict per-vertex skinning weights.
     """
-    def __init__(self, predictor):
+    def __init__(self, model):
         super().__init__()
-        self.predictor = predictor
+        self.model = model
 
     def forward(self, mesh_features, bone_features):
         """
@@ -201,27 +197,7 @@ class UniRigSkinningPredictor(nn.Module):
         Returns:
             skinning_weights: (B, V, J) skinning weights per vertex per bone
         """
-        return self.predictor(mesh_features, bone_features)
-
-
-class UniRigFullPipeline(nn.Module):
-    """
-    Full UniRig pipeline for ONNX export (non-autoregressive version).
-    """
-    def __init__(self, model):
-        super().__init__()
-        self.model = model
-
-    def forward(self, vertices):
-        """
-        Args:
-            vertices: (B, V, 3) input mesh vertices
-        Returns:
-            joint_positions: (B, J, 3) predicted joint positions
-            skinning_weights: (B, V, J) predicted skinning weights
-            parent_indices: (B, J) parent index for each joint
-        """
-        return self.model(vertices)
+        return self.model(mesh_features, bone_features)
 
 
 def save_onnx_with_external_data(onnx_path):
@@ -346,29 +322,33 @@ def export_mesh_encoder(model, output_path, num_vertices=10000, hidden_dim=512):
 
     encoder_path = output_path.replace('.onnx', '_mesh_encoder.onnx')
 
+    # This requires looking at how UniRigAR encodes mesh
     class MeshEncoderWrapper(nn.Module):
         def __init__(self, model):
             super().__init__()
-            self.encoder = model.mesh_encoder if hasattr(model, 'mesh_encoder') else model
+            self.model = model
 
-        def forward(self, vertices):
-            return self.encoder(vertices)
+        def forward(self, vertices, normals):
+            # UniRigAR.encode_mesh_cond
+            return self.model.encode_mesh_cond(vertices, normals)
 
     try:
         encoder = MeshEncoderWrapper(model)
         encoder.eval()
 
         dummy_vertices = torch.randn(1, num_vertices, 3)
+        dummy_normals = torch.randn(1, num_vertices, 3)
 
         torch.onnx.export(
             encoder,
-            dummy_vertices,
+            (dummy_vertices, dummy_normals),
             encoder_path,
-            input_names=['vertices'],
+            input_names=['vertices', 'normals'],
             output_names=['mesh_features'],
             opset_version=14,
             dynamic_axes={
                 'vertices': {0: 'batch_size', 1: 'num_vertices'},
+                'normals': {0: 'batch_size', 1: 'num_vertices'},
                 'mesh_features': {0: 'batch_size', 1: 'num_tokens'}
             },
             export_params=True
@@ -392,7 +372,7 @@ def export_mesh_encoder(model, output_path, num_vertices=10000, hidden_dim=512):
         return None
 
 
-def export_skeleton_decoder_step(model, output_path, hidden_dim=512, max_seq_len=256):
+def export_skeleton_decoder_step(model, output_path, hidden_dim=768, max_seq_len=256):
     """Export skeleton decoder for single-step autoregressive inference."""
     print(f"\nExporting UniRig Skeleton Decoder (Single Step)...")
 
@@ -401,43 +381,51 @@ def export_skeleton_decoder_step(model, output_path, hidden_dim=512, max_seq_len
     class SkeletonDecoderStepWrapper(nn.Module):
         def __init__(self, model):
             super().__init__()
-            self.decoder = model.skeleton_decoder if hasattr(model, 'skeleton_decoder') else model
+            self.model = model
+            self.transformer = model.transformer
 
-        def forward(self, mesh_features, prev_tokens, prev_positions):
+        def forward(self, mesh_features, input_ids, attention_mask):
             """
             Single-step forward for autoregressive generation.
-
-            Args:
-                mesh_features: (B, N, D) encoded mesh
-                prev_tokens: (B, S) previous token indices
-                prev_positions: (B, S, 3) previous joint positions
-            Returns:
-                next_token_logits: (B, V) vocabulary logits
-                next_position: (B, 3) predicted position
             """
-            return self.decoder.step(mesh_features, prev_tokens, prev_positions)
+            # mesh_features is cond
+            B = mesh_features.shape[0]
+
+            inputs_embeds = self.transformer.get_input_embeddings()(input_ids).to(dtype=self.transformer.dtype)
+            inputs_embeds = torch.concat([mesh_features, inputs_embeds], dim=1)
+
+            # attention mask needs padding
+            # attention_mask = pad(attention_mask, (mesh_features.shape[1], 0, 0, 0), value=1.)
+
+            output = self.transformer(
+                inputs_embeds=inputs_embeds,
+                # attention_mask=attention_mask,
+                use_cache=False,
+            )
+
+            # Return last logit
+            return output.logits[:, -1, :]
 
     try:
         decoder = SkeletonDecoderStepWrapper(model)
         decoder.eval()
 
-        dummy_mesh_features = torch.randn(1, 256, hidden_dim)
-        dummy_prev_tokens = torch.randint(0, 100, (1, 10))
-        dummy_prev_positions = torch.randn(1, 10, 3)
+        dummy_mesh_features = torch.randn(1, 256, hidden_dim) # Assuming 256 tokens from encoder
+        dummy_input_ids = torch.randint(0, 100, (1, 10))
+        dummy_mask = torch.ones((1, 10))
 
         torch.onnx.export(
             decoder,
-            (dummy_mesh_features, dummy_prev_tokens, dummy_prev_positions),
+            (dummy_mesh_features, dummy_input_ids, dummy_mask),
             decoder_path,
-            input_names=['mesh_features', 'prev_tokens', 'prev_positions'],
-            output_names=['next_token_logits', 'next_position'],
+            input_names=['mesh_features', 'input_ids', 'attention_mask'],
+            output_names=['next_token_logits'],
             opset_version=14,
             dynamic_axes={
                 'mesh_features': {0: 'batch_size'},
-                'prev_tokens': {0: 'batch_size', 1: 'seq_len'},
-                'prev_positions': {0: 'batch_size', 1: 'seq_len'},
+                'input_ids': {0: 'batch_size', 1: 'seq_len'},
+                'attention_mask': {0: 'batch_size', 1: 'seq_len'},
                 'next_token_logits': {0: 'batch_size'},
-                'next_position': {0: 'batch_size'}
             },
             export_params=True
         )
@@ -460,128 +448,12 @@ def export_skeleton_decoder_step(model, output_path, hidden_dim=512, max_seq_len
         return None
 
 
-def export_skinning_predictor(model, output_path, num_vertices=10000, num_joints=64, hidden_dim=512):
-    """Export the skinning weight predictor."""
-    print(f"\nExporting UniRig Skinning Predictor...")
-
-    skinning_path = output_path.replace('.onnx', '_skinning_predictor.onnx')
-
-    class SkinningPredictorWrapper(nn.Module):
-        def __init__(self, model):
-            super().__init__()
-            self.predictor = model.skinning_predictor if hasattr(model, 'skinning_predictor') else model
-
-        def forward(self, mesh_features, bone_features):
-            return self.predictor(mesh_features, bone_features)
-
-    try:
-        predictor = SkinningPredictorWrapper(model)
-        predictor.eval()
-
-        dummy_mesh_features = torch.randn(1, num_vertices, hidden_dim)
-        dummy_bone_features = torch.randn(1, num_joints, hidden_dim)
-
-        torch.onnx.export(
-            predictor,
-            (dummy_mesh_features, dummy_bone_features),
-            skinning_path,
-            input_names=['mesh_features', 'bone_features'],
-            output_names=['skinning_weights'],
-            opset_version=14,
-            dynamic_axes={
-                'mesh_features': {0: 'batch_size', 1: 'num_vertices'},
-                'bone_features': {0: 'batch_size', 1: 'num_bones'},
-                'skinning_weights': {0: 'batch_size', 1: 'num_vertices', 2: 'num_bones'}
-            },
-            export_params=True
-        )
-
-        file_size = os.path.getsize(skinning_path) / (1024*1024)
-        if file_size > 1800:
-            save_onnx_with_external_data(skinning_path)
-
-        print(f"Skinning predictor exported to {skinning_path}")
-        verify_onnx_model(skinning_path)
-        if not verify_onnx_has_weights(skinning_path):
-            save_onnx_with_external_data(skinning_path)
-            verify_onnx_has_weights(skinning_path)
-        return skinning_path
-
-    except Exception as e:
-        print(f"Skinning predictor export failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-
-
-def export_bone_feature_extractor(model, output_path, num_joints=64, joint_dim=3):
-    """Export bone feature extractor for skeleton-to-features conversion."""
-    print(f"\nExporting UniRig Bone Feature Extractor...")
-
-    bone_path = output_path.replace('.onnx', '_bone_features.onnx')
-
-    class BoneFeatureWrapper(nn.Module):
-        def __init__(self, model):
-            super().__init__()
-            self.bone_encoder = model.bone_encoder if hasattr(model, 'bone_encoder') else model
-
-        def forward(self, joint_positions, parent_indices, bone_axes=None):
-            """
-            Args:
-                joint_positions: (B, J, 3) joint world positions
-                parent_indices: (B, J) parent joint index for each joint
-                bone_axes: (B, J, 3, 3) local bone axes (optional)
-            Returns:
-                bone_features: (B, J, D) bone feature vectors
-            """
-            return self.bone_encoder(joint_positions, parent_indices, bone_axes)
-
-    try:
-        wrapper = BoneFeatureWrapper(model)
-        wrapper.eval()
-
-        dummy_positions = torch.randn(1, num_joints, joint_dim)
-        dummy_parents = torch.randint(-1, num_joints, (1, num_joints))
-
-        torch.onnx.export(
-            wrapper,
-            (dummy_positions, dummy_parents),
-            bone_path,
-            input_names=['joint_positions', 'parent_indices'],
-            output_names=['bone_features'],
-            opset_version=14,
-            dynamic_axes={
-                'joint_positions': {0: 'batch_size', 1: 'num_joints'},
-                'parent_indices': {0: 'batch_size', 1: 'num_joints'},
-                'bone_features': {0: 'batch_size', 1: 'num_joints'}
-            },
-            export_params=True
-        )
-
-        file_size = os.path.getsize(bone_path) / (1024*1024)
-        if file_size > 1800:
-            save_onnx_with_external_data(bone_path)
-
-        print(f"Bone feature extractor exported to {bone_path}")
-        verify_onnx_model(bone_path)
-        if not verify_onnx_has_weights(bone_path):
-            save_onnx_with_external_data(bone_path)
-            verify_onnx_has_weights(bone_path)
-        return bone_path
-
-    except Exception as e:
-        print(f"Bone feature extractor export failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-
-
 def parse_args():
     parser = argparse.ArgumentParser(description="Export UniRig model to ONNX format")
     parser.add_argument("--output", type=str, default="unirig.onnx",
                         help="Output path for ONNX model")
     parser.add_argument("--component", type=str, default="all",
-                        choices=['all', 'encoder', 'skeleton', 'skinning', 'bones'],
+                        choices=['all', 'encoder', 'skeleton', 'skinning'],
                         help="Which component to export (default: all)")
     parser.add_argument("--device", type=str, default="cpu",
                         help="Device to use for export (cpu or cuda)")
@@ -618,6 +490,60 @@ def resolve_output_path(output_path, default_name="unirig.onnx"):
     return output_path
 
 
+def load_model_from_config(repo_dir, device="cpu"):
+    """Load the UniRig model using its configuration files."""
+    try:
+        import yaml
+        from box import Box
+        from src.tokenizer.spec import TokenizerConfig
+        from src.tokenizer.parse import get_tokenizer
+        from src.model.parse import get_model
+
+        # Helper to load yaml as Box
+        def load_box(path):
+            return Box(yaml.safe_load(open(path, 'r')))
+
+        # Assume we are loading the skeleton model (UniRigAR)
+        # Config paths
+        task_config_path = os.path.join(repo_dir, "configs/task/rignet_ar_inference_scratch.yaml")
+
+        # If specific inference config doesn't exist, try training config
+        if not os.path.exists(task_config_path):
+             task_config_path = os.path.join(repo_dir, "configs/task/train_rignet_ar.yaml")
+
+        if not os.path.exists(task_config_path):
+            raise FileNotFoundError(f"Could not find task config at {task_config_path}")
+
+        print(f"Loading task config: {task_config_path}")
+        task = load_box(task_config_path)
+
+        # Load component configs
+        tokenizer_name = task.components.get('tokenizer', 'tokenizer_rignet')
+        model_name = task.components.get('model', 'unirig_rignet')
+
+        tokenizer_config_path = os.path.join(repo_dir, f"configs/tokenizer/{tokenizer_name}.yaml")
+        model_config_path = os.path.join(repo_dir, f"configs/model/{model_name}.yaml")
+
+        print(f"Loading tokenizer: {tokenizer_config_path}")
+        tokenizer_config = load_box(tokenizer_config_path)
+        tokenizer_config = TokenizerConfig.parse(config=tokenizer_config)
+        tokenizer = get_tokenizer(config=tokenizer_config)
+
+        print(f"Loading model: {model_config_path}")
+        model_config = load_box(model_config_path)
+
+        # Instantiate model
+        model = get_model(tokenizer=tokenizer, **model_config)
+
+        return model
+
+    except Exception as e:
+        print(f"Error loading model from config: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
 def main():
     args = parse_args()
     output_path = resolve_output_path(args.output, "unirig.onnx")
@@ -636,20 +562,53 @@ def main():
 
         # Download model
         print("Downloading model from HuggingFace...")
-        model_dir = snapshot_download(repo_id=MODEL_ID, local_dir=os.path.join(REPO_DIR, "pretrained"))
-
-        # Try to import and load UniRig
+        # UniRig model ID might be different or weights stored in subfolder
+        # Based on run.py, it downloads checkpoint in 'experiments/' or similar
+        # For now, we attempt to download from VAST-AI/UniRig
         try:
-            from unirig.models import UniRig
-            model = UniRig.from_pretrained(model_dir)
-        except ImportError:
-            # Alternative import
-            print("Standard import failed, trying alternative...")
-            from inference import load_model
-            model = load_model(model_dir)
+            model_dir = snapshot_download(repo_id=MODEL_ID, local_dir=os.path.join(REPO_DIR, "pretrained"))
+        except Exception:
+            print("Could not download from VAST-AI/UniRig, proceeding with local config only...")
+
+        # Load UniRigAR (Skeleton Model)
+        print("Initializing UniRigAR (Skeleton Model)...")
+        model = load_model_from_config(REPO_DIR, device)
+
+        if model is None:
+            raise RuntimeError("Failed to initialize model from config")
 
         model.to(device)
         model.eval()
+
+        # Export components
+        print("\n" + "="*60)
+        print("Exporting UniRig components to ONNX")
+        print("="*60)
+
+        exported_files = []
+
+        if args.component in ['all', 'encoder']:
+            encoder_path = export_mesh_encoder(model, output_path)
+            if encoder_path:
+                exported_files.append(encoder_path)
+
+        if args.component in ['all', 'skeleton']:
+            skeleton_path = export_skeleton_decoder_step(model, output_path)
+            if skeleton_path:
+                exported_files.append(skeleton_path)
+
+        if exported_files:
+            print("\n" + "="*60)
+            print("EXPORT COMPLETED")
+            print("="*60)
+            print(f"\nExported files:")
+            for f in exported_files:
+                print(f"  - {f}")
+                if os.path.exists(f + ".data"):
+                    print(f"  - {f}.data")
+            print("\nNote: Skeleton generation requires autoregressive loop in C#.")
+        else:
+            print("\nNo components were exported. See errors above.")
 
     except Exception as e:
         print(f"Failed to load UniRig model: {e}")
@@ -659,52 +618,6 @@ def main():
 
         create_export_stubs(output_path)
         return
-
-    # Print model info
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f"\nModel Statistics:")
-    print(f"  - Total parameters: {total_params:,}")
-    print(f"  - Model size: {total_params * 4 / (1024*1024):.2f} MB (float32)")
-
-    # Export components
-    print("\n" + "="*60)
-    print("Exporting UniRig components to ONNX")
-    print("="*60)
-
-    exported_files = []
-
-    if args.component in ['all', 'encoder']:
-        encoder_path = export_mesh_encoder(model, output_path)
-        if encoder_path:
-            exported_files.append(encoder_path)
-
-    if args.component in ['all', 'skeleton']:
-        skeleton_path = export_skeleton_decoder_step(model, output_path)
-        if skeleton_path:
-            exported_files.append(skeleton_path)
-
-    if args.component in ['all', 'bones']:
-        bone_path = export_bone_feature_extractor(model, output_path)
-        if bone_path:
-            exported_files.append(bone_path)
-
-    if args.component in ['all', 'skinning']:
-        skinning_path = export_skinning_predictor(model, output_path)
-        if skinning_path:
-            exported_files.append(skinning_path)
-
-    if exported_files:
-        print("\n" + "="*60)
-        print("EXPORT COMPLETED")
-        print("="*60)
-        print(f"\nExported files:")
-        for f in exported_files:
-            print(f"  - {f}")
-            if os.path.exists(f + ".data"):
-                print(f"  - {f}.data")
-        print("\nNote: Skeleton generation requires autoregressive loop in C#.")
-    else:
-        print("\nNo components were exported. See errors above.")
 
 
 def create_export_stubs(output_path):
