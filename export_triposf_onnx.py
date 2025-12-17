@@ -709,6 +709,15 @@ def main():
                 # We can try to patch via sys.modules if it's already imported
                 pass
 
+            # Patch load_state_dict to use strict=False for version compatibility
+            # The weights may have extra keys from a different model version
+            print("Patching load_state_dict for version compatibility (strict=False)...")
+            original_load_state_dict = TripoSFVAEInference.load_state_dict
+            def patched_load_state_dict(self, state_dict, strict=False, **kwargs):
+                result = original_load_state_dict(self, state_dict, strict=False, **kwargs)
+                return result
+            TripoSFVAEInference.load_state_dict = patched_load_state_dict
+
             # Initialize model
             model = TripoSFVAEInference(cfg)
 
