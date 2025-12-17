@@ -132,7 +132,10 @@ def install_triposf():
             with open(req_file, 'r') as f:
                 lines = f.readlines()
 
-            filtered_lines = [l for l in lines if 'flash-attn' not in l and 'flash_attn' not in l]
+            filtered_lines = [
+                l for l in lines
+                if 'flash-attn' not in l and 'flash_attn' not in l and 'spconv' not in l
+            ]
 
             with open(req_file, 'w') as f:
                 f.writelines(filtered_lines)
@@ -541,21 +544,40 @@ def resolve_output_path(output_path, default_name="triposf.onnx"):
     return output_path
 
 
-def mock_flash_attn():
-    """Mock flash_attn module to allow CPU execution."""
+def mock_cuda_modules():
+    """Mock flash_attn and spconv to allow CPU execution."""
     import sys
     from unittest.mock import MagicMock
+    import torch.nn as nn
 
-    if 'flash_attn' in sys.modules:
-        return
+    print("Mocking CUDA-only modules (flash_attn, spconv) for CPU execution...")
 
-    print("Mocking flash_attn for CPU execution...")
-    mock_module = MagicMock()
-    sys.modules['flash_attn'] = mock_module
-    sys.modules['flash_attn.flash_attn_interface'] = mock_module
-    sys.modules['flash_attn.bert_padding'] = mock_module
-    sys.modules['flash_attn.layers'] = mock_module
-    sys.modules['flash_attn.layers.rotary'] = mock_module
+    # Mock flash_attn
+    if 'flash_attn' not in sys.modules:
+        mock_fa = MagicMock()
+        sys.modules['flash_attn'] = mock_fa
+        sys.modules['flash_attn.flash_attn_interface'] = mock_fa
+        sys.modules['flash_attn.bert_padding'] = mock_fa
+        sys.modules['flash_attn.layers'] = mock_fa
+        sys.modules['flash_attn.layers.rotary'] = mock_fa
+
+    # Mock spconv
+    if 'spconv' not in sys.modules:
+        spconv = MagicMock()
+        sys.modules['spconv'] = spconv
+        sys.modules['spconv.pytorch'] = spconv
+
+        # We need to mock SparseConv3d to prevent crashes during model initialization
+        # The traceback showed: sp.SparseConv3d(...)
+        class MockSparseConv3d(nn.Module):
+            def __init__(self, *args, **kwargs):
+                super().__init__()
+            def forward(self, x): return x
+
+        spconv.SparseConv3d = MockSparseConv3d
+        spconv.SubMConv3d = MockSparseConv3d
+        spconv.SparseModule = nn.Module
+        spconv.SparseSequential = nn.Sequential
 
 
 def force_cpu_if_requested(device):
@@ -578,8 +600,8 @@ def main():
     ensure_dependencies()
     install_triposf()
 
-    # Mock flash_attn before importing model
-    mock_flash_attn()
+    # Mock CUDA modules before importing model
+    mock_cuda_modules()
 
     print(f"\nLoading TripoSF model...")
 
