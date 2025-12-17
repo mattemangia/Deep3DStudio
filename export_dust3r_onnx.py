@@ -707,16 +707,39 @@ def verify_onnx_has_weights(onnx_path):
         return True  # Don't fail if verification itself fails
 
 
+def resolve_output_path(output_path, default_name="dust3r.onnx"):
+    """Resolve output path, handling directory paths that may not exist yet."""
+    # Check if path ends with / or \ (indicating directory intent)
+    is_dir_path = output_path.endswith('/') or output_path.endswith('\\')
+
+    # Check if it's an existing directory
+    if os.path.isdir(output_path) or is_dir_path:
+        # Create directory if it doesn't exist
+        dir_path = output_path.rstrip('/\\')
+        if not os.path.exists(dir_path):
+            os.makedirs(dir_path, exist_ok=True)
+            print(f"Created output directory: {dir_path}")
+        return os.path.join(dir_path, default_name)
+
+    # If path doesn't end with .onnx, treat as directory
+    if not output_path.lower().endswith('.onnx'):
+        if not os.path.exists(output_path):
+            os.makedirs(output_path, exist_ok=True)
+            print(f"Created output directory: {output_path}")
+        return os.path.join(output_path, default_name)
+
+    # It's a file path - ensure parent directory exists
+    parent_dir = os.path.dirname(output_path)
+    if parent_dir and not os.path.exists(parent_dir):
+        os.makedirs(parent_dir, exist_ok=True)
+        print(f"Created parent directory: {parent_dir}")
+
+    return output_path
+
+
 def main():
     args = parse_args()
-    onnx_output_path = args.output
-
-    # Handle directory output
-    if os.path.isdir(onnx_output_path):
-        onnx_output_path = os.path.join(onnx_output_path, "dust3r.onnx")
-    elif not onnx_output_path.endswith('.onnx') and not os.path.exists(os.path.dirname(onnx_output_path) or '.'):
-         # If parent dir doesn't exist and no extension, it's ambiguous, but we proceed.
-         pass
+    onnx_output_path = resolve_output_path(args.output, "dust3r.onnx")
 
     ensure_dependencies()
     install_and_import_dust3r()
