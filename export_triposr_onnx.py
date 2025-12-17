@@ -105,7 +105,7 @@ MODEL_ID = "stabilityai/TripoSR"
 
 def ensure_dependencies():
     """Ensure required packages are installed."""
-    required_packages = ['huggingface_hub', 'einops', 'onnx', 'pillow', 'rembg', 'trimesh']
+    required_packages = ['huggingface_hub', 'einops', 'onnx', 'pillow', 'rembg', 'trimesh', 'scipy', 'numpy']
     missing_packages = []
 
     for package in required_packages:

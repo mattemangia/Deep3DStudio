@@ -228,7 +228,7 @@ def ensure_dependencies():
     """
     Ensures basic dependencies are installed. Automatically installs missing ones.
     """
-    required_packages = ['huggingface_hub', 'einops', 'safetensors', 'roma', 'onnx']
+    required_packages = ['huggingface_hub', 'einops', 'safetensors', 'roma', 'onnx', 'scipy', 'numpy']
     missing_packages = []
 
     for package in required_packages:

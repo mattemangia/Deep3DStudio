@@ -97,7 +97,8 @@ def ensure_dependencies():
     """Ensure required packages are installed."""
     required_packages = [
         'huggingface_hub', 'einops', 'onnx', 'pillow',
-        'trimesh', 'safetensors', 'accelerate', 'transformers'
+        'trimesh', 'safetensors', 'accelerate', 'transformers',
+        'easydict', 'scipy', 'numpy'
     ]
     missing_packages = []
 
