@@ -620,14 +620,68 @@ def main():
             # Load the config first to inject weights
             config = OmegaConf.load(config_path)
 
-            # Check for weight file
-            weights_path = os.path.join(model_dir, "model.safetensors")
-            if not os.path.exists(weights_path):
-                weights_path = os.path.join(model_dir, "pytorch_model.bin")
+            # Check for weight file - search in model_dir and subdirectories
+            weights_path = None
 
-            if os.path.exists(weights_path):
+            # First, try common locations and patterns
+            weight_search_patterns = [
+                # Direct paths
+                os.path.join(model_dir, "model.safetensors"),
+                os.path.join(model_dir, "pytorch_model.bin"),
+                # VAE subdirectory (common for TripoSF)
+                os.path.join(model_dir, "vae", "pretrained_TripoSFVAE_256i1024o.safetensors"),
+                os.path.join(model_dir, "vae", "model.safetensors"),
+                # Relative to repo root
+                os.path.join(REPO_DIR, "pretrained", "vae", "pretrained_TripoSFVAE_256i1024o.safetensors"),
+                os.path.join(REPO_DIR, "ckpts", "pretrained_TripoSFVAE_256i1024o.safetensors"),
+            ]
+
+            for candidate in weight_search_patterns:
+                if os.path.exists(candidate):
+                    weights_path = candidate
+                    break
+
+            # If not found, search recursively for any safetensors file
+            if not weights_path:
+                print(f"Searching for safetensors files in {model_dir}...")
+                for root, dirs, files in os.walk(model_dir):
+                    for f in files:
+                        if f.endswith('.safetensors'):
+                            candidate = os.path.join(root, f)
+                            print(f"  Found: {candidate}")
+                            # Prefer files with "TripoSF" in name
+                            if 'triposf' in f.lower() or 'vae' in f.lower():
+                                weights_path = candidate
+                                break
+                            elif not weights_path:
+                                weights_path = candidate
+                    if weights_path and ('triposf' in os.path.basename(weights_path).lower()):
+                        break
+
+            # Also search in REPO_DIR if model_dir search failed
+            if not weights_path:
+                print(f"Searching for safetensors files in {REPO_DIR}...")
+                for root, dirs, files in os.walk(REPO_DIR):
+                    for f in files:
+                        if f.endswith('.safetensors'):
+                            candidate = os.path.join(root, f)
+                            print(f"  Found: {candidate}")
+                            if 'triposf' in f.lower() or 'vae' in f.lower():
+                                weights_path = candidate
+                                break
+                            elif not weights_path:
+                                weights_path = candidate
+                    if weights_path and ('triposf' in os.path.basename(weights_path).lower()):
+                        break
+
+            if weights_path and os.path.exists(weights_path):
                 print(f"Found weights at {weights_path}")
                 config.weight = weights_path
+            else:
+                print(f"WARNING: Could not find weight files!")
+                print(f"  Searched in: {model_dir}")
+                print(f"  Searched in: {REPO_DIR}")
+                print(f"  Config weight setting: {config.get('weight', 'not set')}")
 
             # Override with TripoSFVAEInference.Config defaults
             cfg = OmegaConf.merge(OmegaConf.structured(TripoSFVAEInference.Config), config)
