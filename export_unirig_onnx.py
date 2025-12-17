@@ -127,7 +127,24 @@ def install_unirig():
     # Install requirements
     req_file = os.path.join(REPO_DIR, "requirements.txt")
     if os.path.exists(req_file):
-        print("Installing UniRig requirements...")
+        print("Installing UniRig requirements (filtering CUDA-only)...")
+
+        # Read and filter requirements
+        try:
+            with open(req_file, 'r') as f:
+                lines = f.readlines()
+
+            # Filter spconv and flash-attn
+            filtered_lines = [
+                l for l in lines
+                if 'spconv' not in l and 'flash-attn' not in l and 'flash_attn' not in l
+            ]
+
+            with open(req_file, 'w') as f:
+                f.writelines(filtered_lines)
+        except Exception as e:
+            print(f"Warning: Failed to filter requirements: {e}")
+
         try:
             subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_file, "-q"])
         except subprocess.CalledProcessError:
@@ -544,12 +561,47 @@ def load_model_from_config(repo_dir, device="cpu"):
         return None
 
 
+def mock_cuda_modules():
+    """Mock spconv and flash_attn for CPU execution."""
+    import sys
+    from unittest.mock import MagicMock
+    import torch.nn as nn
+
+    print("Mocking CUDA-only modules (spconv, flash_attn)...")
+
+    # Mock flash_attn
+    if 'flash_attn' not in sys.modules:
+        sys.modules['flash_attn'] = MagicMock()
+        sys.modules['flash_attn.flash_attn_interface'] = MagicMock()
+
+    # Mock spconv
+    if 'spconv' not in sys.modules:
+        spconv = MagicMock()
+        sys.modules['spconv'] = spconv
+        sys.modules['spconv.pytorch'] = spconv
+
+        # We need to mock common spconv layers so model definition doesn't crash
+        # This is a best-effort mock to allow loading the model structure
+        class MockSparseConv3d(nn.Module):
+            def __init__(self, *args, **kwargs):
+                super().__init__()
+            def forward(self, x): return x
+
+        spconv.SparseConv3d = MockSparseConv3d
+        spconv.SubMConv3d = MockSparseConv3d
+        spconv.SparseModule = nn.Module
+        spconv.SparseSequential = nn.Sequential
+
+
 def main():
     args = parse_args()
     output_path = resolve_output_path(args.output, "unirig.onnx")
 
     ensure_dependencies()
     install_unirig()
+
+    # Mock modules before loading
+    mock_cuda_modules()
 
     print(f"\nLoading UniRig model...")
     device = args.device
