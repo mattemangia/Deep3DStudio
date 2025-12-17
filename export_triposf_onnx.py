@@ -13,6 +13,7 @@ License: MIT
 Usage:
     python export_triposf_onnx.py --output triposf.onnx
     python export_triposf_onnx.py --output ./models/ --resolution 512
+    python export_triposf_onnx.py --output triposf.onnx --device cpu  # CPU-only export
 """
 
 import os
@@ -20,6 +21,13 @@ import sys
 import subprocess
 import argparse
 import shutil
+
+# =============================================================================
+# CRITICAL: Setup CPU-only environment BEFORE any torch imports
+# This mocks spconv, flash_attn, xformers and all CUDA dependencies
+# =============================================================================
+from cpu_mock_utils import setup_cpu_only_environment
+setup_cpu_only_environment()
 
 import torch
 import torch.nn as nn
@@ -544,50 +552,18 @@ def resolve_output_path(output_path, default_name="triposf.onnx"):
     return output_path
 
 
-def mock_cuda_modules():
-    """Mock flash_attn and spconv to allow CPU execution."""
-    import sys
-    from unittest.mock import MagicMock
-    import torch.nn as nn
-
-    print("Mocking CUDA-only modules (flash_attn, spconv) for CPU execution...")
-
-    # Mock flash_attn
-    if 'flash_attn' not in sys.modules:
-        mock_fa = MagicMock()
-        sys.modules['flash_attn'] = mock_fa
-        sys.modules['flash_attn.flash_attn_interface'] = mock_fa
-        sys.modules['flash_attn.bert_padding'] = mock_fa
-        sys.modules['flash_attn.layers'] = mock_fa
-        sys.modules['flash_attn.layers.rotary'] = mock_fa
-
-    # Mock spconv
-    if 'spconv' not in sys.modules:
-        spconv = MagicMock()
-        sys.modules['spconv'] = spconv
-        sys.modules['spconv.pytorch'] = spconv
-
-        # We need to mock SparseConv3d to prevent crashes during model initialization
-        # The traceback showed: sp.SparseConv3d(...)
-        class MockSparseConv3d(nn.Module):
-            def __init__(self, *args, **kwargs):
-                super().__init__()
-            def forward(self, x): return x
-
-        spconv.SparseConv3d = MockSparseConv3d
-        spconv.SubMConv3d = MockSparseConv3d
-        spconv.SparseModule = nn.Module
-        spconv.SparseSequential = nn.Sequential
-
-
 def force_cpu_if_requested(device):
     """Force PyTorch to think CUDA is unavailable if device is cpu."""
     if device == 'cpu':
         print("Forcing CPU execution by patching torch.cuda.is_available()...")
         try:
             torch.cuda.is_available = lambda: False
+            # Also patch torch.cuda.device_count
+            torch.cuda.device_count = lambda: 0
+            # And current_device
+            torch.cuda.current_device = lambda: None
         except Exception as e:
-            print(f"Warning: Could not patch torch.cuda.is_available: {e}")
+            print(f"Warning: Could not patch torch.cuda functions: {e}")
 
 def main():
     args = parse_args()
@@ -600,8 +576,8 @@ def main():
     ensure_dependencies()
     install_triposf()
 
-    # Mock CUDA modules before importing model
-    mock_cuda_modules()
+    # Note: CUDA modules (spconv, flash_attn, xformers) are already mocked
+    # at the top of this script via setup_early_cuda_mocks()
 
     print(f"\nLoading TripoSF model...")
 

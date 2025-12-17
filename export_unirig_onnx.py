@@ -14,6 +14,7 @@ License: Apache 2.0
 Usage:
     python export_unirig_onnx.py --output unirig.onnx
     python export_unirig_onnx.py --output ./models/ --component skeleton
+    python export_unirig_onnx.py --output unirig.onnx --device cpu  # CPU-only export
 """
 
 import os
@@ -21,6 +22,12 @@ import sys
 import subprocess
 import argparse
 import shutil
+
+# =============================================================================
+# CRITICAL: Setup CPU-only environment BEFORE any torch imports
+# =============================================================================
+from cpu_mock_utils import setup_cpu_only_environment
+setup_cpu_only_environment()
 
 import torch
 import torch.nn as nn
@@ -561,38 +568,6 @@ def load_model_from_config(repo_dir, device="cpu"):
         return None
 
 
-def mock_cuda_modules():
-    """Mock spconv and flash_attn for CPU execution."""
-    import sys
-    from unittest.mock import MagicMock
-    import torch.nn as nn
-
-    print("Mocking CUDA-only modules (spconv, flash_attn)...")
-
-    # Mock flash_attn
-    if 'flash_attn' not in sys.modules:
-        sys.modules['flash_attn'] = MagicMock()
-        sys.modules['flash_attn.flash_attn_interface'] = MagicMock()
-
-    # Mock spconv
-    if 'spconv' not in sys.modules:
-        spconv = MagicMock()
-        sys.modules['spconv'] = spconv
-        sys.modules['spconv.pytorch'] = spconv
-
-        # We need to mock common spconv layers so model definition doesn't crash
-        # This is a best-effort mock to allow loading the model structure
-        class MockSparseConv3d(nn.Module):
-            def __init__(self, *args, **kwargs):
-                super().__init__()
-            def forward(self, x): return x
-
-        spconv.SparseConv3d = MockSparseConv3d
-        spconv.SubMConv3d = MockSparseConv3d
-        spconv.SparseModule = nn.Module
-        spconv.SparseSequential = nn.Sequential
-
-
 def force_cpu_if_requested(device):
     """Force PyTorch to think CUDA is unavailable if device is cpu."""
     if device == 'cpu':
@@ -613,8 +588,8 @@ def main():
     ensure_dependencies()
     install_unirig()
 
-    # Mock modules before loading
-    mock_cuda_modules()
+    # Note: CUDA modules (spconv, flash_attn, xformers) are already mocked
+    # at the top of this script via cpu_mock_utils.setup_cpu_only_environment()
 
     print(f"\nLoading UniRig model...")
 

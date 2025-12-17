@@ -13,6 +13,7 @@ License: MIT
 Usage:
     python export_triposr_onnx.py --output triposr.onnx
     python export_triposr_onnx.py --output ./models/ --resolution 256
+    python export_triposr_onnx.py --output triposr.onnx --device cpu  # CPU-only export
 """
 
 import os
@@ -20,6 +21,12 @@ import sys
 import subprocess
 import argparse
 import shutil
+
+# =============================================================================
+# CRITICAL: Setup CPU-only environment BEFORE any torch imports
+# =============================================================================
+from cpu_mock_utils import setup_cpu_only_environment
+setup_cpu_only_environment()
 
 import torch
 import torch.nn as nn
