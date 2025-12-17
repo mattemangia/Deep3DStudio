@@ -125,7 +125,20 @@ def install_triposf():
     # Install requirements
     req_file = os.path.join(REPO_DIR, "requirements.txt")
     if os.path.exists(req_file):
-        print("Installing TripoSF requirements...")
+        print("Installing TripoSF requirements (filtering CUDA-only)...")
+
+        # Read and filter requirements
+        try:
+            with open(req_file, 'r') as f:
+                lines = f.readlines()
+
+            filtered_lines = [l for l in lines if 'flash-attn' not in l and 'flash_attn' not in l]
+
+            with open(req_file, 'w') as f:
+                f.writelines(filtered_lines)
+        except Exception as e:
+            print(f"Warning: Failed to filter requirements: {e}")
+
         try:
             subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_file, "-q"])
         except subprocess.CalledProcessError:
@@ -528,15 +541,47 @@ def resolve_output_path(output_path, default_name="triposf.onnx"):
     return output_path
 
 
+def mock_flash_attn():
+    """Mock flash_attn module to allow CPU execution."""
+    import sys
+    from unittest.mock import MagicMock
+
+    if 'flash_attn' in sys.modules:
+        return
+
+    print("Mocking flash_attn for CPU execution...")
+    mock_module = MagicMock()
+    sys.modules['flash_attn'] = mock_module
+    sys.modules['flash_attn.flash_attn_interface'] = mock_module
+    sys.modules['flash_attn.bert_padding'] = mock_module
+    sys.modules['flash_attn.layers'] = mock_module
+    sys.modules['flash_attn.layers.rotary'] = mock_module
+
+
+def force_cpu_if_requested(device):
+    """Force PyTorch to think CUDA is unavailable if device is cpu."""
+    if device == 'cpu':
+        print("Forcing CPU execution by patching torch.cuda.is_available()...")
+        try:
+            torch.cuda.is_available = lambda: False
+        except Exception as e:
+            print(f"Warning: Could not patch torch.cuda.is_available: {e}")
+
 def main():
     args = parse_args()
     output_path = resolve_output_path(args.output, "triposf.onnx")
+    device = args.device
+
+    # Force CPU before any significant imports if requested
+    force_cpu_if_requested(device)
 
     ensure_dependencies()
     install_triposf()
 
+    # Mock flash_attn before importing model
+    mock_flash_attn()
+
     print(f"\nLoading TripoSF model...")
-    device = args.device
 
     # Try to import and load the model
     try:
@@ -588,6 +633,29 @@ def main():
 
             # Override with TripoSFVAEInference.Config defaults
             cfg = OmegaConf.merge(OmegaConf.structured(TripoSFVAEInference.Config), config)
+
+            # Force device in config if possible or via monkey patching
+            # The error usually comes from FlexiCubes using a default device or one from config
+            # We'll monkey patch the Config class or the init if needed,
+            # but patching torch.cuda.is_available() at start should handle most cases.
+
+            # Additionally, let's patch FlexiCubes just in case
+            try:
+                from triposf.representations.mesh.flexicubes.flexicubes import FlexiCubes
+                original_init = FlexiCubes.__init__
+                def new_init(self, device='cpu', *args, **kwargs):
+                    if args and len(args) > 0:
+                        # If device is passed as arg, override it
+                        # But arguments are usually keyword args in this codebase
+                        pass
+                    # Force CPU device
+                    return original_init(self, device='cpu', *args, **kwargs)
+                FlexiCubes.__init__ = new_init
+                print("Patched FlexiCubes to force CPU device.")
+            except Exception:
+                # If import fails (e.g. paths not set yet), we might be too early or paths differ
+                # We can try to patch via sys.modules if it's already imported
+                pass
 
             # Initialize model
             model = TripoSFVAEInference(cfg)

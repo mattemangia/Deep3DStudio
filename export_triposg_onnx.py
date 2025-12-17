@@ -139,7 +139,20 @@ def install_triposg():
     # Install requirements
     req_file = os.path.join(REPO_DIR, "requirements.txt")
     if os.path.exists(req_file):
-        print("Installing TripoSG requirements...")
+        print("Installing TripoSG requirements (filtering CUDA-only)...")
+
+        # Filter requirements
+        try:
+            with open(req_file, 'r') as f:
+                lines = f.readlines()
+
+            filtered_lines = [l for l in lines if 'flash-attn' not in l and 'xformers' not in l]
+
+            with open(req_file, 'w') as f:
+                f.writelines(filtered_lines)
+        except Exception as e:
+            print(f"Warning: Failed to filter requirements: {e}")
+
         try:
             subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_file, "-q"])
         except subprocess.CalledProcessError:
@@ -573,12 +586,43 @@ def resolve_output_path(output_path, default_name="triposg.onnx"):
     return output_path
 
 
+def mock_flash_attn():
+    """Mock flash_attn module to allow CPU execution."""
+    import sys
+    from unittest.mock import MagicMock
+
+    if 'flash_attn' in sys.modules:
+        return
+
+    print("Mocking flash_attn for CPU execution...")
+    mock_module = MagicMock()
+    sys.modules['flash_attn'] = mock_module
+    sys.modules['flash_attn.flash_attn_interface'] = mock_module
+    sys.modules['flash_attn.bert_padding'] = mock_module
+
+
+def force_cpu_if_requested(device):
+    """Force PyTorch to think CUDA is unavailable if device is cpu."""
+    if device == 'cpu':
+        print("Forcing CPU execution by patching torch.cuda.is_available()...")
+        try:
+            torch.cuda.is_available = lambda: False
+        except Exception as e:
+            print(f"Warning: Could not patch torch.cuda.is_available: {e}")
+
 def main():
     args = parse_args()
     output_path = resolve_output_path(args.output, "triposg.onnx")
+    device = args.device
+
+    # Force CPU if requested
+    force_cpu_if_requested(device)
 
     ensure_dependencies()
     install_triposg()
+
+    # Mock flash_attn
+    mock_flash_attn()
 
     print(f"\nLoading TripoSG model...")
     print("Note: TripoSG is a 1.5B parameter model, loading may take time...")

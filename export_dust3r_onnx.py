@@ -157,7 +157,20 @@ def install_and_import_dust3r():
         """Install dust3r requirements if requirements.txt exists."""
         req_file = os.path.join(REPO_DIR, "requirements.txt")
         if os.path.exists(req_file):
-            print(f"Installing dust3r requirements from {req_file}...")
+            print(f"Installing dust3r requirements from {req_file} (filtering CUDA-only)...")
+
+            # Filter requirements
+            try:
+                with open(req_file, 'r') as f:
+                    lines = f.readlines()
+
+                filtered_lines = [l for l in lines if 'flash-attn' not in l and 'xformers' not in l]
+
+                with open(req_file, 'w') as f:
+                    f.writelines(filtered_lines)
+            except Exception as e:
+                print(f"Warning: Failed to filter requirements: {e}")
+
             try:
                 subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_file, "-q"])
                 print("Dust3r requirements installed successfully.")
@@ -737,12 +750,45 @@ def resolve_output_path(output_path, default_name="dust3r.onnx"):
     return output_path
 
 
+def mock_cuda_modules():
+    """Mock CUDA-only modules to allow CPU execution."""
+    import sys
+    from unittest.mock import MagicMock
+
+    # Mock flash_attn
+    if 'flash_attn' not in sys.modules:
+        mock_fa = MagicMock()
+        sys.modules['flash_attn'] = mock_fa
+        sys.modules['flash_attn.flash_attn_interface'] = mock_fa
+        sys.modules['flash_attn.bert_padding'] = mock_fa
+
+    # Mock xformers
+    if 'xformers' not in sys.modules:
+        mock_xf = MagicMock()
+        sys.modules['xformers'] = mock_xf
+        sys.modules['xformers.ops'] = mock_xf
+
+def force_cpu_if_requested():
+    """Force PyTorch to think CUDA is unavailable to prevent accidental CUDA calls."""
+    print("Forcing CPU execution by patching torch.cuda.is_available()...")
+    try:
+        torch.cuda.is_available = lambda: False
+    except Exception as e:
+        print(f"Warning: Could not patch torch.cuda.is_available: {e}")
+
 def main():
     args = parse_args()
+
+    # Force CPU to be safe
+    force_cpu_if_requested()
+
     onnx_output_path = resolve_output_path(args.output, "dust3r.onnx")
 
     ensure_dependencies()
     install_and_import_dust3r()
+
+    # Mock CUDA modules
+    mock_cuda_modules()
 
     from dust3r.model import AsymmetricCroCo3DStereo
     print(f"Loading model {MODEL_NAME}...")
