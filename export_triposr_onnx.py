@@ -416,6 +416,84 @@ def verify_onnx_has_weights(onnx_path):
         return True  # Don't fail if verification itself fails
 
 
+def export_with_fallback(model, args, output_path, input_names, output_names, dynamic_axes, component_name):
+    """
+    Export model to ONNX with multi-strategy fallback (like dust3r).
+
+    Strategy 1: Try dynamo-based export (default in PyTorch 2.x)
+    Strategy 2: Try legacy TorchScript-based export with dynamo=False
+    Strategy 3: Try fixed shapes export (no dynamic axes)
+    """
+    export_success = False
+
+    # --- Strategy 1: Try dynamo-based export ---
+    print(f"  Attempting export with dynamo-based exporter...")
+    try:
+        torch.onnx.export(
+            model,
+            args,
+            output_path,
+            input_names=input_names,
+            output_names=output_names,
+            opset_version=14,
+            dynamic_axes=dynamic_axes,
+            export_params=True,
+        )
+        export_success = True
+        print(f"  Success with dynamo-based exporter!")
+    except Exception as e:
+        print(f"  Dynamo-based export failed: {e}")
+
+    # --- Strategy 2: Try legacy TorchScript-based export ---
+    if not export_success:
+        print(f"  Attempting fallback with legacy TorchScript-based exporter (dynamo=False)...")
+        try:
+            with torch.no_grad():
+                torch.onnx.export(
+                    model,
+                    args,
+                    output_path,
+                    input_names=input_names,
+                    output_names=output_names,
+                    opset_version=14,
+                    dynamic_axes=dynamic_axes,
+                    do_constant_folding=True,
+                    export_params=True,
+                    dynamo=False,  # Force legacy exporter
+                )
+            export_success = True
+            print(f"  Success with legacy exporter!")
+        except Exception as e2:
+            print(f"  Legacy export failed: {e2}")
+
+    # --- Strategy 3: Try fixed shapes export (no dynamic axes) ---
+    if not export_success:
+        print(f"  Attempting export with fixed shapes (no dynamic axes)...")
+        fixed_output_path = output_path.replace('.onnx', '_fixed.onnx')
+        try:
+            with torch.no_grad():
+                torch.onnx.export(
+                    model,
+                    args,
+                    fixed_output_path,
+                    input_names=input_names,
+                    output_names=output_names,
+                    opset_version=14,
+                    do_constant_folding=True,
+                    export_params=True,
+                    dynamo=False,  # Force legacy exporter
+                )
+            export_success = True
+            output_path = fixed_output_path
+            print(f"  Success with fixed shapes! Output: {fixed_output_path}")
+        except Exception as e3:
+            print(f"  Fixed shapes export also failed: {e3}")
+            import traceback
+            traceback.print_exc()
+
+    return output_path if export_success else None
+
+
 def export_triposr_encoder(model, output_path, resolution=256):
     """Export the image encoder part of TripoSR."""
     print(f"\nExporting TripoSR Image Encoder...")
@@ -437,25 +515,28 @@ def export_triposr_encoder(model, output_path, resolution=256):
     dummy_input = torch.randn(1, 3, resolution, resolution)
 
     try:
-        torch.onnx.export(
+        result_path = export_with_fallback(
             encoder,
             dummy_input,
             encoder_path,
             input_names=['image'],
             output_names=['image_features'],
-            opset_version=14,
             dynamic_axes={
                 'image': {0: 'batch_size'},
                 'image_features': {0: 'batch_size'}
             },
-            export_params=True
+            component_name="Encoder"
         )
-        print(f"Encoder exported to {encoder_path}")
-        verify_onnx_model(encoder_path)
-        if not verify_onnx_has_weights(encoder_path):
-            save_onnx_with_external_data(encoder_path)
-            verify_onnx_has_weights(encoder_path)
-        return encoder_path
+
+        if result_path is None:
+            return None
+
+        print(f"Encoder exported to {result_path}")
+        verify_onnx_model(result_path)
+        if not verify_onnx_has_weights(result_path):
+            save_onnx_with_external_data(result_path)
+            verify_onnx_has_weights(result_path)
+        return result_path
     except Exception as e:
         print(f"Encoder export failed: {e}")
         return None
@@ -484,31 +565,33 @@ def export_triposr_backbone(model, output_path, resolution=256):
     dummy_input = torch.randn(1, 3, resolution, resolution)
 
     try:
-        with torch.no_grad():
-            torch.onnx.export(
-                backbone,
-                dummy_input,
-                backbone_path,
-                input_names=['image'],
-                output_names=['triplane_tokens'],
-                opset_version=14,
-                dynamic_axes={
-                    'image': {0: 'batch_size'},
-                    'triplane_tokens': {0: 'batch_size'}
-                },
-                export_params=True
-            )
-        print(f"Backbone exported to {backbone_path}")
+        result_path = export_with_fallback(
+            backbone,
+            dummy_input,
+            backbone_path,
+            input_names=['image'],
+            output_names=['triplane_tokens'],
+            dynamic_axes={
+                'image': {0: 'batch_size'},
+                'triplane_tokens': {0: 'batch_size'}
+            },
+            component_name="Backbone"
+        )
 
-        file_size = os.path.getsize(backbone_path) / (1024*1024)
+        if result_path is None:
+            return None
+
+        print(f"Backbone exported to {result_path}")
+
+        file_size = os.path.getsize(result_path) / (1024*1024)
         if file_size > 1800:  # > 1.8GB, convert to external
-            save_onnx_with_external_data(backbone_path)
+            save_onnx_with_external_data(result_path)
 
-        verify_onnx_model(backbone_path)
-        if not verify_onnx_has_weights(backbone_path):
-            save_onnx_with_external_data(backbone_path)
-            verify_onnx_has_weights(backbone_path)
-        return backbone_path
+        verify_onnx_model(result_path)
+        if not verify_onnx_has_weights(result_path):
+            save_onnx_with_external_data(result_path)
+            verify_onnx_has_weights(result_path)
+        return result_path
     except Exception as e:
         print(f"Backbone export failed: {e}")
         import traceback
