@@ -13,6 +13,7 @@ License: Apache 2.0
 Usage:
     python export_wonder3d_onnx.py --output wonder3d.onnx
     python export_wonder3d_onnx.py --output ./models/ --component unet
+    python export_wonder3d_onnx.py --output wonder3d.onnx --device cpu  # CPU-only export
 """
 
 import os
@@ -20,6 +21,12 @@ import sys
 import subprocess
 import argparse
 import shutil
+
+# =============================================================================
+# CRITICAL: Setup CPU-only environment BEFORE any torch imports
+# =============================================================================
+from cpu_mock_utils import setup_cpu_only_environment
+setup_cpu_only_environment()
 
 import torch
 import torch.nn as nn
@@ -603,27 +610,6 @@ def resolve_output_path(output_path, default_name="wonder3d.onnx"):
     return output_path
 
 
-def mock_cuda_modules():
-    """Mock CUDA-only modules (flash_attn, xformers) to allow CPU execution."""
-    import sys
-    from unittest.mock import MagicMock
-
-    print("Mocking CUDA-only modules for CPU execution...")
-
-    # Mock flash_attn
-    if 'flash_attn' not in sys.modules:
-        mock_fa = MagicMock()
-        sys.modules['flash_attn'] = mock_fa
-        sys.modules['flash_attn.flash_attn_interface'] = mock_fa
-        sys.modules['flash_attn.bert_padding'] = mock_fa
-
-    # Mock xformers
-    if 'xformers' not in sys.modules:
-        mock_xf = MagicMock()
-        sys.modules['xformers'] = mock_xf
-        sys.modules['xformers.ops'] = mock_xf
-
-
 def force_cpu_if_requested(device):
     """Force PyTorch to think CUDA is unavailable if device is cpu."""
     if device == 'cpu':
@@ -644,8 +630,8 @@ def main():
     ensure_dependencies()
     install_wonder3d()
 
-    # Mock CUDA modules before loading
-    mock_cuda_modules()
+    # Note: CUDA modules (spconv, flash_attn, xformers) are already mocked
+    # at the top of this script via cpu_mock_utils.setup_cpu_only_environment()
 
     print(f"\nLoading Wonder3D model components...")
 

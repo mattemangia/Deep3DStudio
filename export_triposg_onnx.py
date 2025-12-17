@@ -13,6 +13,7 @@ License: MIT
 Usage:
     python export_triposg_onnx.py --output triposg.onnx
     python export_triposg_onnx.py --output ./models/ --component encoder
+    python export_triposg_onnx.py --output triposg.onnx --device cpu  # CPU-only export
 """
 
 import os
@@ -20,6 +21,12 @@ import sys
 import subprocess
 import argparse
 import shutil
+
+# =============================================================================
+# CRITICAL: Setup CPU-only environment BEFORE any torch imports
+# =============================================================================
+from cpu_mock_utils import setup_cpu_only_environment
+setup_cpu_only_environment()
 
 import torch
 import torch.nn as nn
@@ -589,38 +596,6 @@ def resolve_output_path(output_path, default_name="triposg.onnx"):
     return output_path
 
 
-def mock_cuda_modules():
-    """Mock CUDA-only modules (flash_attn, xformers, spconv) to allow CPU execution."""
-    import sys
-    from unittest.mock import MagicMock
-    import torch.nn as nn
-
-    print("Mocking CUDA-only modules for CPU execution...")
-
-    # Mock flash_attn
-    if 'flash_attn' not in sys.modules:
-        mock_fa = MagicMock()
-        sys.modules['flash_attn'] = mock_fa
-        sys.modules['flash_attn.flash_attn_interface'] = mock_fa
-        sys.modules['flash_attn.bert_padding'] = mock_fa
-
-    # Mock spconv
-    if 'spconv' not in sys.modules:
-        spconv = MagicMock()
-        sys.modules['spconv'] = spconv
-        sys.modules['spconv.pytorch'] = spconv
-
-        class MockSparseConv3d(nn.Module):
-            def __init__(self, *args, **kwargs):
-                super().__init__()
-            def forward(self, x): return x
-
-        spconv.SparseConv3d = MockSparseConv3d
-        spconv.SubMConv3d = MockSparseConv3d
-        spconv.SparseModule = nn.Module
-        spconv.SparseSequential = nn.Sequential
-
-
 def force_cpu_if_requested(device):
     """Force PyTorch to think CUDA is unavailable if device is cpu."""
     if device == 'cpu':
@@ -641,8 +616,8 @@ def main():
     ensure_dependencies()
     install_triposg()
 
-    # Mock CUDA modules
-    mock_cuda_modules()
+    # Note: CUDA modules (spconv, flash_attn, xformers) are already mocked
+    # at the top of this script via cpu_mock_utils.setup_cpu_only_environment()
 
     print(f"\nLoading TripoSG model...")
     print("Note: TripoSG is a 1.5B parameter model, loading may take time...")

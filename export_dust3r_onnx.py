@@ -1,9 +1,27 @@
+#!/usr/bin/env python3
+"""
+Dust3r ONNX Export Script
+=========================
+Exports the Dust3r model (stereo 3D reconstruction) to ONNX format.
+
+Usage:
+    python export_dust3r_onnx.py --output dust3r.onnx
+    python export_dust3r_onnx.py --output dust3r.onnx --device cpu  # CPU-only export
+"""
+
 import os
 import sys
 import subprocess
+import argparse
+
+# =============================================================================
+# CRITICAL: Setup CPU-only environment BEFORE any torch imports
+# =============================================================================
+from cpu_mock_utils import setup_cpu_only_environment
+setup_cpu_only_environment()
+
 import torch
 import torch.nn as nn
-import argparse
 
 # =============================================================================
 # Register ALL custom ONNX symbolic functions for unsupported operators
@@ -750,24 +768,6 @@ def resolve_output_path(output_path, default_name="dust3r.onnx"):
     return output_path
 
 
-def mock_cuda_modules():
-    """Mock CUDA-only modules to allow CPU execution."""
-    import sys
-    from unittest.mock import MagicMock
-
-    # Mock flash_attn
-    if 'flash_attn' not in sys.modules:
-        mock_fa = MagicMock()
-        sys.modules['flash_attn'] = mock_fa
-        sys.modules['flash_attn.flash_attn_interface'] = mock_fa
-        sys.modules['flash_attn.bert_padding'] = mock_fa
-
-    # Mock xformers
-    if 'xformers' not in sys.modules:
-        mock_xf = MagicMock()
-        sys.modules['xformers'] = mock_xf
-        sys.modules['xformers.ops'] = mock_xf
-
 def force_cpu_if_requested():
     """Force PyTorch to think CUDA is unavailable to prevent accidental CUDA calls."""
     print("Forcing CPU execution by patching torch.cuda.is_available()...")
@@ -787,8 +787,8 @@ def main():
     ensure_dependencies()
     install_and_import_dust3r()
 
-    # Mock CUDA modules
-    mock_cuda_modules()
+    # Note: CUDA modules (spconv, flash_attn, xformers) are already mocked
+    # at the top of this script via cpu_mock_utils.setup_cpu_only_environment()
 
     from dust3r.model import AsymmetricCroCo3DStereo
     print(f"Loading model {MODEL_NAME}...")
