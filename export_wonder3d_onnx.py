@@ -437,9 +437,22 @@ def export_vae_encoder(vae, output_path, resolution=256):
 
         def forward(self, image):
             # VAE encoder returns distribution, we sample from it
-            latent_dist = self.vae.encode(image).latent_dist
-            # During export, use mean (deterministic)
-            return latent_dist.mean * 0.18215
+            # Handle different VAE interfaces
+            try:
+                encode_result = self.vae.encode(image)
+                if hasattr(encode_result, 'latent_dist'):
+                    latent_dist = encode_result.latent_dist
+                    return latent_dist.mean * 0.18215
+                elif hasattr(encode_result, 'latent'):
+                    return encode_result.latent * 0.18215
+                else:
+                    # Assume it's already the latent
+                    return encode_result * 0.18215
+            except Exception as e:
+                # Fallback: try direct encoder access
+                if hasattr(self.vae, 'encoder'):
+                    return self.vae.encoder(image) * 0.18215
+                raise e
 
     try:
         encoder = VAEEncoderWrapper(vae)
@@ -493,7 +506,18 @@ def export_vae_decoder(vae, output_path, latent_size=32):
             self.vae = vae
 
         def forward(self, latent):
-            return self.vae.decode(latent / 0.18215).sample
+            # Handle different VAE decode interfaces
+            try:
+                decode_result = self.vae.decode(latent / 0.18215)
+                if hasattr(decode_result, 'sample'):
+                    return decode_result.sample
+                else:
+                    return decode_result
+            except Exception as e:
+                # Fallback: try direct decoder access
+                if hasattr(self.vae, 'decoder'):
+                    return self.vae.decoder(latent / 0.18215)
+                raise e
 
     try:
         decoder = VAEDecoderWrapper(vae)
@@ -548,11 +572,36 @@ def export_unet(unet, output_path, num_views=6, latent_size=32, hidden_dim=768):
             self.unet = unet
 
         def forward(self, latent, timestep, encoder_hidden_states):
-            return self.unet(
-                latent,
-                timestep,
-                encoder_hidden_states=encoder_hidden_states
-            ).sample
+            # Handle different UNet interfaces
+            try:
+                result = self.unet(
+                    latent,
+                    timestep,
+                    encoder_hidden_states=encoder_hidden_states
+                )
+                if hasattr(result, 'sample'):
+                    return result.sample
+                elif isinstance(result, tuple):
+                    return result[0]
+                else:
+                    return result
+            except TypeError:
+                # Some UNets use different argument names
+                try:
+                    result = self.unet(
+                        latent,
+                        timestep,
+                        context=encoder_hidden_states
+                    )
+                    if hasattr(result, 'sample'):
+                        return result.sample
+                    return result
+                except:
+                    # Last resort: positional args
+                    result = self.unet(latent, timestep, encoder_hidden_states)
+                    if hasattr(result, 'sample'):
+                        return result.sample
+                    return result
 
     try:
         wrapper = UNetWrapper(unet)
@@ -612,7 +661,18 @@ def export_image_encoder(encoder, output_path, resolution=224):
             self.encoder = encoder
 
         def forward(self, image):
-            return self.encoder(image).last_hidden_state
+            # Handle different encoder output interfaces
+            result = self.encoder(image)
+            if hasattr(result, 'last_hidden_state'):
+                return result.last_hidden_state
+            elif hasattr(result, 'pooler_output'):
+                return result.pooler_output
+            elif hasattr(result, 'image_embeds'):
+                return result.image_embeds
+            elif isinstance(result, tuple):
+                return result[0]
+            else:
+                return result
 
     try:
         wrapper = ImageEncoderWrapper(encoder)
