@@ -287,6 +287,7 @@ namespace Deep3DStudio.UI
                     SceneObjectType.Camera => new Gdk.Color(255, 165, 0),        // Orange
                     SceneObjectType.Group => new Gdk.Color(169, 169, 169),       // Dark gray
                     SceneObjectType.Light => new Gdk.Color(255, 255, 0),         // Yellow
+                    SceneObjectType.Skeleton => new Gdk.Color(255, 200, 0),      // Gold/Yellow for skeleton
                     _ => new Gdk.Color(128, 128, 128)                            // Gray
                 };
 
@@ -313,6 +314,7 @@ namespace Deep3DStudio.UI
                 SceneObjectType.Group => "Group",
                 SceneObjectType.Light => "Light",
                 SceneObjectType.Annotation => "Note",
+                SceneObjectType.Skeleton => "Skeleton",
                 _ => "Object"
             };
         }
