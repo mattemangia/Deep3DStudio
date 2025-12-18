@@ -355,6 +355,15 @@ def obfuscate_and_clean(python_dir, target_platform):
             if file.endswith(".py"):
                 os.remove(os.path.join(root, file))
 
+def create_zip(source_dir, output_zip):
+    print(f"Zipping {source_dir} to {output_zip}...")
+    with zipfile.ZipFile(output_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for root, dirs, files in os.walk(source_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, source_dir)
+                zipf.write(file_path, arcname)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default="dist", help="Output directory")
@@ -368,6 +377,11 @@ if __name__ == "__main__":
         if setup_python_embed(python_dir, args.platform):
             setup_models(models_dir, python_dir, args.platform)
             obfuscate_and_clean(python_dir, args.platform)
+
+            # Zip python env
+            python_zip = os.path.join(args.output, "python_env.zip")
+            create_zip(python_dir, python_zip)
+
             print("Deployment setup complete.")
         else:
             print("Setup failed.")
