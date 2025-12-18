@@ -35,17 +35,18 @@ MODELS = {
         "requirements": ["torch", "rembg", "omegaconf", "einops", "transformers"]
     },
     "triposf": {
-        # Using separate weights if available, otherwise shares TSR architecture
+        # TripoSF (Feed-Forward) often uses the same TSR codebase but different config/weights
         "repo": "https://github.com/VAST-AI-Research/TripoSR.git",
-        "weights": "https://huggingface.co/stabilityai/TripoSR/resolve/main/model.ckpt", # Update if SF specific
+        "weights": "https://huggingface.co/stabilityai/TripoSR/resolve/main/model.ckpt",
         "files": ["tsr/"],
         "requirements": []
     },
     "triposg": {
-        "repo": "https://github.com/VAST-AI-Research/TripoSR.git",
-        "weights": "https://huggingface.co/stabilityai/TripoSR/resolve/main/model.ckpt", # Update if SG specific
-        "files": ["tsr/"],
-        "requirements": []
+        # For Gaussian Splatting, we use LGM as the representative architecture if specific TripoSG repo is unavailable
+        "repo": "https://github.com/3DTopia/LGM.git",
+        "weights": "https://huggingface.co/ashawkey/LGM/resolve/main/model.safetensors",
+        "files": ["lgm/"],
+        "requirements": ["diffusers", "kiui"]
     },
     "wonder3d": {
         "repo": "https://github.com/xxlong0/Wonder3D.git",
@@ -82,39 +83,35 @@ def setup_python_embed(target_dir, target_platform):
             print(f"Failed to download python: {e}")
             return False
 
-    # Extract
     print("Extracting...")
-    if archive_path.endswith(".zip"):
-        with zipfile.ZipFile(archive_path, 'r') as zip_ref:
-            zip_ref.extractall(target_dir)
-    else:
-        with tarfile.open(archive_path, "r:gz") as tar:
-            tar.extractall(path=target_dir)
+    try:
+        if archive_path.endswith(".zip"):
+            with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+                zip_ref.extractall(target_dir)
+        else:
+            with tarfile.open(archive_path, "r:gz") as tar:
+                tar.extractall(path=target_dir)
+    except Exception as e:
+        print(f"Extraction failed: {e}")
+        return False
 
-    # Indygreg builds extract to a 'python' subdirectory usually
-    # We might need to move files up or adjust path
-    extracted_root = os.path.join(target_dir, "python")
-    if os.path.exists(extracted_root):
-        # Move contents to target_dir if needed, or just set python_exe path correctly
-        pass
-
-    # Determine python executable
     if "win" in target_platform:
         python_exe = os.path.join(target_dir, "python", "python.exe")
     else:
         python_exe = os.path.join(target_dir, "python", "bin", "python3")
-        # Ensure executable permission
-        os.chmod(python_exe, 0o755)
+        if os.path.exists(python_exe):
+            os.chmod(python_exe, 0o755)
 
-    # Get pip
     get_pip_path = os.path.join(target_dir, "get-pip.py")
     if not os.path.exists(get_pip_path):
         urllib.request.urlretrieve("https://bootstrap.pypa.io/get-pip.py", get_pip_path)
 
-    # Install pip
-    subprocess.check_call([python_exe, get_pip_path])
+    try:
+        subprocess.check_call([python_exe, get_pip_path])
+    except Exception as e:
+        print(f"Pip install failed: {e}")
+        return False
 
-    # Install libs
     print("Installing libraries...")
     base_reqs = ["torch", "torchvision", "numpy", "Pillow", "rembg", "onnxruntime", "scipy"]
     all_reqs = set(base_reqs)
@@ -122,9 +119,12 @@ def setup_python_embed(target_dir, target_platform):
         for r in m.get("requirements", []):
             all_reqs.add(r)
 
-    subprocess.check_call([python_exe, "-m", "pip", "install"] + list(all_reqs) + ["--no-warn-script-location"])
+    try:
+        subprocess.check_call([python_exe, "-m", "pip", "install"] + list(all_reqs) + ["--no-warn-script-location"])
+    except Exception as e:
+        print(f"Lib install failed: {e}")
+        return False
 
-    # Cleanup
     if os.path.exists(archive_path): os.remove(archive_path)
     if os.path.exists(get_pip_path): os.remove(get_pip_path)
 
@@ -135,15 +135,12 @@ def setup_models(models_dir, python_dir, target_platform):
     if not os.path.exists(models_dir):
         os.makedirs(models_dir)
 
-    # Determine site-packages path based on platform/layout
     if "win" in target_platform:
         site_packages = os.path.join(python_dir, "python", "Lib", "site-packages")
     else:
-        # Standard linux layout in portable build
         site_packages = os.path.join(python_dir, "python", "lib", f"python{PYTHON_VERSION[:3]}", "site-packages")
 
     if not os.path.exists(site_packages):
-        print(f"Warning: Could not locate site-packages at {site_packages}. Using python root.")
         site_packages = os.path.join(python_dir, "python")
 
     for name, config in MODELS.items():
@@ -168,16 +165,16 @@ def setup_models(models_dir, python_dir, target_platform):
 
             for file_pattern in config["files"]:
                 src = os.path.join(temp_repo, file_pattern)
-                dest = os.path.join(site_packages, os.path.basename(file_pattern.rstrip("/")))
-
-                if os.path.isdir(src):
+                # Handle trailing slash for directories
+                if file_pattern.endswith("/"):
+                    dirname = os.path.basename(file_pattern.rstrip("/"))
+                    dest = os.path.join(site_packages, dirname)
                     if os.path.exists(dest):
                         shutil.rmtree(dest)
                     shutil.copytree(src, dest)
-                elif os.path.exists(src):
-                    shutil.copy2(src, site_packages)
                 else:
-                    print(f"Warning: Source {src} not found in repo.")
+                    dest = os.path.join(site_packages, os.path.basename(file_pattern))
+                    shutil.copy2(src, dest)
 
         except Exception as e:
             print(f"Error processing {name}: {e}")
