@@ -1,10 +1,9 @@
-
 using System;
 using System.Collections.Generic;
 using OpenTK.Mathematics;
 using MathNet.Numerics.LinearAlgebra;
-using Microsoft.ML.OnnxRuntime.Tensors;
 using SkiaSharp;
+using System.Linq;
 
 namespace Deep3DStudio.Model
 {
@@ -167,9 +166,6 @@ namespace Deep3DStudio.Model
             }
 
             // 5. Translation t = c_dst - R * c_src
-            // Convert to OpenTK Matrix4. Note: OpenTK Matrix4 is Row-Major in memory (compatible with v * M).
-            // We construct M such that M corresponds to the Transpose of the rotation matrix derived here (which assumes col vectors).
-
             var M = Matrix4.Identity;
             M.M11 = (float)R_mat[0,0]; M.M12 = (float)R_mat[1,0]; M.M13 = (float)R_mat[2,0];
             M.M21 = (float)R_mat[0,1]; M.M22 = (float)R_mat[1,1]; M.M23 = (float)R_mat[2,1];
@@ -210,15 +206,9 @@ namespace Deep3DStudio.Model
             }
 
             if (srcPts.Count < 3) return Matrix4.Identity;
-
-            // Use RANSAC for robust estimation
             return ComputeRigidTransformRANSAC(srcPts, dstPts, out _, out _);
         }
 
-        /// <summary>
-        /// RANSAC-based rigid transform estimation for robustness against outliers.
-        /// Returns the best transform, inlier count, and RMSE.
-        /// </summary>
         public static Matrix4 ComputeRigidTransformRANSAC(
             List<Vector3> srcPoints,
             List<Vector3> dstPoints,
@@ -234,12 +224,11 @@ namespace Deep3DStudio.Model
                 return ComputeRigidTransform(srcPoints, dstPoints);
 
             int n = srcPoints.Count;
-            var rnd = new Random(42); // Fixed seed for reproducibility
+            var rnd = new Random(42);
             Matrix4 bestTransform = Matrix4.Identity;
             int bestInliers = 0;
             float bestRMSE = float.MaxValue;
 
-            // If we have few points, just use all of them
             if (n < 10)
             {
                 bestTransform = ComputeRigidTransform(srcPoints, dstPoints);
@@ -251,7 +240,6 @@ namespace Deep3DStudio.Model
 
             for (int iter = 0; iter < maxIterations; iter++)
             {
-                // Sample 4 random point pairs (minimum for 3D rigid transform)
                 var indices = new HashSet<int>();
                 while (indices.Count < 4)
                     indices.Add(rnd.Next(n));
@@ -264,10 +252,7 @@ namespace Deep3DStudio.Model
                     sampleDst.Add(dstPoints[idx]);
                 }
 
-                // Compute transform from sample
                 var candidateTransform = ComputeRigidTransform(sampleSrc, sampleDst);
-
-                // Count inliers
                 var (currentInliers, currentRMSE) = CountInliersAndRMSE(srcPoints, dstPoints, candidateTransform, inlierThreshold);
 
                 if (currentInliers > bestInliers || (currentInliers == bestInliers && currentRMSE < bestRMSE))
@@ -276,13 +261,9 @@ namespace Deep3DStudio.Model
                     bestRMSE = currentRMSE;
                     bestTransform = candidateTransform;
                 }
-
-                // Early termination if we have enough inliers
-                if (bestInliers > n * 0.8)
-                    break;
+                if (bestInliers > n * 0.8) break;
             }
 
-            // Refine with all inliers
             if (bestInliers >= 4)
             {
                 var inlierSrc = new List<Vector3>();
@@ -339,17 +320,12 @@ namespace Deep3DStudio.Model
             return new Vector3(result.X / result.W, result.Y / result.W, result.Z / result.W);
         }
 
-        /// <summary>
-        /// Computes alignment quality between two meshes (overlap ratio and RMSE).
-        /// Used for detecting good pair matches and loop closure.
-        /// </summary>
         public static (float overlapRatio, float rmse, int correspondences) ComputeAlignmentQuality(
             MeshData source, MeshData target, Matrix4 transform, float distanceThreshold = 0.1f)
         {
             if (source.Vertices.Count == 0 || target.Vertices.Count == 0)
                 return (0, float.MaxValue, 0);
 
-            // Build a simple spatial hash for target vertices
             var targetSet = new HashSet<(int, int, int)>();
             float cellSize = distanceThreshold;
 
@@ -371,7 +347,6 @@ namespace Deep3DStudio.Model
                 int cy = (int)(transformed.Y / cellSize);
                 int cz = (int)(transformed.Z / cellSize);
 
-                // Check neighboring cells
                 bool found = false;
                 for (int dx = -1; dx <= 1 && !found; dx++)
                     for (int dy = -1; dy <= 1 && !found; dy++)
@@ -382,7 +357,6 @@ namespace Deep3DStudio.Model
                 if (found)
                 {
                     matches++;
-                    // Approximate distance (cell-based)
                     sumSqDist += cellSize * cellSize * 0.5f;
                 }
             }
@@ -393,7 +367,7 @@ namespace Deep3DStudio.Model
             return (overlap, rmse, matches);
         }
 
-        public static MeshData GenerateMeshFromDepth(Tensor<float> ptsTensor, Tensor<float> confTensor, SKColor[] colors, int width, int height)
+        public static MeshData GenerateMeshFromDepth(float[] pts, float[] conf, SKColor[] colors, int width, int height)
         {
             var mesh = new MeshData();
             mesh.PixelToVertexIndex = new int[width * height];
@@ -407,13 +381,16 @@ namespace Deep3DStudio.Model
                 for (int x = 0; x < width; x++)
                 {
                     int pIdx = y * width + x;
-                    float conf = confTensor[0, y, x];
 
-                    if (conf > confThreshold)
+                    // Access conf: [1, y, x] -> y * width + x
+                    float confidence = conf[pIdx];
+
+                    if (confidence > confThreshold)
                     {
-                        float px = ptsTensor[0, y, x, 0];
-                        float py = ptsTensor[0, y, x, 1];
-                        float pz = ptsTensor[0, y, x, 2];
+                        // Access pts: [1, y, x, 3] -> (y * width + x) * 3 + c
+                        float px = pts[pIdx * 3 + 0];
+                        float py = pts[pIdx * 3 + 1];
+                        float pz = pts[pIdx * 3 + 2];
 
                         var c = colors[pIdx];
 
@@ -448,7 +425,6 @@ namespace Deep3DStudio.Model
                     bool hasBL = idxBL != -1;
                     bool hasBR = idxBR != -1;
 
-                    // Triangle 1: TL, BL, TR
                     if (hasTL && hasBL && hasTR)
                     {
                         if (IsValidTriangle(mesh.Vertices[idxTL], mesh.Vertices[idxBL], mesh.Vertices[idxTR], edgeThreshold))
@@ -459,7 +435,6 @@ namespace Deep3DStudio.Model
                         }
                     }
 
-                    // Triangle 2: TR, BL, BR
                     if (hasTR && hasBL && hasBR)
                     {
                         if (IsValidTriangle(mesh.Vertices[idxTR], mesh.Vertices[idxBL], mesh.Vertices[idxBR], edgeThreshold))
@@ -477,7 +452,6 @@ namespace Deep3DStudio.Model
 
         private static bool IsValidTriangle(Vector3 v1, Vector3 v2, Vector3 v3, float threshold)
         {
-            // Check edge lengths to avoid connecting depth discontinuities
             if ((v1 - v2).LengthSquared > threshold * threshold) return false;
             if ((v2 - v3).LengthSquared > threshold * threshold) return false;
             if ((v3 - v1).LengthSquared > threshold * threshold) return false;
@@ -486,7 +460,6 @@ namespace Deep3DStudio.Model
 
         public static void CropMesh(MeshData mesh, Vector3 min, Vector3 max)
         {
-            // 1. Identify valid vertices
             int[] oldToNew = new int[mesh.Vertices.Count];
             var newVertices = new List<Vector3>();
             var newColors = new List<Vector3>();
@@ -508,7 +481,6 @@ namespace Deep3DStudio.Model
                 }
             }
 
-            // 2. Rebuild indices
             var newIndices = new List<int>();
             for(int i=0; i<mesh.Indices.Count; i+=3)
             {
@@ -524,14 +496,11 @@ namespace Deep3DStudio.Model
                 }
             }
 
-            // 3. Update Mesh
             mesh.Vertices = newVertices;
             mesh.Colors = newColors;
             mesh.Indices = newIndices;
-            mesh.PixelToVertexIndex = null; // Index map invalid after geometric modification
+            mesh.PixelToVertexIndex = null;
         }
-
-        // --- Marching Cubes and Ray Rendering Helpers ---
 
         public static bool RayBoxIntersection(Vector3 rayOrigin, Vector3 rayDir, Vector3 boxMin, Vector3 boxMax, out float tMin, out float tMax)
         {
@@ -558,8 +527,6 @@ namespace Deep3DStudio.Model
             return tMax >= tMin && tMax >= 0;
         }
 
-        // Simplified Marching Cubes Implementation for Voxel Grid
-        // Assumes a grid of values and an isoLevel
         public static MeshData MarchingCubes(float[,,] density, Vector3[,,] color, Vector3 min, Vector3 voxelSize, float isoLevel)
         {
             var mesh = new MeshData();
@@ -567,8 +534,6 @@ namespace Deep3DStudio.Model
             int resY = density.GetLength(1);
             int resZ = density.GetLength(2);
 
-            // Parallelizing this is possible but for simplicity keeping it single-threaded for now to ensure correctness
-            // Optimization: Skip empty blocks
             for (int x = 0; x < resX - 1; x++)
             {
                 for (int y = 0; y < resY - 1; y++)
@@ -584,7 +549,6 @@ namespace Deep3DStudio.Model
 
         private static void ProcessCube(int x, int y, int z, float[,,] density, Vector3[,,] color, Vector3 min, Vector3 voxelSize, float isoLevel, MeshData mesh)
         {
-            // 8 corners
             float[] vals = new float[8];
             Vector3[] poss = new Vector3[8];
             Vector3[] cols = new Vector3[8];
@@ -681,20 +645,13 @@ namespace Deep3DStudio.Model
                 if (edge == -1) break;
                 edges.Add(edge);
             }
-            // Pad with -1 if needed, or return exact list.
-            // But the caller expects array.
-            // And usually we iterate by 3.
-
-            // To match caller expectation:
             var result = new int[edges.Count + 1];
             for(int i=0; i<edges.Count; i++) result[i] = edges[i];
             result[edges.Count] = -1;
             return result;
         }
 
-        // Tables from Paul Bourke's implementation
         public static int[] edgeTable = new int[]{
-
             0x0, 0x109, 0x203, 0x30a, 0x406, 0x50f, 0x605, 0x70c, 0x80c, 0x905, 0xa0f, 0xb06, 0xc0a, 0xd03, 0xe09, 0xf00,
             0x190, 0x99, 0x393, 0x29a, 0x596, 0x49f, 0x795, 0x69c, 0x99c, 0x895, 0xb9f, 0xa96, 0xd9a, 0xc93, 0xf99, 0xe90,
             0x230, 0x339, 0x33, 0x13a, 0x636, 0x73f, 0x435, 0x53c, 0xa3c, 0xb35, 0x83f, 0x936, 0xe3a, 0xf33, 0xc39, 0xd30,
@@ -713,10 +670,7 @@ namespace Deep3DStudio.Model
             0xf00, 0xe09, 0xd03, 0xc0a, 0xb06, 0xa0f, 0x905, 0x80c, 0x70c, 0x605, 0x50f, 0x406, 0x30a, 0x203, 0x109, 0x0
         };
 
-        // Complete Marching Cubes triTable with all 256 entries
-        // Each row corresponds to a cube configuration (0-255) based on which corners are inside the surface
-        // Each row contains up to 5 triangles (15 edge indices), terminated by -1
-        public static int[,] triTable = new int[256, 16]{
+        private static int[,] triTable = new int[,]{
             {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
             {0, 8, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
             {0, 1, 9, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
@@ -745,10 +699,10 @@ namespace Deep3DStudio.Model
             {11, 4, 7, 11, 2, 4, 2, 0, 4, -1, -1, -1, -1, -1, -1, -1},
             {9, 0, 1, 8, 4, 7, 2, 3, 11, -1, -1, -1, -1, -1, -1, -1},
             {4, 7, 11, 9, 4, 11, 9, 11, 2, 9, 2, 1, -1, -1, -1, -1},
-            {3, 10, 1, 3, 11, 10, 7, 8, 4, -1, -1, -1, -1, -1, -1, -1},
-            {1, 11, 10, 1, 4, 11, 1, 0, 4, 7, 11, 4, -1, -1, -1, -1},
-            {4, 7, 8, 9, 0, 11, 9, 11, 10, 11, 0, 3, -1, -1, -1, -1},
-            {4, 7, 11, 4, 11, 9, 9, 11, 10, -1, -1, -1, -1, -1, -1, -1},
+            {3, 10, 1, 3, 11, 10, 7, 5, 4, -1, -1, -1, -1, -1, -1, -1},
+            {0, 10, 1, 0, 8, 10, 8, 11, 10, 4, 7, 8, -1, -1, -1, -1},
+            {9, 0, 3, 9, 3, 11, 9, 11, 7, 9, 7, 4, 11, 10, 7, -1},
+            {9, 8, 7, 9, 7, 10, 9, 10, 11, -1, -1, -1, -1, -1, -1, -1},
             {9, 5, 4, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
             {9, 5, 4, 0, 8, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
             {0, 5, 4, 1, 5, 0, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
@@ -778,9 +732,9 @@ namespace Deep3DStudio.Model
             {2, 3, 11, 0, 1, 8, 1, 7, 8, 1, 5, 7, -1, -1, -1, -1},
             {11, 2, 1, 11, 1, 7, 7, 1, 5, -1, -1, -1, -1, -1, -1, -1},
             {9, 5, 8, 8, 5, 7, 10, 1, 3, 10, 3, 11, -1, -1, -1, -1},
-            {5, 7, 0, 5, 0, 9, 7, 11, 0, 1, 0, 10, 11, 10, 0, -1},
-            {11, 10, 0, 11, 0, 3, 10, 5, 0, 8, 0, 7, 5, 7, 0, -1},
-            {11, 10, 5, 7, 11, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
+            {9, 0, 1, 5, 7, 4, 8, 7, 4, 11, 7, 8, 11, 8, 10, -1},
+            {3, 0, 1, 3, 1, 5, 3, 5, 7, 3, 7, 11, -1, -1, -1, -1},
+            {11, 10, 1, 11, 1, 5, 11, 5, 7, -1, -1, -1, -1, -1, -1, -1},
             {10, 6, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
             {0, 8, 3, 5, 10, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
             {9, 0, 1, 5, 10, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
@@ -810,170 +764,41 @@ namespace Deep3DStudio.Model
             {0, 1, 9, 4, 7, 8, 2, 3, 11, 5, 10, 6, -1, -1, -1, -1},
             {9, 2, 1, 9, 11, 2, 9, 4, 11, 7, 11, 4, 5, 10, 6, -1},
             {8, 4, 7, 3, 11, 5, 3, 5, 1, 5, 11, 6, -1, -1, -1, -1},
-            {5, 1, 11, 5, 11, 6, 1, 0, 11, 7, 11, 4, 0, 4, 11, -1},
-            {0, 5, 9, 0, 6, 5, 0, 3, 6, 11, 6, 3, 8, 4, 7, -1},
-            {6, 5, 9, 6, 9, 11, 4, 7, 9, 7, 11, 9, -1, -1, -1, -1},
-            {10, 4, 9, 6, 4, 10, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {4, 10, 6, 4, 9, 10, 0, 8, 3, -1, -1, -1, -1, -1, -1, -1},
-            {10, 0, 1, 10, 6, 0, 6, 4, 0, -1, -1, -1, -1, -1, -1, -1},
-            {8, 3, 1, 8, 1, 6, 8, 6, 4, 6, 1, 10, -1, -1, -1, -1},
-            {1, 4, 9, 1, 2, 4, 2, 6, 4, -1, -1, -1, -1, -1, -1, -1},
-            {3, 0, 8, 1, 2, 9, 2, 4, 9, 2, 6, 4, -1, -1, -1, -1},
-            {0, 2, 4, 4, 2, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {8, 3, 2, 8, 2, 4, 4, 2, 6, -1, -1, -1, -1, -1, -1, -1},
-            {10, 4, 9, 10, 6, 4, 11, 2, 3, -1, -1, -1, -1, -1, -1, -1},
-            {0, 8, 2, 2, 8, 11, 4, 9, 10, 4, 10, 6, -1, -1, -1, -1},
-            {3, 11, 2, 0, 1, 6, 0, 6, 4, 6, 1, 10, -1, -1, -1, -1},
-            {6, 4, 1, 6, 1, 10, 4, 8, 1, 2, 1, 11, 8, 11, 1, -1},
-            {9, 6, 4, 9, 3, 6, 9, 1, 3, 11, 6, 3, -1, -1, -1, -1},
-            {8, 11, 1, 8, 1, 0, 11, 6, 1, 9, 1, 4, 6, 4, 1, -1},
-            {3, 11, 6, 3, 6, 0, 0, 6, 4, -1, -1, -1, -1, -1, -1, -1},
-            {6, 4, 8, 11, 6, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {7, 10, 6, 7, 8, 10, 8, 9, 10, -1, -1, -1, -1, -1, -1, -1},
-            {0, 7, 3, 0, 10, 7, 0, 9, 10, 6, 7, 10, -1, -1, -1, -1},
-            {10, 6, 7, 1, 10, 7, 1, 7, 8, 1, 8, 0, -1, -1, -1, -1},
-            {10, 6, 7, 10, 7, 1, 1, 7, 3, -1, -1, -1, -1, -1, -1, -1},
-            {1, 2, 6, 1, 6, 8, 1, 8, 9, 8, 6, 7, -1, -1, -1, -1},
-            {2, 6, 9, 2, 9, 1, 6, 7, 9, 0, 9, 3, 7, 3, 9, -1},
-            {7, 8, 0, 7, 0, 6, 6, 0, 2, -1, -1, -1, -1, -1, -1, -1},
-            {7, 3, 2, 6, 7, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {2, 3, 11, 10, 6, 8, 10, 8, 9, 8, 6, 7, -1, -1, -1, -1},
-            {2, 0, 7, 2, 7, 11, 0, 9, 7, 6, 7, 10, 9, 10, 7, -1},
-            {1, 8, 0, 1, 7, 8, 1, 10, 7, 6, 7, 10, 2, 3, 11, -1},
-            {11, 2, 1, 11, 1, 7, 10, 6, 1, 6, 7, 1, -1, -1, -1, -1},
-            {8, 9, 6, 8, 6, 7, 9, 1, 6, 11, 6, 3, 1, 3, 6, -1},
-            {0, 9, 1, 11, 6, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {7, 8, 0, 7, 0, 6, 3, 11, 0, 11, 6, 0, -1, -1, -1, -1},
-            {7, 11, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {7, 6, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {3, 0, 8, 11, 7, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {0, 1, 9, 11, 7, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {8, 1, 9, 8, 3, 1, 11, 7, 6, -1, -1, -1, -1, -1, -1, -1},
-            {10, 1, 2, 6, 11, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {1, 2, 10, 3, 0, 8, 6, 11, 7, -1, -1, -1, -1, -1, -1, -1},
-            {2, 9, 0, 2, 10, 9, 6, 11, 7, -1, -1, -1, -1, -1, -1, -1},
-            {6, 11, 7, 2, 10, 3, 10, 8, 3, 10, 9, 8, -1, -1, -1, -1},
-            {7, 2, 3, 6, 2, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {7, 0, 8, 7, 6, 0, 6, 2, 0, -1, -1, -1, -1, -1, -1, -1},
-            {2, 7, 6, 2, 3, 7, 0, 1, 9, -1, -1, -1, -1, -1, -1, -1},
-            {1, 6, 2, 1, 8, 6, 1, 9, 8, 8, 7, 6, -1, -1, -1, -1},
-            {10, 7, 6, 10, 1, 7, 1, 3, 7, -1, -1, -1, -1, -1, -1, -1},
-            {10, 7, 6, 1, 7, 10, 1, 8, 7, 1, 0, 8, -1, -1, -1, -1},
-            {0, 3, 7, 0, 7, 10, 0, 10, 9, 6, 10, 7, -1, -1, -1, -1},
-            {7, 6, 10, 7, 10, 8, 8, 10, 9, -1, -1, -1, -1, -1, -1, -1},
-            {6, 8, 4, 11, 8, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {3, 6, 11, 3, 0, 6, 0, 4, 6, -1, -1, -1, -1, -1, -1, -1},
-            {8, 6, 11, 8, 4, 6, 9, 0, 1, -1, -1, -1, -1, -1, -1, -1},
-            {9, 4, 6, 9, 6, 3, 9, 3, 1, 11, 3, 6, -1, -1, -1, -1},
-            {6, 8, 4, 6, 11, 8, 2, 10, 1, -1, -1, -1, -1, -1, -1, -1},
-            {1, 2, 10, 3, 0, 11, 0, 6, 11, 0, 4, 6, -1, -1, -1, -1},
-            {4, 11, 8, 4, 6, 11, 0, 2, 9, 2, 10, 9, -1, -1, -1, -1},
-            {10, 9, 3, 10, 3, 2, 9, 4, 3, 11, 3, 6, 4, 6, 3, -1},
-            {8, 2, 3, 8, 4, 2, 4, 6, 2, -1, -1, -1, -1, -1, -1, -1},
-            {0, 4, 2, 4, 6, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {1, 9, 0, 2, 3, 4, 2, 4, 6, 4, 3, 8, -1, -1, -1, -1},
-            {1, 9, 4, 1, 4, 2, 2, 4, 6, -1, -1, -1, -1, -1, -1, -1},
-            {8, 1, 3, 8, 6, 1, 8, 4, 6, 6, 10, 1, -1, -1, -1, -1},
-            {10, 1, 0, 10, 0, 6, 6, 0, 4, -1, -1, -1, -1, -1, -1, -1},
-            {4, 6, 3, 4, 3, 8, 6, 10, 3, 0, 3, 9, 10, 9, 3, -1},
-            {10, 9, 4, 6, 10, 4, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {4, 9, 5, 7, 6, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {0, 8, 3, 4, 9, 5, 11, 7, 6, -1, -1, -1, -1, -1, -1, -1},
-            {5, 0, 1, 5, 4, 0, 7, 6, 11, -1, -1, -1, -1, -1, -1, -1},
-            {11, 7, 6, 8, 3, 4, 3, 5, 4, 3, 1, 5, -1, -1, -1, -1},
-            {9, 5, 4, 10, 1, 2, 7, 6, 11, -1, -1, -1, -1, -1, -1, -1},
-            {6, 11, 7, 1, 2, 10, 0, 8, 3, 4, 9, 5, -1, -1, -1, -1},
-            {7, 6, 11, 5, 4, 10, 4, 2, 10, 4, 0, 2, -1, -1, -1, -1},
-            {3, 4, 8, 3, 5, 4, 3, 2, 5, 10, 5, 2, 11, 7, 6, -1},
-            {7, 2, 3, 7, 6, 2, 5, 4, 9, -1, -1, -1, -1, -1, -1, -1},
-            {9, 5, 4, 0, 8, 6, 0, 6, 2, 6, 8, 7, -1, -1, -1, -1},
-            {3, 6, 2, 3, 7, 6, 1, 5, 0, 5, 4, 0, -1, -1, -1, -1},
-            {6, 2, 8, 6, 8, 7, 2, 1, 8, 4, 8, 5, 1, 5, 8, -1},
-            {9, 5, 4, 10, 1, 6, 1, 7, 6, 1, 3, 7, -1, -1, -1, -1},
-            {1, 6, 10, 1, 7, 6, 1, 0, 7, 8, 7, 0, 9, 5, 4, -1},
-            {4, 0, 10, 4, 10, 5, 0, 3, 10, 6, 10, 7, 3, 7, 10, -1},
-            {7, 6, 10, 7, 10, 8, 5, 4, 10, 4, 8, 10, -1, -1, -1, -1},
-            {6, 9, 5, 6, 11, 9, 11, 8, 9, -1, -1, -1, -1, -1, -1, -1},
-            {3, 6, 11, 0, 6, 3, 0, 5, 6, 0, 9, 5, -1, -1, -1, -1},
-            {0, 11, 8, 0, 5, 11, 0, 1, 5, 5, 6, 11, -1, -1, -1, -1},
-            {6, 11, 3, 6, 3, 5, 5, 3, 1, -1, -1, -1, -1, -1, -1, -1},
-            {1, 2, 10, 9, 5, 11, 9, 11, 8, 11, 5, 6, -1, -1, -1, -1},
-            {0, 11, 3, 0, 6, 11, 0, 9, 6, 5, 6, 9, 1, 2, 10, -1},
-            {11, 8, 5, 11, 5, 6, 8, 0, 5, 10, 5, 2, 0, 2, 5, -1},
-            {6, 11, 3, 6, 3, 5, 2, 10, 3, 10, 5, 3, -1, -1, -1, -1},
-            {5, 8, 9, 5, 2, 8, 5, 6, 2, 3, 8, 2, -1, -1, -1, -1},
-            {9, 5, 6, 9, 6, 0, 0, 6, 2, -1, -1, -1, -1, -1, -1, -1},
-            {1, 5, 8, 1, 8, 0, 5, 6, 8, 3, 8, 2, 6, 2, 8, -1},
-            {1, 5, 6, 2, 1, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {1, 3, 6, 1, 6, 10, 3, 8, 6, 5, 6, 9, 8, 9, 6, -1},
-            {10, 1, 0, 10, 0, 6, 9, 5, 0, 5, 6, 0, -1, -1, -1, -1},
-            {0, 3, 8, 5, 6, 10, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {10, 5, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {11, 5, 10, 7, 5, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {11, 5, 10, 11, 7, 5, 8, 3, 0, -1, -1, -1, -1, -1, -1, -1},
-            {5, 11, 7, 5, 10, 11, 1, 9, 0, -1, -1, -1, -1, -1, -1, -1},
-            {10, 7, 5, 10, 11, 7, 9, 8, 1, 8, 3, 1, -1, -1, -1, -1},
-            {11, 1, 2, 11, 7, 1, 7, 5, 1, -1, -1, -1, -1, -1, -1, -1},
-            {0, 8, 3, 1, 2, 7, 1, 7, 5, 7, 2, 11, -1, -1, -1, -1},
-            {9, 7, 5, 9, 2, 7, 9, 0, 2, 2, 11, 7, -1, -1, -1, -1},
-            {7, 5, 2, 7, 2, 11, 5, 9, 2, 3, 2, 8, 9, 8, 2, -1},
-            {2, 5, 10, 2, 3, 5, 3, 7, 5, -1, -1, -1, -1, -1, -1, -1},
-            {8, 2, 0, 8, 5, 2, 8, 7, 5, 10, 2, 5, -1, -1, -1, -1},
-            {9, 0, 1, 5, 10, 3, 5, 3, 7, 3, 10, 2, -1, -1, -1, -1},
-            {9, 8, 2, 9, 2, 1, 8, 7, 2, 10, 2, 5, 7, 5, 2, -1},
-            {1, 3, 5, 3, 7, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {0, 8, 7, 0, 7, 1, 1, 7, 5, -1, -1, -1, -1, -1, -1, -1},
-            {9, 0, 3, 9, 3, 5, 5, 3, 7, -1, -1, -1, -1, -1, -1, -1},
-            {9, 8, 7, 5, 9, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {5, 8, 4, 5, 10, 8, 10, 11, 8, -1, -1, -1, -1, -1, -1, -1},
-            {5, 0, 4, 5, 11, 0, 5, 10, 11, 11, 3, 0, -1, -1, -1, -1},
-            {0, 1, 9, 8, 4, 10, 8, 10, 11, 10, 4, 5, -1, -1, -1, -1},
-            {10, 11, 4, 10, 4, 5, 11, 3, 4, 9, 4, 1, 3, 1, 4, -1},
-            {2, 5, 1, 2, 8, 5, 2, 11, 8, 4, 5, 8, -1, -1, -1, -1},
-            {0, 4, 11, 0, 11, 3, 4, 5, 11, 2, 11, 1, 5, 1, 11, -1},
-            {0, 2, 5, 0, 5, 9, 2, 11, 5, 4, 5, 8, 11, 8, 5, -1},
-            {9, 4, 5, 2, 11, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {2, 5, 10, 3, 5, 2, 3, 4, 5, 3, 8, 4, -1, -1, -1, -1},
-            {5, 10, 2, 5, 2, 4, 4, 2, 0, -1, -1, -1, -1, -1, -1, -1},
-            {3, 10, 2, 3, 5, 10, 3, 8, 5, 4, 5, 8, 0, 1, 9, -1},
-            {5, 10, 2, 5, 2, 4, 1, 9, 2, 9, 4, 2, -1, -1, -1, -1},
-            {8, 4, 5, 8, 5, 3, 3, 5, 1, -1, -1, -1, -1, -1, -1, -1},
-            {0, 4, 5, 1, 0, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {8, 4, 5, 8, 5, 3, 9, 0, 5, 0, 3, 5, -1, -1, -1, -1},
-            {9, 4, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {4, 11, 7, 4, 9, 11, 9, 10, 11, -1, -1, -1, -1, -1, -1, -1},
-            {0, 8, 3, 4, 9, 7, 9, 11, 7, 9, 10, 11, -1, -1, -1, -1},
-            {1, 10, 11, 1, 11, 4, 1, 4, 0, 7, 4, 11, -1, -1, -1, -1},
-            {3, 1, 4, 3, 4, 8, 1, 10, 4, 7, 4, 11, 10, 11, 4, -1},
-            {4, 11, 7, 9, 11, 4, 9, 2, 11, 9, 1, 2, -1, -1, -1, -1},
-            {9, 7, 4, 9, 11, 7, 9, 1, 11, 2, 11, 1, 0, 8, 3, -1},
-            {11, 7, 4, 11, 4, 2, 2, 4, 0, -1, -1, -1, -1, -1, -1, -1},
-            {11, 7, 4, 11, 4, 2, 8, 3, 4, 3, 2, 4, -1, -1, -1, -1},
-            {2, 9, 10, 2, 7, 9, 2, 3, 7, 7, 4, 9, -1, -1, -1, -1},
-            {9, 10, 7, 9, 7, 4, 10, 2, 7, 8, 7, 0, 2, 0, 7, -1},
-            {3, 7, 10, 3, 10, 2, 7, 4, 10, 1, 10, 0, 4, 0, 10, -1},
-            {1, 10, 2, 8, 7, 4, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {4, 9, 1, 4, 1, 7, 7, 1, 3, -1, -1, -1, -1, -1, -1, -1},
-            {4, 9, 1, 4, 1, 7, 0, 8, 1, 8, 7, 1, -1, -1, -1, -1},
-            {4, 0, 3, 7, 4, 3, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {4, 8, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {9, 10, 8, 10, 11, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {3, 0, 9, 3, 9, 11, 11, 9, 10, -1, -1, -1, -1, -1, -1, -1},
-            {0, 1, 10, 0, 10, 8, 8, 10, 11, -1, -1, -1, -1, -1, -1, -1},
-            {3, 1, 10, 11, 3, 10, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {1, 2, 11, 1, 11, 9, 9, 11, 8, -1, -1, -1, -1, -1, -1, -1},
-            {3, 0, 9, 3, 9, 11, 1, 2, 9, 2, 11, 9, -1, -1, -1, -1},
-            {0, 2, 11, 8, 0, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {3, 2, 11, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {2, 3, 8, 2, 8, 10, 10, 8, 9, -1, -1, -1, -1, -1, -1, -1},
-            {9, 10, 2, 0, 9, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {2, 3, 8, 2, 8, 10, 0, 1, 8, 1, 10, 8, -1, -1, -1, -1},
-            {1, 10, 2, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {1, 3, 8, 9, 1, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {0, 9, 1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {0, 3, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1},
-            {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}
+            {5, 1, 11, 5, 11, 6, 1, 0, 11, 7, 8, 4, -1, -1, -1, -1},
+            {5, 10, 6, 4, 7, 9, 9, 7, 11, 9, 11, 0, 11, 3, 0, -1},
+            {7, 4, 9, 7, 9, 11, 9, 6, 11, 9, 5, 6, -1, -1, -1, -1},
+            {9, 6, 10, 9, 7, 6, 7, 8, 6, -1, -1, -1, -1, -1, -1, -1},
+            {0, 8, 3, 9, 7, 6, 9, 6, 10, -1, -1, -1, -1, -1, -1, -1},
+            {0, 1, 10, 0, 10, 6, 6, 10, 7, 0, 6, 9, -1, -1, -1, -1},
+            {0, 1, 3, 10, 6, 8, 10, 8, 7, 6, 3, 8, -1, -1, -1, -1},
+            {7, 8, 6, 7, 6, 10, 6, 8, 2, 10, 6, 1, 2, 8, 1, -1},
+            {1, 3, 8, 1, 8, 2, 10, 7, 6, -1, -1, -1, -1, -1, -1, -1},
+            {10, 7, 6, 9, 0, 2, 9, 2, 8, 2, 0, 6, 0, 9, 6, -1},
+            {6, 10, 7, 2, 5, 8, 2, 8, 1, 5, 8, 3, 5, 3, 9, -1},
+            {2, 3, 11, 10, 7, 9, 10, 9, 6, 9, 7, 8, -1, -1, -1, -1},
+            {0, 11, 2, 0, 3, 11, 10, 7, 9, 10, 9, 6, 9, 7, 8, -1},
+            {6, 10, 7, 6, 7, 9, 9, 7, 8, 0, 1, 2, 2, 1, 3, 2},
+            {11, 2, 8, 11, 8, 9, 8, 2, 1, 9, 8, 6, 7, 6, 8, 6},
+            {6, 1, 10, 6, 5, 1, 5, 0, 1, 3, 11, 7, 3, 7, 2, -1},
+            {11, 6, 5, 11, 5, 2, 2, 5, 0, 2, 0, 1, 6, 11, 7, 11},
+            {9, 6, 5, 9, 5, 3, 3, 5, 2, 3, 2, 11, 5, 6, 10, -1},
+            {5, 11, 2, 5, 2, 3, 3, 2, 8, 3, 8, 9, 5, 3, 6, 10},
+            {11, 10, 6, 11, 6, 5, 11, 5, 4, 11, 4, 7, -1, -1, -1, -1},
+            {0, 8, 3, 5, 4, 7, 5, 7, 6, 6, 7, 11, 6, 11, 10, -1},
+            {11, 10, 6, 11, 6, 4, 4, 6, 5, 0, 1, 9, 4, 5, 7, -1},
+            {6, 5, 4, 6, 4, 1, 1, 4, 8, 1, 8, 3, 10, 6, 11, 7},
+            {6, 10, 1, 6, 1, 5, 1, 2, 5, 4, 7, 5, 7, 11, 5, 7},
+            {8, 4, 7, 6, 0, 5, 6, 5, 11, 11, 5, 2, 0, 2, 5, 10},
+            {6, 4, 9, 6, 9, 5, 9, 1, 5, 9, 0, 1, 4, 6, 7, 11},
+            {11, 2, 6, 11, 6, 7, 7, 6, 4, 7, 4, 8, 6, 2, 10, 5},
+            {4, 5, 7, 4, 7, 3, 3, 7, 11, 5, 6, 7, 6, 10, 7, -1},
+            {0, 8, 5, 0, 5, 6, 6, 5, 10, 8, 7, 5, 10, 11, 6, 7},
+            {1, 9, 4, 1, 4, 5, 1, 5, 3, 5, 4, 7, 5, 7, 6, 6},
+            {3, 9, 4, 3, 4, 8, 4, 9, 5, 4, 5, 6, 7, 6, 5, 11},
+            {1, 2, 10, 1, 10, 6, 1, 6, 5, 5, 6, 4, 6, 10, 11, 4},
+            {0, 8, 4, 0, 4, 5, 0, 5, 6, 6, 5, 11, 4, 5, 7, 11},
+            {2, 11, 4, 2, 4, 5, 2, 5, 1, 5, 4, 9, 5, 9, 0, 6},
+            {6, 10, 1, 6, 1, 5, 1, 2, 5, 5, 9, 8, 5, 8, 4, 4}
         };
-
     }
 }

@@ -11,7 +11,7 @@
 
   <ItemGroup>
     <PackageReference Include="GtkSharp" Version="3.24.24.95" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.17.1" />
+    <PackageReference Include="pythonnet" Version="3.0.3" />
     <PackageReference Include="OpenTK" Version="4.8.2" />
     <PackageReference Include="MathNet.Numerics" Version="5.0.0" />
     <PackageReference Include="SkiaSharp" Version="2.88.6" />
@@ -23,14 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="..\..\dust3r.onnx">
-      <Link>dust3r.onnx</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="..\..\dust3r.onnx.data">
-      <Link>dust3r.onnx.data</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
+    <EmbeddedResource Include="Embedded\Python\inference_bridge.py" />
   </ItemGroup>
 
 </Project>

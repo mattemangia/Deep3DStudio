@@ -2,33 +2,23 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using OpenTK.Mathematics;
-using Deep3DStudio.Model;
 using Deep3DStudio.Meshing;
 using SkiaSharp;
 
 namespace Deep3DStudio.Model
 {
-    /// <summary>
-    /// Implements a Voxel Grid based "NeRF" (Neural Radiance Field) approximation.
-    /// It uses Dust3r points for initialization (Occupancy Grid) to skip empty space.
-    /// It then optimizes the Color and Density of the voxels using the input images and poses.
-    ///
-    /// This is a CPU-based implementation optimized with Parallel.For.
-    /// </summary>
     public class VoxelGridNeRF
     {
-        private const int GridSize = 128; // Resolution of the voxel grid (128^3). Higher = More memory/time.
+        private const int GridSize = 128;
         private float[,,] _density;
         private Vector3[,,] _color;
-        private bool[,,] _occupancy; // Coarse mask to skip raymarching
+        private bool[,,] _occupancy;
 
         private Vector3 _boundsMin;
         private Vector3 _boundsMax;
         private Vector3 _voxelSize;
 
-        // Optimization parameters
         private float _learningRate = 0.1f;
-        // private float _densityStep = 0.5f; // Removed unused variable
 
         public VoxelGridNeRF()
         {
@@ -37,13 +27,8 @@ namespace Deep3DStudio.Model
             _occupancy = new bool[GridSize, GridSize, GridSize];
         }
 
-        /// <summary>
-        /// Initializes the voxel grid from a coarse mesh (Dust3r output).
-        /// Determines the bounding box and marks occupied voxels.
-        /// </summary>
         public void InitializeFromMesh(List<MeshData> meshes)
         {
-            // 1. Compute Bounds
             _boundsMin = new Vector3(float.PositiveInfinity);
             _boundsMax = new Vector3(float.NegativeInfinity);
 
@@ -60,15 +45,12 @@ namespace Deep3DStudio.Model
 
             if (vertexCount == 0) return;
 
-            // Add padding
             Vector3 padding = (_boundsMax - _boundsMin) * 0.1f;
             _boundsMin -= padding;
             _boundsMax += padding;
 
             _voxelSize = (_boundsMax - _boundsMin) / GridSize;
 
-            // 2. Mark Occupancy and Initialize Colors
-            // We iterate over points and splat them into the grid
             foreach (var mesh in meshes)
             {
                 for (int i = 0; i < mesh.Vertices.Count; i++)
@@ -85,8 +67,6 @@ namespace Deep3DStudio.Model
                     {
                         _occupancy[x, y, z] = true;
 
-                        // Initial guess: Average color, High density
-                        // Simple running average for initialization
                         if (_density[x, y, z] == 0)
                         {
                             _color[x, y, z] = c;
@@ -97,7 +77,6 @@ namespace Deep3DStudio.Model
                             _color[x, y, z] = (_color[x, y, z] + c) * 0.5f;
                         }
 
-                        // Dilate occupancy slightly to capture near surface details
                         DilateOccupancy(x, y, z);
                     }
                 }
@@ -116,18 +95,14 @@ namespace Deep3DStudio.Model
                             if (!_occupancy[nx, ny, nz])
                             {
                                 _occupancy[nx, ny, nz] = true;
-                                _density[nx, ny, nz] = 0.1f; // Low initial density for expanded areas
+                                _density[nx, ny, nz] = 0.1f;
                             }
                         }
                     }
         }
 
-        /// <summary>
-        /// Runs the training loop to refine Color and Density using the input images.
-        /// </summary>
         public void Train(List<CameraPose> poses, int iterations = 5)
         {
-            // Simple SGD-like optimization
             Console.WriteLine($"Starting NeRF Training ({iterations} iterations)...");
 
             for (int iter = 0; iter < iterations; iter++)
@@ -141,9 +116,7 @@ namespace Deep3DStudio.Model
                     ProcessImageOptimized(pose, densityGrad, colorGrad, counts);
                 }
 
-                // Apply Updates
                 ApplyGradients(densityGrad, colorGrad, counts);
-
                 Console.WriteLine($"  Iteration {iter+1}/{iterations} complete.");
             }
         }
@@ -151,13 +124,12 @@ namespace Deep3DStudio.Model
         private void ProcessImageOptimized(CameraPose pose, float[,,] densityGrad, Vector3[,,] colorGrad, int[,,] counts)
         {
             var (tensor, shape) = ImageUtils.LoadAndPreprocessImage(pose.ImagePath);
-            int W = shape[1];
-            int H = shape[0];
-            var colors = ImageUtils.ExtractColors(pose.ImagePath, W, H); // This reloads/resizes to match W/H
+            int W = shape[3]; // [1, 3, H, W]
+            int H = shape[2];
+
+            var colors = ImageUtils.ExtractColors(pose.ImagePath, W, H);
 
             Vector3 camPos = pose.CameraToWorld.ExtractTranslation();
-
-            // Assume FOV 60
             float fov = MathHelper.DegreesToRadians(60);
             float focal = (W * 0.5f) / (float)Math.Tan(fov * 0.5f);
 
@@ -165,15 +137,14 @@ namespace Deep3DStudio.Model
             int numRaysY = (H + stride - 1) / stride;
 
             Parallel.For(0, numRaysY,
-                () => new Dictionary<int, (Vector3 colSum, float denSum, int count)>(), // Local Init
-                (yIdx, loop, localState) => // Body
+                () => new Dictionary<int, (Vector3 colSum, float denSum, int count)>(),
+                (yIdx, loop, localState) =>
                 {
                     int y = yIdx * stride;
                     if (y >= H) return localState;
 
                     for (int x = 0; x < W; x += stride)
                     {
-                        // Ray Generation
                         float u = (x - W * 0.5f) / focal;
                         float v = (y - H * 0.5f) / focal;
                         Vector3 dirCam = new Vector3(u, v, 1.0f).Normalized();
@@ -206,7 +177,6 @@ namespace Deep3DStudio.Model
                                     float alpha = 1.0f - (float)Math.Exp(-dens * stepSize);
                                     float weight = alpha * transmittance;
 
-                                    // Accumulate into local state
                                     int key = vz * GridSize * GridSize + vy * GridSize + vx;
 
                                     float dGrad = 0;
@@ -231,7 +201,7 @@ namespace Deep3DStudio.Model
                     }
                     return localState;
                 },
-                (localState) => // Finalizer
+                (localState) =>
                 {
                     lock (counts)
                     {
@@ -254,7 +224,6 @@ namespace Deep3DStudio.Model
 
         private void ApplyGradients(float[,,] densityGrad, Vector3[,,] colorGrad, int[,,] counts)
         {
-            // Apply accumulated gradients
             Parallel.For(0, GridSize, x =>
             {
                 for (int y = 0; y < GridSize; y++)
@@ -263,17 +232,11 @@ namespace Deep3DStudio.Model
                     {
                         if (_occupancy[x, y, z] && counts[x,y,z] > 0)
                         {
-                            // Average color seen from all cameras
                             Vector3 avgTargetColor = colorGrad[x, y, z] / counts[x, y, z];
-
-                            // Blend current color with observed color
                             _color[x, y, z] = Vector3.Lerp(_color[x, y, z], avgTargetColor, _learningRate);
-
-                            // Update density
                             _density[x, y, z] += densityGrad[x, y, z] * _learningRate;
                             _density[x, y, z] = Math.Clamp(_density[x, y, z], 0.0f, 100.0f);
 
-                            // Carve empty space
                             if (_density[x, y, z] < 0.1f)
                                 _occupancy[x, y, z] = false;
                         }
@@ -284,21 +247,12 @@ namespace Deep3DStudio.Model
 
         public MeshData GetMesh()
         {
-            // Default legacy extraction
             return GetMesh(new MarchingCubesMesher());
         }
 
         public MeshData GetMesh(IMesher mesher)
         {
-            // Use the provided mesher
-            // Note: Most meshers need density, origin, voxelSize, isoLevel.
-            // Some meshers might ignore color.
-
-            // If the mesher supports color sampling internally, great.
-            // Generate mesh using the selected meshing algorithm
             var mesh = mesher.GenerateMesh(_density, _boundsMin, _voxelSize.X, 5.0f);
-
-            // Post-process: interpolate colors from voxel color grid for each vertex
             for(int i=0; i<mesh.Vertices.Count; i++)
             {
                  Vector3 v = mesh.Vertices[i];
@@ -310,12 +264,9 @@ namespace Deep3DStudio.Model
                  y = Math.Clamp(y, 0, GridSize-1);
                  z = Math.Clamp(z, 0, GridSize-1);
 
-                 // If the mesher did not populate vertex colors, replace them with samples from the nearest voxel color.
-                 // MarchingCubes (GeometryUtils) sets colors when available, but other implementations may skip them.
                  if(mesh.Colors.Count <= i) mesh.Colors.Add(_color[x,y,z]);
                  else mesh.Colors[i] = _color[x,y,z];
             }
-
             return mesh;
         }
     }
