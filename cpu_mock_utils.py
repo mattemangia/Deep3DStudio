@@ -411,17 +411,29 @@ def setup_cpu_only_environment(verbose=True):
 
     triton_mock.backends = triton_backends_mock
 
+    # Create comprehensive triton.compiler mock with all submodules
+    triton_compiler_mock = MagicMock()
+    triton_compiler_compiler_mock = MagicMock()  # triton.compiler.compiler submodule
+    triton_compiler_mock.compiler = triton_compiler_compiler_mock
+
     sys.modules['triton'] = triton_mock
     sys.modules['triton.language'] = triton_language_mock
     sys.modules['triton.runtime'] = MagicMock()
     sys.modules['triton.runtime.jit'] = MagicMock()
     sys.modules['triton.runtime.autotuner'] = MagicMock()
-    sys.modules['triton.compiler'] = MagicMock()
+    sys.modules['triton.runtime.driver'] = MagicMock()
+    sys.modules['triton.runtime.cache'] = MagicMock()
+    sys.modules['triton.compiler'] = triton_compiler_mock
+    sys.modules['triton.compiler.compiler'] = triton_compiler_compiler_mock
+    sys.modules['triton.compiler.code_generator'] = MagicMock()
+    sys.modules['triton.compiler.make_launcher'] = MagicMock()
+    sys.modules['triton.compiler.errors'] = MagicMock()
     sys.modules['triton.ops'] = MagicMock()
     sys.modules['triton.testing'] = MagicMock()
     sys.modules['triton.backends'] = triton_backends_mock
     sys.modules['triton.backends.compiler'] = triton_backends_compiler_mock
     sys.modules['triton.backends.nvidia'] = MagicMock()
+    sys.modules['triton.backends.nvidia.driver'] = MagicMock()
     sys.modules['triton.backends.amd'] = MagicMock()
 
     if verbose:

@@ -460,16 +460,28 @@ def export_image_encoder(model, output_path, resolution=518):
         def __init__(self, model):
             super().__init__()
             # TripoSG uses DINOv2 or CLIP, check model structure
+            self._model = model
+            self._encoder = None
+
+            # Try different access patterns
             if hasattr(model, 'image_encoder'):
-                self.image_encoder = model.image_encoder
-            elif hasattr(model, 'model') and hasattr(model.model, 'image_encoder'):
-                self.image_encoder = model.model.image_encoder
-            else:
-                 # Fallback, assume model itself is encoder or has it
-                 self.image_encoder = model
+                self._encoder = model.image_encoder
+            elif hasattr(model, 'encoder'):
+                self._encoder = model.encoder
+            elif hasattr(model, 'model'):
+                if hasattr(model.model, 'image_encoder'):
+                    self._encoder = model.model.image_encoder
+                elif hasattr(model.model, 'encoder'):
+                    self._encoder = model.model.encoder
+            elif hasattr(model, 'vision_model'):
+                self._encoder = model.vision_model
+
+            if self._encoder is None:
+                # Fallback, assume model itself is encoder
+                self._encoder = model
 
         def forward(self, image):
-            return self.image_encoder(image)
+            return self._encoder(image)
 
     try:
         encoder = ImageEncoderWrapper(model)
@@ -520,15 +532,27 @@ def export_vae_decoder(model, output_path, num_latent_tokens=2048, latent_dim=64
     class VAEDecoderWrapper(nn.Module):
         def __init__(self, model):
             super().__init__()
-            if hasattr(model, 'vae'):
-                self.decoder = model.vae.decoder
+            self._decoder = None
+            self._model = model
+
+            # Try different access patterns
+            if hasattr(model, 'vae') and hasattr(model.vae, 'decoder'):
+                self._decoder = model.vae.decoder
             elif hasattr(model, 'decoder'):
-                self.decoder = model.decoder
-            else:
-                raise ValueError("Could not locate VAE decoder in model")
+                self._decoder = model.decoder
+            elif hasattr(model, 'model'):
+                if hasattr(model.model, 'vae') and hasattr(model.model.vae, 'decoder'):
+                    self._decoder = model.model.vae.decoder
+                elif hasattr(model.model, 'decoder'):
+                    self._decoder = model.model.decoder
+
+            if self._decoder is None:
+                # Fallback: the model itself might be callable
+                self._decoder = model
+                print(f"Warning: Could not locate VAE decoder. Using model directly. Available attrs: {[a for a in dir(model) if not a.startswith('_')]}")
 
         def forward(self, latent_tokens, query_points):
-            return self.decoder(latent_tokens, query_points)
+            return self._decoder(latent_tokens, query_points)
 
     try:
         decoder = VAEDecoderWrapper(model)
@@ -582,17 +606,38 @@ def export_flow_transformer(model, output_path, num_tokens=2048, hidden_dim=1024
     class FlowTransformerWrapper(nn.Module):
         def __init__(self, model):
             super().__init__()
+            self._transformer = None
+            self._model = model
+
+            # Try different access patterns
             if hasattr(model, 'transformer'):
-                self.transformer = model.transformer
-            else:
-                raise ValueError("Could not locate transformer in model")
+                self._transformer = model.transformer
+            elif hasattr(model, 'dit'):  # DiT model
+                self._transformer = model.dit
+            elif hasattr(model, 'unet'):
+                self._transformer = model.unet
+            elif hasattr(model, 'model'):
+                if hasattr(model.model, 'transformer'):
+                    self._transformer = model.model.transformer
+                elif hasattr(model.model, 'dit'):
+                    self._transformer = model.model.dit
+
+            if self._transformer is None:
+                # Fallback
+                self._transformer = model
+                print(f"Warning: Could not locate transformer. Using model directly. Available attrs: {[a for a in dir(model) if not a.startswith('_')]}")
 
         def forward(self, image_features, timestep, noisy_latent):
-            return self.transformer(
-                condition=image_features,
-                timestep=timestep,
-                x=noisy_latent
-            )
+            # Try standard flow transformer interface
+            try:
+                return self._transformer(
+                    condition=image_features,
+                    timestep=timestep,
+                    x=noisy_latent
+                )
+            except TypeError:
+                # Fallback to different call signature
+                return self._transformer(noisy_latent, timestep, image_features)
 
     try:
         transformer = FlowTransformerWrapper(model)
