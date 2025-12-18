@@ -253,6 +253,19 @@ namespace Deep3DStudio.Model.AIModels
                                 currentResult = await GenerateFromSingleImageAsync(imagePaths[0], ImageTo3DModel.Wonder3D);
                             break;
 
+                        case WorkflowStep.TripoSFRefinement:
+                            // TripoSF logic: If we have an original image, re-generate high quality
+                            if (imagePaths != null && imagePaths.Count > 0)
+                            {
+                                var refinedMesh = TripoSF?.GenerateFromImage(imagePaths[0]);
+                                if (refinedMesh != null && refinedMesh.Vertices.Count > 0)
+                                {
+                                    if(currentResult.Meshes.Count == 0) currentResult.Meshes.Add(refinedMesh);
+                                    else currentResult.Meshes[0] = refinedMesh;
+                                }
+                            }
+                            break;
+
                         case WorkflowStep.MarchingCubes:
                              break;
 

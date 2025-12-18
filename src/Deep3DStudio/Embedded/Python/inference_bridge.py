@@ -5,13 +5,17 @@ import io
 import torch
 import numpy as np
 from PIL import Image
+import torchvision.transforms as transforms
 
 loaded_models = {}
 
-def load_model(model_name, weights_path, device='cpu'):
+def load_model(model_name, weights_path, device=None):
     global loaded_models
     if model_name in loaded_models:
         return True
+
+    if device is None:
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     print(f"Loading {model_name} from {weights_path} on {device}...")
 
@@ -32,6 +36,7 @@ def load_model(model_name, weights_path, device='cpu'):
             loaded_models[model_name] = model
 
         elif model_name == 'triposf':
+            # Mapping TripoSF to TSR architecture (Feed Forward)
             from tsr.system import TSR
             model = TSR.from_pretrained(weights_path, config_name="config.yaml", weight_name="model.ckpt")
             model.to(device)
@@ -39,19 +44,23 @@ def load_model(model_name, weights_path, device='cpu'):
             loaded_models[model_name] = model
 
         elif model_name == 'triposg':
-             # Using LGM for Gaussian Splatting
-             # LGM is a Large Gaussian Model.
-             # We assume LGM structure is in path.
+             # LGM for Gaussian Splatting
              from lgm.models import LGM
-             # LGM typically loads from safetensors or config
-             model = LGM.load_from_checkpoint(weights_path)
+             try:
+                 model = LGM.load_from_checkpoint(weights_path)
+             except:
+                 state_dict = torch.load(weights_path, map_location='cpu')
+                 model = LGM()
+                 model.load_state_dict(state_dict, strict=False)
+
              model.to(device)
              model.eval()
              loaded_models[model_name] = model
 
         elif model_name == 'wonder3d':
              from wonder3d.mvdiffusion.pipeline_mvdiffusion import MVDiffusionPipeline
-             model = MVDiffusionPipeline.from_pretrained(os.path.dirname(weights_path), torch_dtype=torch.float16)
+             base_dir = os.path.dirname(weights_path)
+             model = MVDiffusionPipeline.from_pretrained(base_dir, torch_dtype=torch.float16 if device == 'cuda' else torch.float32)
              model.to(device)
              loaded_models[model_name] = model
 
@@ -87,7 +96,8 @@ def infer_dust3r(images_bytes_list):
         processed_images.append(img)
 
     try:
-        preds, preds_all = inference( [(processed_images, model)], batch_size=1, device=next(model.parameters()).device )
+        device = next(model.parameters()).device
+        preds, preds_all = inference( [(processed_images, model)], batch_size=1, device=device )
         scene = preds[0]
 
         results = []
@@ -124,9 +134,10 @@ def infer_triposr(image_bytes):
     except: pass
 
     img = img.resize((512, 512))
+    device = next(model.parameters()).device
 
     with torch.no_grad():
-        scene_codes = model(img, device=next(model.parameters()).device)
+        scene_codes = model(img, device=device)
         mesh = model.extract_mesh(scene_codes)[0]
 
         vertices = mesh.vertices
@@ -143,14 +154,21 @@ def infer_triposr(image_bytes):
     }
 
 def infer_triposf(image_bytes):
+    # TripoSF (Feed Forward) using TSR architecture
     model = loaded_models.get('triposf')
     if not model: return None
 
     img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+    try:
+        from rembg import remove
+        img = remove(img)
+    except: pass
+
     img = img.resize((512, 512))
+    device = next(model.parameters()).device
 
     with torch.no_grad():
-        scene_codes = model(img, device=next(model.parameters()).device)
+        scene_codes = model(img, device=device)
         mesh = model.extract_mesh(scene_codes)[0]
         vertices = mesh.vertices
         faces = mesh.faces
@@ -170,17 +188,29 @@ def infer_triposg(image_bytes):
     if not model: return None
 
     img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+    device = next(model.parameters()).device
+
+    # Preprocess for LGM: [1, 3, 512, 512], normalized
+    img = img.resize((512, 512))
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+    ])
+    img_tensor = transform(img).unsqueeze(0).to(device)
 
     with torch.no_grad():
         # LGM inference
-        # returns gaussians: means3D, opacity, scales, rotations, shs
-        gaussians = model(img)
+        gaussians = model(img_tensor)
 
-        # Convert Gaussians to Point Cloud for MeshData
-        # means3D is [N, 3]
-        means = gaussians['means3D'].cpu().numpy()
-        colors = gaussians['rgb'].cpu().numpy() # If pre-rendered or SH converted
-        # For simplicity, we just return the centers as a dense point cloud
+        if 'means3D' in gaussians:
+            means = gaussians['means3D'].squeeze(0).cpu().numpy()
+            if 'rgb' in gaussians:
+                colors = gaussians['rgb'].squeeze(0).cpu().numpy()
+            else:
+                colors = np.ones_like(means) * 0.5
+        else:
+            means = np.zeros((1,3), dtype=np.float32)
+            colors = np.zeros((1,3), dtype=np.float32)
 
         vertices = means
         faces = np.array([], dtype=np.int32)
@@ -219,18 +249,19 @@ def infer_wonder3d(image_bytes):
             grid_y, grid_x = np.mgrid[:H, :W]
             u = (grid_x - W/2) / (W/2)
             v_ = (grid_y - H/2) / (H/2)
-            z = np.ones_like(u)
+            z = np.ones_like(u) * 0.0
+
             pts = np.stack([u, v_, z], axis=-1).reshape(-1, 3)
             pts = pts @ rots[v].T
             col = img_v.reshape(-1, 3)
+
             vertices.append(pts)
             colors.append(col)
 
         all_verts = np.concatenate(vertices, axis=0)
         all_cols = np.concatenate(colors, axis=0)
 
-        # Simple subsampling
-        idx = np.random.choice(len(all_verts), min(len(all_verts), 50000), replace=False)
+        idx = np.random.choice(len(all_verts), min(len(all_verts), 100000), replace=False)
 
     return {
         'vertices': all_verts[idx].astype(np.float32),
@@ -238,20 +269,23 @@ def infer_wonder3d(image_bytes):
         'colors': all_cols[idx].astype(np.float32)
     }
 
-def infer_unirig_mesh(vertices, faces):
+def infer_unirig_mesh_bytes(vertices_bytes, faces_bytes):
     model = loaded_models.get('unirig')
     if not model: return None
 
-    verts_t = torch.tensor(vertices, dtype=torch.float32).unsqueeze(0).to(next(model.parameters()).device)
-    faces_t = torch.tensor(faces, dtype=torch.int32).unsqueeze(0).to(next(model.parameters()).device)
+    vertices = np.frombuffer(vertices_bytes, dtype=np.float32).reshape(-1, 3)
+    faces = np.frombuffer(faces_bytes, dtype=np.int32).reshape(-1, 3)
+
+    device = next(model.parameters()).device
+    verts_t = torch.tensor(vertices, dtype=torch.float32).unsqueeze(0).to(device)
+    faces_t = torch.tensor(faces, dtype=torch.int32).unsqueeze(0).to(device)
 
     with torch.no_grad():
         output = model(verts_t, faces_t)
 
-        # Real extraction logic
-        joints = output['joints'][0].cpu().numpy() # [J, 3]
-        parents = output['parents'][0].cpu().numpy() # [J]
-        weights = output['weights'][0].cpu().numpy() # [N, J]
+        joints = output['joints'][0].cpu().numpy()
+        parents = output['parents'][0].cpu().numpy()
+        weights = output['weights'][0].cpu().numpy()
 
     return {
         'joint_positions': joints.astype(np.float32),

@@ -127,8 +127,6 @@ namespace Deep3DStudio.Model
             int W = shape[3]; // [1, 3, H, W]
             int H = shape[2];
 
-            // Tensor is flattened [1, 3, H, W] -> Access index
-
             var colors = ImageUtils.ExtractColors(pose.ImagePath, W, H);
 
             Vector3 camPos = pose.CameraToWorld.ExtractTranslation();

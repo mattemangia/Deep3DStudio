@@ -5,6 +5,7 @@ using Deep3DStudio.Python;
 using OpenTK.Mathematics;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 
 namespace Deep3DStudio.Model.AIModels
 {
@@ -25,29 +26,27 @@ namespace Deep3DStudio.Model.AIModels
 
             try
             {
+                // Serialize Vertices
+                float[] vertsArr = new float[mesh.Vertices.Count * 3];
+                for(int i=0; i<mesh.Vertices.Count; i++)
+                {
+                    vertsArr[i*3] = mesh.Vertices[i].X;
+                    vertsArr[i*3+1] = mesh.Vertices[i].Y;
+                    vertsArr[i*3+2] = mesh.Vertices[i].Z;
+                }
+                byte[] vertsBytes = new byte[vertsArr.Length * sizeof(float)];
+                Buffer.BlockCopy(vertsArr, 0, vertsBytes, 0, vertsBytes.Length);
+
+                // Serialize Faces
+                int[] facesArr = mesh.Indices.ToArray();
+                byte[] facesBytes = new byte[facesArr.Length * sizeof(int)];
+                Buffer.BlockCopy(facesArr, 0, facesBytes, 0, facesBytes.Length);
+
                 using (Py.GIL())
                 {
-                    var pyVerts = new PyList();
-                    foreach (var v in mesh.Vertices)
-                    {
-                        var pt = new PyList();
-                        pt.Append(new PyFloat(v.X));
-                        pt.Append(new PyFloat(v.Y));
-                        pt.Append(new PyFloat(v.Z));
-                        pyVerts.Append(pt);
-                    }
-
-                    var pyFaces = new PyList();
-                    for (int i = 0; i < mesh.Indices.Count; i += 3)
-                    {
-                        var face = new PyList();
-                        face.Append(new PyInt(mesh.Indices[i]));
-                        face.Append(new PyInt(mesh.Indices[i+1]));
-                        face.Append(new PyInt(mesh.Indices[i+2]));
-                        pyFaces.Append(face);
-                    }
-
-                    dynamic output = _bridgeModule.infer_unirig_mesh(pyVerts, pyFaces);
+                    // Pass bytes directly to Python
+                    // ToPython() on byte[] creates a bytes object which is what we want
+                    dynamic output = _bridgeModule.infer_unirig_mesh_bytes(vertsBytes.ToPython(), facesBytes.ToPython());
 
                     if (output != null)
                     {
@@ -56,34 +55,28 @@ namespace Deep3DStudio.Model.AIModels
                         dynamic weights = output["skinning_weights"];
                         dynamic names = output["joint_names"];
 
-                        // Parse Joint Positions
                         long jCount = (long)joints.shape[0];
                         result.JointPositions = new Vector3[jCount];
+                        // Parsing float arrays from numpy is reasonably fast via indexing or we can implement reverse buffer copy
+                        // For rig data (small), looping is fine.
                         for(int i=0; i<jCount; i++)
                         {
                             result.JointPositions[i] = new Vector3((float)joints[i][0], (float)joints[i][1], (float)joints[i][2]);
                         }
 
-                        // Parse Parents
                         result.ParentIndices = new int[jCount];
-                        for(int i=0; i<jCount; i++)
-                        {
-                            result.ParentIndices[i] = (int)parents[i];
-                        }
+                        for(int i=0; i<jCount; i++) result.ParentIndices[i] = (int)parents[i];
 
-                        // Parse Names
                         result.JointNames = new string[jCount];
-                        for(int i=0; i<jCount; i++)
-                        {
-                            result.JointNames[i] = (string)names[i];
-                        }
+                        for(int i=0; i<jCount; i++) result.JointNames[i] = (string)names[i];
 
-                        // Parse Weights (N vertices x M bones)
                         long vCount = (long)weights.shape[0];
                         long wBones = (long)weights.shape[1];
                         result.SkinningWeights = new float[vCount, wBones];
 
-                        // Copy logic (optimized bulk copy should be used in prod)
+                        // Weights can be large, but usually sparse.
+                        // Optimization: Copy buffer if possible.
+                        // But Py.NET dynamic access is okay for now given vertices < 100k usually.
                         for(int v=0; v<vCount; v++)
                         {
                             for(int b=0; b<wBones; b++)

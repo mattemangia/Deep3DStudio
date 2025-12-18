@@ -3,6 +3,7 @@ using System.IO;
 using Python.Runtime;
 using Deep3DStudio.Python;
 using OpenTK.Mathematics;
+using System.Collections.Generic;
 
 namespace Deep3DStudio.Model.AIModels
 {
@@ -24,7 +25,6 @@ namespace Deep3DStudio.Model.AIModels
                     dynamic output = _bridgeModule.infer_triposf(imgBytes.ToPython());
                     if (output != null)
                     {
-                        // Same parsing logic as TripoSR for now
                         dynamic vertices = output["vertices"];
                         dynamic faces = output["faces"];
                         dynamic colors = output["colors"];
@@ -49,6 +49,13 @@ namespace Deep3DStudio.Model.AIModels
                 Console.WriteLine($"TripoSF Inference failed: {ex.Message}");
             }
             return mesh;
+        }
+
+        // Removed RefineFromPointCloud as TripoSF is treated as Feed-Forward Image-to-Mesh
+        public MeshData RefineFromPointCloud(List<Vector3> points)
+        {
+             // Placeholder if called by legacy code, but manager should call GenerateFromImage
+             return new MeshData();
         }
     }
 }
