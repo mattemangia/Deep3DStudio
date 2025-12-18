@@ -36,13 +36,13 @@ namespace Deep3DStudio.UI
         public event EventHandler<Joint>? JointSelected;
         public event EventHandler<Joint>? JointTransformChanged;
         public event EventHandler? SkeletonChanged;
-        public event Action? RequestAddJoint;
-        public event Action? RequestAddBone;
-        public event Action? RequestDeleteSelected;
-        public event Action? RequestImportUniRig;
-        public event Action? RequestExportRig;
-        public event Action? RequestCreateHumanoid;
-        public event Action? RefreshViewport;
+        public event System.Action? RequestAddJoint;
+        public event System.Action? RequestAddBone;
+        public event System.Action? RequestDeleteSelected;
+        public event System.Action? RequestImportUniRig;
+        public event System.Action? RequestExportRig;
+        public event System.Action? RequestCreateHumanoid;
+        public event System.Action? RefreshViewport;
 
         private bool _isUpdating = false;
 
