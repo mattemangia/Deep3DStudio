@@ -27,10 +27,24 @@
   </ItemGroup>
 
   <Target Name="CopyDistFiles" AfterTargets="Build">
+    <!-- Determine target platform for python artifacts -->
+    <PropertyGroup>
+      <PythonPlatform Condition="'$(RuntimeIdentifier)' == 'win-x64'">win_amd64</PythonPlatform>
+      <PythonPlatform Condition="'$(RuntimeIdentifier)' == 'linux-x64'">linux_x86_64</PythonPlatform>
+      <PythonPlatform Condition="'$(RuntimeIdentifier)' == 'osx-arm64'">osx_arm64</PythonPlatform>
+      <!-- Default to windows if not specified (e.g. dev build) or fallback -->
+      <PythonPlatform Condition="'$(PythonPlatform)' == ''">win_amd64</PythonPlatform>
+    </PropertyGroup>
+
     <ItemGroup>
-      <PythonEnv Include="..\..\dist\python_env.zip" />
+      <!-- Copy platform specific python zip -->
+      <PythonEnv Include="..\..\dist\$(PythonPlatform)\python_env.zip" />
+      <!-- Copy shared models -->
       <Models Include="..\..\dist\models\**\*.*" />
     </ItemGroup>
+
+    <Message Text="Copying Python environment for $(PythonPlatform)..." Importance="high" />
+
     <Copy SourceFiles="@(PythonEnv)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(Models)" DestinationFolder="$(OutDir)\models\%(RecursiveDir)" SkipUnchangedFiles="true" />
   </Target>

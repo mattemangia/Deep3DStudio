@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.IO.Compression;
 using System.Runtime.InteropServices;
 using Python.Runtime;
 using Deep3DStudio.Configuration; // Assuming for logging or settings
@@ -42,6 +43,9 @@ namespace Deep3DStudio.Python
 
             try
             {
+                // Ensure environment is ready
+                EnsurePythonEnvironment();
+
                 string pythonHome = GetPythonHome();
                 string pythonDll = GetPythonDllPath(pythonHome);
 
@@ -74,8 +78,80 @@ namespace Deep3DStudio.Python
             }
         }
 
+        private void EnsurePythonEnvironment()
+        {
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string targetDir = Path.Combine(appData, "Deep3DStudio", "python");
+            string sourceZip = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "python_env.zip");
+
+            if (!File.Exists(sourceZip))
+            {
+                // Fallback to local python folder if zip is missing (dev mode)
+                string localPython = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "python");
+                if (Directory.Exists(localPython))
+                {
+                    Log("Using local 'python' directory.");
+                    return;
+                }
+                Log("Warning: python_env.zip not found and no local python dir.");
+                return;
+            }
+
+            // Simple version check or existence check
+            // For now, if target dir exists, assume it's good?
+            // Better: use a hash or version file.
+            // Minimal: Check if target exists. If so, do nothing?
+            // Issue: Updates won't apply.
+            // Aggressive: Always delete and unzip? Slow.
+            // Compromise: Check if zip is newer than target folder creation time?
+
+            bool shouldExtract = false;
+            if (!Directory.Exists(targetDir))
+            {
+                shouldExtract = true;
+            }
+            else
+            {
+                DateTime zipTime = File.GetLastWriteTime(sourceZip);
+                DateTime dirTime = Directory.GetCreationTime(targetDir);
+                if (zipTime > dirTime)
+                {
+                    shouldExtract = true;
+                    Log("Update detected. Re-extracting python environment...");
+                }
+            }
+
+            if (shouldExtract)
+            {
+                try
+                {
+                    if (Directory.Exists(targetDir))
+                    {
+                        Directory.Delete(targetDir, true);
+                    }
+
+                    Log($"Extracting {sourceZip} to {targetDir}...");
+                    ZipFile.ExtractToDirectory(sourceZip, targetDir);
+                }
+                catch (Exception ex)
+                {
+                    Log($"Failed to extract python env: {ex.Message}");
+                }
+            }
+        }
+
         private string GetPythonHome()
         {
+            // Prioritize the extracted location in AppData
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string targetDir = Path.Combine(appData, "Deep3DStudio", "python");
+
+            if (Directory.Exists(targetDir))
+            {
+                return targetDir;
+            }
+
+            // Fallback to local directory
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
             return Path.Combine(baseDir, "python");
         }
