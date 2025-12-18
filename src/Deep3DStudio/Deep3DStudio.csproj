@@ -26,4 +26,13 @@
     <EmbeddedResource Include="Embedded\Python\inference_bridge.py" />
   </ItemGroup>
 
+  <Target Name="CopyDistFiles" AfterTargets="Build">
+    <ItemGroup>
+      <PythonEnv Include="..\..\dist\python_env.zip" />
+      <Models Include="..\..\dist\models\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(PythonEnv)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(Models)" DestinationFolder="$(OutDir)\models\%(RecursiveDir)" SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>
