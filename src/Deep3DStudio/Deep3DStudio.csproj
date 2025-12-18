@@ -37,13 +37,13 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <!-- Copy platform specific python zip -->
-      <PythonEnv Include="..\..\dist\$(PythonPlatform)\python_env.zip" />
+      <!-- Copy platform specific python zip - using scripts path as base -->
+      <PythonEnv Include="..\..\scripts\dist\$(PythonPlatform)\python_env.zip" />
       <!-- Copy shared models -->
-      <Models Include="..\..\dist\models\**\*.*" />
+      <Models Include="..\..\scripts\dist\models\**\*.*" />
     </ItemGroup>
 
-    <Message Text="Copying Python environment for $(PythonPlatform)..." Importance="high" />
+    <Message Text="Copying Python environment for $(PythonPlatform) from scripts/dist..." Importance="high" />
 
     <Copy SourceFiles="@(PythonEnv)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(Models)" DestinationFolder="$(OutDir)\models\%(RecursiveDir)" SkipUnchangedFiles="true" />
