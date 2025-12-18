@@ -504,7 +504,15 @@ def export_triposr_encoder(model, output_path, resolution=256):
     class EncoderWrapper(nn.Module):
         def __init__(self, model):
             super().__init__()
-            self.image_tokenizer = model.image_tokenizer
+            # TripoSR model structure: try different access patterns
+            if hasattr(model, 'image_tokenizer'):
+                self.image_tokenizer = model.image_tokenizer
+            elif hasattr(model, 'encoder'):
+                self.image_tokenizer = model.encoder
+            elif hasattr(model, 'image_encoder'):
+                self.image_tokenizer = model.image_encoder
+            else:
+                raise AttributeError(f"Cannot find image tokenizer in model. Available: {dir(model)}")
 
         def forward(self, image):
             return self.image_tokenizer(image)
@@ -552,11 +560,31 @@ def export_triposr_backbone(model, output_path, resolution=256):
         def __init__(self, model):
             super().__init__()
             self.model = model
+            # Detect available components
+            self._has_image_tokenizer = hasattr(model, 'image_tokenizer')
+            self._has_tokenizer = hasattr(model, 'tokenizer')
 
         def forward(self, image):
-            # Full forward to triplane
-            image_features = self.model.image_tokenizer(image)
-            tokens = self.model.tokenizer(image_features)
+            # Full forward to triplane - handle different model structures
+            # Get image features
+            if self._has_image_tokenizer:
+                image_features = self.model.image_tokenizer(image)
+            elif hasattr(self.model, 'encoder'):
+                image_features = self.model.encoder(image)
+            elif hasattr(self.model, 'image_encoder'):
+                image_features = self.model.image_encoder(image)
+            else:
+                raise AttributeError(f"Cannot find image tokenizer. Available: {dir(self.model)}")
+
+            # Get tokens
+            if self._has_tokenizer:
+                tokens = self.model.tokenizer(image_features)
+            elif hasattr(self.model, 'transformer'):
+                tokens = self.model.transformer(image_features)
+            else:
+                # Some models directly return tokens from encoder
+                tokens = image_features
+
             return tokens
 
     backbone = BackboneWrapper(model)

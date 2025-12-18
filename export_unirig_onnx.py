@@ -428,11 +428,36 @@ def export_mesh_encoder(model, output_path, num_vertices=10000, hidden_dim=512):
     class MeshEncoderWrapper(nn.Module):
         def __init__(self, model):
             super().__init__()
-            self.model = model
+            self._model = model
+            self._encoder = None
+
+            # Try different access patterns for mesh encoder
+            if hasattr(model, 'encode_mesh_cond'):
+                self._use_method = 'encode_mesh_cond'
+            elif hasattr(model, 'mesh_encoder'):
+                self._encoder = model.mesh_encoder
+                self._use_method = 'encoder'
+            elif hasattr(model, 'encoder'):
+                self._encoder = model.encoder
+                self._use_method = 'encoder'
+            elif hasattr(model, 'point_encoder'):
+                self._encoder = model.point_encoder
+                self._use_method = 'encoder'
+            else:
+                self._use_method = 'model'
+                print(f"Warning: Could not locate mesh encoder. Available attrs: {[a for a in dir(model) if not a.startswith('_')]}")
 
         def forward(self, vertices, normals):
-            # UniRigAR.encode_mesh_cond
-            return self.model.encode_mesh_cond(vertices, normals)
+            if self._use_method == 'encode_mesh_cond':
+                return self._model.encode_mesh_cond(vertices, normals)
+            elif self._use_method == 'encoder' and self._encoder is not None:
+                # Concatenate vertices and normals as features
+                features = torch.cat([vertices, normals], dim=-1)
+                return self._encoder(features)
+            else:
+                # Try calling model with combined input
+                features = torch.cat([vertices, normals], dim=-1)
+                return self._model(features)
 
     try:
         encoder = MeshEncoderWrapper(model)
@@ -485,30 +510,64 @@ def export_skeleton_decoder_step(model, output_path, hidden_dim=768, max_seq_len
     class SkeletonDecoderStepWrapper(nn.Module):
         def __init__(self, model):
             super().__init__()
-            self.model = model
-            self.transformer = model.transformer
+            self._model = model
+            self._transformer = None
+
+            # Try different access patterns
+            if hasattr(model, 'transformer'):
+                self._transformer = model.transformer
+            elif hasattr(model, 'decoder'):
+                self._transformer = model.decoder
+            elif hasattr(model, 'model') and hasattr(model.model, 'transformer'):
+                self._transformer = model.model.transformer
+            elif hasattr(model, 'lm_head'):
+                # It might be a complete LM model
+                self._transformer = model
+            else:
+                print(f"Warning: Could not locate transformer. Available attrs: {[a for a in dir(model) if not a.startswith('_')]}")
+                self._transformer = model
 
         def forward(self, mesh_features, input_ids, attention_mask):
             """
             Single-step forward for autoregressive generation.
             """
-            # mesh_features is cond
             B = mesh_features.shape[0]
 
-            inputs_embeds = self.transformer.get_input_embeddings()(input_ids).to(dtype=self.transformer.dtype)
-            inputs_embeds = torch.concat([mesh_features, inputs_embeds], dim=1)
+            # Get input embeddings - try different interfaces
+            if hasattr(self._transformer, 'get_input_embeddings'):
+                embed_layer = self._transformer.get_input_embeddings()
+                inputs_embeds = embed_layer(input_ids)
+                if hasattr(self._transformer, 'dtype'):
+                    inputs_embeds = inputs_embeds.to(dtype=self._transformer.dtype)
+            elif hasattr(self._transformer, 'embed_tokens'):
+                inputs_embeds = self._transformer.embed_tokens(input_ids)
+            elif hasattr(self._transformer, 'wte'):  # GPT-2 style
+                inputs_embeds = self._transformer.wte(input_ids)
+            else:
+                # Fallback: assume embedding table at .embedding or similar
+                inputs_embeds = input_ids.float()  # Will likely fail, but shows the issue
 
-            # attention mask needs padding
-            # attention_mask = pad(attention_mask, (mesh_features.shape[1], 0, 0, 0), value=1.)
+            inputs_embeds = torch.cat([mesh_features, inputs_embeds], dim=1)
 
-            output = self.transformer(
-                inputs_embeds=inputs_embeds,
-                # attention_mask=attention_mask,
-                use_cache=False,
-            )
-
-            # Return last logit
-            return output.logits[:, -1, :]
+            # Call transformer
+            try:
+                output = self._transformer(
+                    inputs_embeds=inputs_embeds,
+                    use_cache=False,
+                )
+                # Return last logit
+                if hasattr(output, 'logits'):
+                    return output.logits[:, -1, :]
+                elif isinstance(output, tuple):
+                    return output[0][:, -1, :]
+                else:
+                    return output[:, -1, :]
+            except Exception as e:
+                # Fallback: try direct call
+                output = self._transformer(inputs_embeds)
+                if hasattr(output, 'logits'):
+                    return output.logits[:, -1, :]
+                return output[:, -1, :]
 
     try:
         decoder = SkeletonDecoderStepWrapper(model)

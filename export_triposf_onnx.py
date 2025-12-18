@@ -222,7 +222,16 @@ class TripoSFVAE(nn.Module):
             latent_mean: (B, L, D) latent mean
             latent_logvar: (B, L, D) latent log variance
         """
-        return self.model.encode(points)
+        # TripoSFVAEInference has 'encoder' attribute, not 'encode' method
+        # Try different access patterns based on model structure
+        if hasattr(self.model, 'encode'):
+            return self.model.encode(points)
+        elif hasattr(self.model, 'encoder'):
+            return self.model.encoder(points)
+        elif hasattr(self.model, 'model') and hasattr(self.model.model, 'encoder'):
+            return self.model.model.encoder(points)
+        else:
+            raise AttributeError(f"Cannot find encoder in model. Available attributes: {dir(self.model)}")
 
 
 def save_onnx_with_external_data(onnx_path):
@@ -428,11 +437,24 @@ def export_encoder(model, output_path, num_points=10000, point_dim=3):
     class EncoderWrapper(nn.Module):
         def __init__(self, model):
             super().__init__()
-            self.encoder = model.encoder if hasattr(model, 'encoder') else model
+            # TripoSFVAEInference has different attribute structures
+            # Try to find the encoder component
+            if hasattr(model, 'encoder'):
+                self.encoder = model.encoder
+            elif hasattr(model, 'model') and hasattr(model.model, 'encoder'):
+                self.encoder = model.model.encoder
+            elif hasattr(model, 'vae') and hasattr(model.vae, 'encoder'):
+                self.encoder = model.vae.encoder
+            else:
+                # Fallback: use the model itself and try encode method in forward
+                self.encoder = model
+                self._use_encode_method = True
 
         def forward(self, points):
-            # This is simplified - actual model might need sparse tensors
-            # For ONNX, we might need to export the dense components
+            # Handle different encoder interfaces
+            if hasattr(self, '_use_encode_method') and self._use_encode_method:
+                if hasattr(self.encoder, 'encode'):
+                    return self.encoder.encode(points)
             return self.encoder(points)
 
     try:
@@ -484,9 +506,24 @@ def export_decoder(model, output_path, latent_dim=512, num_query=50000):
     class DecoderWrapper(nn.Module):
         def __init__(self, model):
             super().__init__()
-            self.decoder = model.decoder if hasattr(model, 'decoder') else model
+            # TripoSFVAEInference has different attribute structures
+            # Try to find the decoder component
+            if hasattr(model, 'decoder'):
+                self.decoder = model.decoder
+            elif hasattr(model, 'model') and hasattr(model.model, 'decoder'):
+                self.decoder = model.model.decoder
+            elif hasattr(model, 'vae') and hasattr(model.vae, 'decoder'):
+                self.decoder = model.vae.decoder
+            else:
+                # Fallback: use the model itself and try decode method in forward
+                self.decoder = model
+                self._use_decode_method = True
 
         def forward(self, latent, query_coords):
+            # Handle different decoder interfaces
+            if hasattr(self, '_use_decode_method') and self._use_decode_method:
+                if hasattr(self.decoder, 'decode'):
+                    return self.decoder.decode(latent, query_coords)
             return self.decoder(latent, query_coords)
 
     try:
@@ -542,12 +579,43 @@ def export_full_vae(model, output_path, num_points=10000):
         def __init__(self, model):
             super().__init__()
             self.model = model
+            # Detect model structure
+            self._has_encode_method = hasattr(model, 'encode')
+            self._has_decode_method = hasattr(model, 'decode')
+            self._has_encoder_attr = hasattr(model, 'encoder')
+            self._has_decoder_attr = hasattr(model, 'decoder')
 
         def forward(self, points, query_coords):
-            # Encode
-            latent = self.model.encode(points)
-            # Decode at query points
-            output = self.model.decode(latent, query_coords)
+            # Encode - try different interfaces
+            if self._has_encode_method:
+                latent = self.model.encode(points)
+            elif self._has_encoder_attr:
+                latent = self.model.encoder(points)
+            elif hasattr(self.model, 'model'):
+                if hasattr(self.model.model, 'encode'):
+                    latent = self.model.model.encode(points)
+                elif hasattr(self.model.model, 'encoder'):
+                    latent = self.model.model.encoder(points)
+                else:
+                    raise AttributeError(f"Cannot find encoder. Available: {dir(self.model.model)}")
+            else:
+                raise AttributeError(f"Cannot find encoder. Available: {dir(self.model)}")
+
+            # Decode - try different interfaces
+            if self._has_decode_method:
+                output = self.model.decode(latent, query_coords)
+            elif self._has_decoder_attr:
+                output = self.model.decoder(latent, query_coords)
+            elif hasattr(self.model, 'model'):
+                if hasattr(self.model.model, 'decode'):
+                    output = self.model.model.decode(latent, query_coords)
+                elif hasattr(self.model.model, 'decoder'):
+                    output = self.model.model.decoder(latent, query_coords)
+                else:
+                    raise AttributeError(f"Cannot find decoder. Available: {dir(self.model.model)}")
+            else:
+                raise AttributeError(f"Cannot find decoder. Available: {dir(self.model)}")
+
             return output
 
     try:
