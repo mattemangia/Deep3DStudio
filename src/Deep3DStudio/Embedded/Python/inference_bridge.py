@@ -138,7 +138,7 @@ def infer_dust3r(images_bytes_list):
 
     return results
 
-def infer_triposr(image_bytes):
+def infer_triposr(image_bytes, resolution=256, mc_resolution=128):
     model = loaded_models.get('triposr')
     if not model: return None
 
@@ -148,12 +148,13 @@ def infer_triposr(image_bytes):
         img = remove(img)
     except: pass
 
-    img = img.resize((512, 512))
+    # Use configured resolution for input
+    img = img.resize((resolution, resolution))
     device = next(model.parameters()).device
 
     with torch.no_grad():
         scene_codes = model(img, device=device)
-        mesh = model.extract_mesh(scene_codes)[0]
+        mesh = model.extract_mesh(scene_codes, resolution=mc_resolution)[0]
 
         vertices = mesh.vertices
         faces = mesh.faces
@@ -168,7 +169,7 @@ def infer_triposr(image_bytes):
         'colors': colors.astype(np.float32)
     }
 
-def infer_triposf(image_bytes):
+def infer_triposf(image_bytes, resolution=512):
     # TripoSF (Feed Forward) using TSR architecture
     model = loaded_models.get('triposf')
     if not model: return None
@@ -179,12 +180,13 @@ def infer_triposf(image_bytes):
         img = remove(img)
     except: pass
 
-    img = img.resize((512, 512))
+    # Use configured resolution
+    img = img.resize((resolution, resolution))
     device = next(model.parameters()).device
 
     with torch.no_grad():
         scene_codes = model(img, device=device)
-        mesh = model.extract_mesh(scene_codes)[0]
+        mesh = model.extract_mesh(scene_codes, resolution=resolution)[0]
         vertices = mesh.vertices
         faces = mesh.faces
         if hasattr(mesh.visual, 'vertex_colors'):
@@ -198,15 +200,15 @@ def infer_triposf(image_bytes):
         'colors': colors.astype(np.float32)
     }
 
-def infer_triposg(image_bytes):
+def infer_triposg(image_bytes, resolution=512, flow_steps=25):
     model = loaded_models.get('triposg')
     if not model: return None
 
     img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
     device = next(model.parameters()).device
 
-    # Preprocess for LGM: [1, 3, 512, 512], normalized
-    img = img.resize((512, 512))
+    # Preprocess for LGM: Use configured resolution, normalized
+    img = img.resize((resolution, resolution))
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
@@ -214,8 +216,11 @@ def infer_triposg(image_bytes):
     img_tensor = transform(img).unsqueeze(0).to(device)
 
     with torch.no_grad():
-        # LGM inference
-        gaussians = model(img_tensor)
+        # LGM inference with flow steps if supported
+        if hasattr(model, 'forward') and 'num_steps' in model.forward.__code__.co_varnames:
+            gaussians = model(img_tensor, num_steps=flow_steps)
+        else:
+            gaussians = model(img_tensor)
 
         if 'means3D' in gaussians:
             means = gaussians['means3D'].squeeze(0).cpu().numpy()
@@ -236,14 +241,14 @@ def infer_triposg(image_bytes):
         'colors': colors.astype(np.float32)
     }
 
-def infer_wonder3d(image_bytes):
+def infer_wonder3d(image_bytes, num_steps=50, guidance_scale=3.0):
     model = loaded_models.get('wonder3d')
     if not model: return None
 
     img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
 
     with torch.no_grad():
-        batch = model(img, num_inference_steps=30, output_type='pt')
+        batch = model(img, num_inference_steps=num_steps, guidance_scale=guidance_scale, output_type='pt')
         images = batch.images[0].permute(0, 2, 3, 1).cpu().numpy()
 
         vertices = []
@@ -284,7 +289,7 @@ def infer_wonder3d(image_bytes):
         'colors': all_cols[idx].astype(np.float32)
     }
 
-def infer_unirig_mesh_bytes(vertices_bytes, faces_bytes):
+def infer_unirig_mesh_bytes(vertices_bytes, faces_bytes, max_joints=64):
     model = loaded_models.get('unirig')
     if not model: return None
 
@@ -296,11 +301,21 @@ def infer_unirig_mesh_bytes(vertices_bytes, faces_bytes):
     faces_t = torch.tensor(faces, dtype=torch.int32).unsqueeze(0).to(device)
 
     with torch.no_grad():
-        output = model(verts_t, faces_t)
+        # Pass max_joints if model supports it
+        if hasattr(model, 'forward') and 'max_joints' in model.forward.__code__.co_varnames:
+            output = model(verts_t, faces_t, max_joints=max_joints)
+        else:
+            output = model(verts_t, faces_t)
 
         joints = output['joints'][0].cpu().numpy()
         parents = output['parents'][0].cpu().numpy()
         weights = output['weights'][0].cpu().numpy()
+
+        # Limit to max_joints if needed
+        if len(joints) > max_joints:
+            joints = joints[:max_joints]
+            parents = parents[:max_joints]
+            weights = weights[:, :max_joints]
 
     return {
         'joint_positions': joints.astype(np.float32),

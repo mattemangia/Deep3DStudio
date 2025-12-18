@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using Python.Runtime;
 using Deep3DStudio.Python;
+using Deep3DStudio.Configuration;
 using OpenTK.Mathematics;
 using System.Collections.Generic;
 
@@ -21,9 +22,19 @@ namespace Deep3DStudio.Model.AIModels
             {
                 byte[] imgBytes = File.ReadAllBytes(imagePath);
 
+                // Get settings for model parameters
+                var settings = IniSettings.Instance;
+                int resolution = settings.TripoSRResolution;
+                int mcResolution = settings.TripoSRMarchingCubesRes;
+
                 Deep3DStudio.Python.PythonService.Instance.ExecuteWithGIL((scope) =>
                 {
-                    dynamic output = _bridgeModule.infer_triposr(imgBytes.ToPython());
+                    // Pass configured parameters to Python
+                    dynamic output = _bridgeModule.infer_triposr(
+                        imgBytes.ToPython(),
+                        resolution,
+                        mcResolution
+                    );
                     if (output != null)
                     {
                         // Parse output dictionary from Python
@@ -35,14 +46,9 @@ namespace Deep3DStudio.Model.AIModels
                         dynamic faces = output["faces"];
                         dynamic colors = output["colors"];
 
-                        // Need to be careful about marshalling large arrays.
-                        // Assuming simple list access or interop for now.
-                        // Ideally use PyBuffer or similar for performance.
-
                         long vCount = (long)vertices.shape[0];
                         long fCount = (long)faces.shape[0];
 
-                        // Slow loop for prototype, optimize with bulk copy in production
                         for(int i=0; i<vCount; i++) {
                             float x = (float)vertices[i][0];
                             float y = (float)vertices[i][1];

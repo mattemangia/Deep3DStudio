@@ -24,6 +24,17 @@ namespace Deep3DStudio.Model
 
         public bool IsLoaded => _isLoaded;
 
+        private string GetDeviceString()
+        {
+            var settings = IniSettings.Instance;
+            return settings.AIDevice switch
+            {
+                AIComputeDevice.CUDA => "cuda",
+                AIComputeDevice.DirectML => "cpu", // DirectML not directly supported by PyTorch, fallback to CPU
+                _ => "cpu"
+            };
+        }
+
         private void Initialize()
         {
             if (_isLoaded) return;
@@ -58,8 +69,10 @@ namespace Deep3DStudio.Model
 
                     string modelsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models");
                     string weightsPath = Path.Combine(modelsDir, "dust3r_weights.pth");
+                    string device = GetDeviceString();
 
-                    // _bridgeModule.load_model("dust3r", weightsPath, "cpu");
+                    // Load the model with configured device
+                    _bridgeModule.load_model("dust3r", weightsPath, device);
                 });
 
                 _isLoaded = true;
