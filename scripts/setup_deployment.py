@@ -370,19 +370,37 @@ if __name__ == "__main__":
     parser.add_argument("--platform", default="win_amd64", help="Target platform")
     args = parser.parse_args()
 
-    python_dir = os.path.join(args.output, "python")
+    # Separate python env by platform
+    platform_dir = os.path.join(args.output, args.platform)
+    python_dir = os.path.join(platform_dir, "python")
+
+    # Models are shared, keep them in root of dist
     models_dir = os.path.join(args.output, "models")
 
     try:
+        # Warn if cross-compiling blindly
+        current_os = platform.system().lower()
+        if "win" in current_os and "win" not in args.platform:
+            print("WARNING: You are running on Windows but targeting a non-Windows platform.")
+            print("The script executes the downloaded python binary to install packages.")
+            print("This will likely FAIL unless you are using WSL or compatible environment.")
+        elif "linux" in current_os and "linux" not in args.platform:
+             print("WARNING: You are running on Linux but targeting a non-Linux platform.")
+             print("This will likely FAIL.")
+
         if setup_python_embed(python_dir, args.platform):
             setup_models(models_dir, python_dir, args.platform)
             obfuscate_and_clean(python_dir, args.platform)
 
             # Zip python env
-            python_zip = os.path.join(args.output, "python_env.zip")
+            python_zip = os.path.join(platform_dir, "python_env.zip")
             create_zip(python_dir, python_zip)
 
-            print("Deployment setup complete.")
+            # Optionally remove the unzipped folder to save space?
+            # shutil.rmtree(python_dir, onerror=remove_readonly)
+
+            print(f"Deployment setup complete for {args.platform}.")
+            print(f"Artifacts located in {platform_dir} and {models_dir}")
         else:
             print("Setup failed.")
     except Exception as e:
