@@ -80,6 +80,129 @@ for op_name, op_func in custom_ops.items():
 
 print(f"Registered {len(custom_ops)} custom ONNX symbolic functions")
 
+
+# =============================================================================
+# SparseTensor Mock for ONNX Export
+# =============================================================================
+class DenseSparseTensor:
+    """
+    A mock SparseTensor class that uses dense tensors internally.
+    This allows TripoSF models to be traced for ONNX export.
+
+    TripoSF's SparseTensor has:
+    - .feats: feature tensor (N, C)
+    - .coords: coordinate tensor (N, 3) or (N, 4) with batch index
+    - .replace(new_feats): creates new tensor with updated features
+    - .shape: returns feature shape
+    """
+    def __init__(self, feats, coords=None, batch_size=1, spatial_shape=None):
+        self.feats = feats
+        self._coords = coords
+        self.batch_size = batch_size
+        self.spatial_shape = spatial_shape or [512, 512, 512]
+
+    @property
+    def coords(self):
+        if self._coords is not None:
+            return self._coords
+        # Generate dummy coords if not provided
+        N = self.feats.shape[0]
+        return torch.zeros(N, 4, dtype=torch.int32, device=self.feats.device)
+
+    @coords.setter
+    def coords(self, value):
+        self._coords = value
+
+    @property
+    def shape(self):
+        return self.feats.shape
+
+    def replace(self, new_feats):
+        """Create a new DenseSparseTensor with updated features."""
+        return DenseSparseTensor(
+            feats=new_feats,
+            coords=self._coords,
+            batch_size=self.batch_size,
+            spatial_shape=self.spatial_shape
+        )
+
+    def dense(self, channels_first=True):
+        """Convert to dense tensor (for compatibility)."""
+        return self.feats
+
+    def to(self, device):
+        """Move to device."""
+        self.feats = self.feats.to(device)
+        if self._coords is not None:
+            self._coords = self._coords.to(device)
+        return self
+
+
+def patch_triposf_for_dense_export():
+    """
+    Patch TripoSF modules to work with dense tensors during ONNX export.
+    This replaces sparse operations with dense equivalents.
+    """
+    try:
+        # Try to import and patch the sparse linear module
+        sys.path.insert(0, os.path.abspath(REPO_DIR))
+
+        # Import the modules we need to patch
+        try:
+            from triposf.modules.sparse import linear as sparse_linear
+
+            # Store original forward
+            _original_sparse_linear_forward = sparse_linear.Linear.forward
+
+            def patched_linear_forward(self, input):
+                """Patched forward that handles both SparseTensor and regular Tensor."""
+                if hasattr(input, 'feats') and hasattr(input, 'replace'):
+                    # It's a SparseTensor-like object
+                    result_feats = nn.Linear.forward(self, input.feats)
+                    return input.replace(result_feats)
+                elif isinstance(input, DenseSparseTensor):
+                    result_feats = nn.Linear.forward(self, input.feats)
+                    return input.replace(result_feats)
+                else:
+                    # Regular tensor - wrap it
+                    result = nn.Linear.forward(self, input)
+                    return DenseSparseTensor(feats=result)
+
+            sparse_linear.Linear.forward = patched_linear_forward
+            print("  [OK] Patched triposf.modules.sparse.linear")
+        except ImportError:
+            print("  [SKIP] triposf.modules.sparse.linear not found")
+        except Exception as e:
+            print(f"  [WARN] Failed to patch sparse.linear: {e}")
+
+        # Try to patch other sparse modules
+        try:
+            from triposf.modules.sparse import norm as sparse_norm
+
+            def patched_norm_forward(self, input):
+                if hasattr(input, 'feats') and hasattr(input, 'replace'):
+                    result_feats = self.norm(input.feats)
+                    return input.replace(result_feats)
+                elif isinstance(input, DenseSparseTensor):
+                    result_feats = self.norm(input.feats)
+                    return input.replace(result_feats)
+                else:
+                    return DenseSparseTensor(feats=self.norm(input))
+
+            if hasattr(sparse_norm, 'LayerNorm'):
+                sparse_norm.LayerNorm.forward = patched_norm_forward
+            if hasattr(sparse_norm, 'BatchNorm'):
+                sparse_norm.BatchNorm.forward = patched_norm_forward
+            print("  [OK] Patched triposf.modules.sparse.norm")
+        except ImportError:
+            print("  [SKIP] triposf.modules.sparse.norm not found")
+        except Exception as e:
+            print(f"  [WARN] Failed to patch sparse.norm: {e}")
+
+    except Exception as e:
+        print(f"Warning: Could not patch TripoSF modules: {e}")
+
+
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -451,11 +574,43 @@ def export_encoder(model, output_path, num_points=10000, point_dim=3):
                 self._use_encode_method = True
 
         def forward(self, points):
+            # Convert dense tensor to DenseSparseTensor for TripoSF compatibility
+            # TripoSF encoder expects SparseTensor with .feats and .coords
+            B, N, C = points.shape
+            # Flatten batch dimension for sparse format
+            flat_points = points.reshape(-1, C)
+
+            # Create batch indices
+            batch_idx = torch.arange(B, device=points.device).unsqueeze(1).expand(B, N).reshape(-1, 1)
+
+            # Create coords: (batch_idx, x, y, z) format expected by some sparse ops
+            # For now, use points as coordinates scaled to grid
+            scaled_coords = (flat_points * 128 + 256).int()  # Scale to [0, 512] range
+            coords = torch.cat([batch_idx.int(), scaled_coords], dim=1)
+
+            # Create DenseSparseTensor
+            sparse_input = DenseSparseTensor(feats=flat_points, coords=coords, batch_size=B)
+
             # Handle different encoder interfaces
-            if hasattr(self, '_use_encode_method') and self._use_encode_method:
-                if hasattr(self.encoder, 'encode'):
-                    return self.encoder.encode(points)
-            return self.encoder(points)
+            try:
+                if hasattr(self, '_use_encode_method') and self._use_encode_method:
+                    if hasattr(self.encoder, 'encode'):
+                        result = self.encoder.encode(sparse_input)
+                    else:
+                        result = self.encoder(sparse_input)
+                else:
+                    result = self.encoder(sparse_input)
+
+                # Extract features from result
+                if isinstance(result, DenseSparseTensor) or hasattr(result, 'feats'):
+                    return result.feats
+                return result
+            except Exception:
+                # Fallback: try with original dense input
+                if hasattr(self, '_use_encode_method') and self._use_encode_method:
+                    if hasattr(self.encoder, 'encode'):
+                        return self.encoder.encode(points)
+                return self.encoder(points)
 
     try:
         encoder = EncoderWrapper(model)
@@ -520,11 +675,49 @@ def export_decoder(model, output_path, latent_dim=512, num_query=50000):
                 self._use_decode_method = True
 
         def forward(self, latent, query_coords):
+            # Convert query_coords to DenseSparseTensor format expected by decoder
+            B = query_coords.shape[0] if query_coords.dim() == 3 else 1
+            if query_coords.dim() == 3:
+                N, C = query_coords.shape[1], query_coords.shape[2]
+                flat_coords = query_coords.reshape(-1, C)
+            else:
+                flat_coords = query_coords
+                N = flat_coords.shape[0]
+
+            # Create batch indices
+            batch_idx = torch.arange(B, device=query_coords.device).unsqueeze(1).expand(B, N).reshape(-1, 1)
+
+            # Scale to grid coordinates
+            scaled_coords = (flat_coords * 128 + 256).int()
+            coords_with_batch = torch.cat([batch_idx.int(), scaled_coords], dim=1)
+
+            # Create sparse tensor for coordinates
+            sparse_coords = DenseSparseTensor(
+                feats=flat_coords,
+                coords=coords_with_batch,
+                batch_size=B
+            )
+
             # Handle different decoder interfaces
-            if hasattr(self, '_use_decode_method') and self._use_decode_method:
-                if hasattr(self.decoder, 'decode'):
-                    return self.decoder.decode(latent, query_coords)
-            return self.decoder(latent, query_coords)
+            try:
+                if hasattr(self, '_use_decode_method') and self._use_decode_method:
+                    if hasattr(self.decoder, 'decode'):
+                        result = self.decoder.decode(latent, sparse_coords)
+                    else:
+                        result = self.decoder(latent, sparse_coords)
+                else:
+                    result = self.decoder(latent, sparse_coords)
+
+                # Extract features from result
+                if isinstance(result, DenseSparseTensor) or hasattr(result, 'feats'):
+                    return result.feats
+                return result
+            except Exception:
+                # Fallback: try with original dense input
+                if hasattr(self, '_use_decode_method') and self._use_decode_method:
+                    if hasattr(self.decoder, 'decode'):
+                        return self.decoder.decode(latent, query_coords)
+                return self.decoder(latent, query_coords)
 
     try:
         decoder = DecoderWrapper(model)
@@ -585,38 +778,78 @@ def export_full_vae(model, output_path, num_points=10000):
             self._has_encoder_attr = hasattr(model, 'encoder')
             self._has_decoder_attr = hasattr(model, 'decoder')
 
+        def _to_sparse(self, tensor):
+            """Convert dense tensor to DenseSparseTensor."""
+            if tensor.dim() == 3:
+                B, N, C = tensor.shape
+                flat = tensor.reshape(-1, C)
+                batch_idx = torch.arange(B, device=tensor.device).unsqueeze(1).expand(B, N).reshape(-1, 1)
+                scaled = (flat * 128 + 256).int()
+                coords = torch.cat([batch_idx.int(), scaled], dim=1)
+                return DenseSparseTensor(feats=flat, coords=coords, batch_size=B)
+            return DenseSparseTensor(feats=tensor, batch_size=1)
+
+        def _from_sparse(self, result):
+            """Extract dense tensor from sparse result."""
+            if isinstance(result, DenseSparseTensor) or hasattr(result, 'feats'):
+                return result.feats
+            return result
+
         def forward(self, points, query_coords):
-            # Encode - try different interfaces
-            if self._has_encode_method:
-                latent = self.model.encode(points)
-            elif self._has_encoder_attr:
-                latent = self.model.encoder(points)
-            elif hasattr(self.model, 'model'):
-                if hasattr(self.model.model, 'encode'):
-                    latent = self.model.model.encode(points)
-                elif hasattr(self.model.model, 'encoder'):
-                    latent = self.model.model.encoder(points)
-                else:
-                    raise AttributeError(f"Cannot find encoder. Available: {dir(self.model.model)}")
-            else:
-                raise AttributeError(f"Cannot find encoder. Available: {dir(self.model)}")
+            # Convert inputs to sparse format
+            sparse_points = self._to_sparse(points)
+            sparse_query = self._to_sparse(query_coords)
 
-            # Decode - try different interfaces
-            if self._has_decode_method:
-                output = self.model.decode(latent, query_coords)
-            elif self._has_decoder_attr:
-                output = self.model.decoder(latent, query_coords)
-            elif hasattr(self.model, 'model'):
-                if hasattr(self.model.model, 'decode'):
-                    output = self.model.model.decode(latent, query_coords)
-                elif hasattr(self.model.model, 'decoder'):
-                    output = self.model.model.decoder(latent, query_coords)
+            try:
+                # Encode - try different interfaces
+                if self._has_encode_method:
+                    latent = self.model.encode(sparse_points)
+                elif self._has_encoder_attr:
+                    latent = self.model.encoder(sparse_points)
+                elif hasattr(self.model, 'model'):
+                    if hasattr(self.model.model, 'encode'):
+                        latent = self.model.model.encode(sparse_points)
+                    elif hasattr(self.model.model, 'encoder'):
+                        latent = self.model.model.encoder(sparse_points)
+                    else:
+                        raise AttributeError(f"Cannot find encoder. Available: {dir(self.model.model)}")
                 else:
-                    raise AttributeError(f"Cannot find decoder. Available: {dir(self.model.model)}")
-            else:
-                raise AttributeError(f"Cannot find decoder. Available: {dir(self.model)}")
+                    raise AttributeError(f"Cannot find encoder. Available: {dir(self.model)}")
 
-            return output
+                # Extract latent if sparse
+                latent = self._from_sparse(latent)
+
+                # Decode - try different interfaces
+                if self._has_decode_method:
+                    output = self.model.decode(latent, sparse_query)
+                elif self._has_decoder_attr:
+                    output = self.model.decoder(latent, sparse_query)
+                elif hasattr(self.model, 'model'):
+                    if hasattr(self.model.model, 'decode'):
+                        output = self.model.model.decode(latent, sparse_query)
+                    elif hasattr(self.model.model, 'decoder'):
+                        output = self.model.model.decoder(latent, sparse_query)
+                    else:
+                        raise AttributeError(f"Cannot find decoder. Available: {dir(self.model.model)}")
+                else:
+                    raise AttributeError(f"Cannot find decoder. Available: {dir(self.model)}")
+
+                return self._from_sparse(output)
+
+            except Exception:
+                # Fallback: try with original dense inputs
+                if self._has_encode_method:
+                    latent = self.model.encode(points)
+                elif self._has_encoder_attr:
+                    latent = self.model.encoder(points)
+                else:
+                    raise
+
+                if self._has_decode_method:
+                    return self.model.decode(latent, query_coords)
+                elif self._has_decoder_attr:
+                    return self.model.decoder(latent, query_coords)
+                raise
 
     try:
         vae = VAEWrapper(model)
@@ -729,7 +962,11 @@ def main():
     install_triposf()
 
     # Note: CUDA modules (spconv, flash_attn, xformers) are already mocked
-    # at the top of this script via setup_early_cuda_mocks()
+    # at the top of this script via cpu_mock_utils.setup_cpu_only_environment()
+
+    # Patch TripoSF sparse modules for dense export compatibility
+    print("\nPatching TripoSF modules for ONNX export...")
+    patch_triposf_for_dense_export()
 
     print(f"\nLoading TripoSF model...")
 
