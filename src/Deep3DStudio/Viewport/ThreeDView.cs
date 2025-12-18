@@ -22,7 +22,8 @@ namespace Deep3DStudio.Viewport
         Rotate,
         Scale,
         Select,
-        Pen // Triangle editing mode
+        Pen, // Triangle editing mode
+        Rigging // Skeleton rigging mode
     }
 
     /// <summary>
@@ -798,6 +799,10 @@ namespace Deep3DStudio.Viewport
                             DrawPointCloudBoundingBox(pcObj);
                         }
                     }
+                }
+                else if (obj is SkeletonObject skelObj)
+                {
+                    DrawSkeletonObject(skelObj);
                 }
 
                 GL.PopMatrix();
@@ -1864,6 +1869,242 @@ namespace Deep3DStudio.Viewport
             GL.PopMatrix();
             GL.MatrixMode(MatrixMode.Modelview);
         }
+
+        #region Skeleton Rendering
+
+        /// <summary>
+        /// Draw a skeleton object with joints and bones
+        /// </summary>
+        private void DrawSkeletonObject(SkeletonObject skelObj)
+        {
+            if (!EnsureLegacySupport("skeleton")) return;
+            if (skelObj.Skeleton == null) return;
+
+            var skeleton = skelObj.Skeleton;
+            var objPos = skelObj.Position;
+
+            // Draw bones first (behind joints)
+            if (skelObj.ShowBones)
+            {
+                foreach (var bone in skeleton.Bones)
+                {
+                    if (!bone.IsVisible) continue;
+
+                    var start = bone.StartJoint.GetWorldPosition() + objPos;
+                    var end = bone.EndJoint.GetWorldPosition() + objPos;
+
+                    // Determine color
+                    Vector3 color;
+                    if (bone.IsSelected)
+                        color = skelObj.SelectedColor;
+                    else
+                        color = skelObj.BoneColor;
+
+                    DrawBone(start, end, skelObj.BoneDisplayThickness, color);
+                }
+            }
+
+            // Draw joints
+            if (skelObj.ShowJoints)
+            {
+                foreach (var joint in skeleton.Joints)
+                {
+                    if (!joint.IsVisible) continue;
+
+                    var pos = joint.GetWorldPosition() + objPos;
+
+                    // Determine color
+                    Vector3 color;
+                    if (joint.IsSelected)
+                        color = skelObj.SelectedColor;
+                    else
+                        color = joint.Color;
+
+                    float size = joint.JointSize > 0 ? joint.JointSize : skelObj.JointDisplaySize;
+                    DrawJoint(pos, size, color);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Draw a single joint as a sphere/octahedron
+        /// </summary>
+        private void DrawJoint(Vector3 position, float size, Vector3 color)
+        {
+            if (!EnsureLegacySupport("joint")) return;
+
+            GL.Color3(color.X, color.Y, color.Z);
+
+            // Draw as an octahedron for better visibility
+            float h = size;
+
+            GL.Begin(PrimitiveType.Triangles);
+
+            // Top pyramid
+            // Front
+            GL.Vertex3(position.X, position.Y + h, position.Z);
+            GL.Vertex3(position.X + h, position.Y, position.Z);
+            GL.Vertex3(position.X, position.Y, position.Z + h);
+
+            // Right
+            GL.Vertex3(position.X, position.Y + h, position.Z);
+            GL.Vertex3(position.X, position.Y, position.Z + h);
+            GL.Vertex3(position.X - h, position.Y, position.Z);
+
+            // Back
+            GL.Vertex3(position.X, position.Y + h, position.Z);
+            GL.Vertex3(position.X - h, position.Y, position.Z);
+            GL.Vertex3(position.X, position.Y, position.Z - h);
+
+            // Left
+            GL.Vertex3(position.X, position.Y + h, position.Z);
+            GL.Vertex3(position.X, position.Y, position.Z - h);
+            GL.Vertex3(position.X + h, position.Y, position.Z);
+
+            // Bottom pyramid
+            // Front
+            GL.Vertex3(position.X, position.Y - h, position.Z);
+            GL.Vertex3(position.X, position.Y, position.Z + h);
+            GL.Vertex3(position.X + h, position.Y, position.Z);
+
+            // Right
+            GL.Vertex3(position.X, position.Y - h, position.Z);
+            GL.Vertex3(position.X - h, position.Y, position.Z);
+            GL.Vertex3(position.X, position.Y, position.Z + h);
+
+            // Back
+            GL.Vertex3(position.X, position.Y - h, position.Z);
+            GL.Vertex3(position.X, position.Y, position.Z - h);
+            GL.Vertex3(position.X - h, position.Y, position.Z);
+
+            // Left
+            GL.Vertex3(position.X, position.Y - h, position.Z);
+            GL.Vertex3(position.X + h, position.Y, position.Z);
+            GL.Vertex3(position.X, position.Y, position.Z - h);
+
+            GL.End();
+
+            // Draw outline
+            GL.LineWidth(1.5f);
+            GL.Color3(color.X * 0.5f, color.Y * 0.5f, color.Z * 0.5f);
+            GL.Begin(PrimitiveType.LineLoop);
+            GL.Vertex3(position.X + h, position.Y, position.Z);
+            GL.Vertex3(position.X, position.Y, position.Z + h);
+            GL.Vertex3(position.X - h, position.Y, position.Z);
+            GL.Vertex3(position.X, position.Y, position.Z - h);
+            GL.End();
+            GL.LineWidth(1.0f);
+        }
+
+        /// <summary>
+        /// Draw a bone connecting two joints
+        /// </summary>
+        private void DrawBone(Vector3 start, Vector3 end, float thickness, Vector3 color)
+        {
+            if (!EnsureLegacySupport("bone")) return;
+
+            var direction = end - start;
+            float length = direction.Length;
+            if (length < 0.0001f) return;
+
+            direction = direction.Normalized();
+
+            // Find perpendicular vectors
+            Vector3 up = Math.Abs(direction.Y) < 0.9f ? Vector3.UnitY : Vector3.UnitX;
+            Vector3 right = Vector3.Cross(direction, up).Normalized();
+            up = Vector3.Cross(right, direction).Normalized();
+
+            float t = thickness;
+            float taperFactor = 0.3f; // Taper toward end
+
+            // Calculate corner points
+            var p1 = start + right * t + up * t;
+            var p2 = start + right * t - up * t;
+            var p3 = start - right * t - up * t;
+            var p4 = start - right * t + up * t;
+
+            var p5 = end + right * t * taperFactor + up * t * taperFactor;
+            var p6 = end + right * t * taperFactor - up * t * taperFactor;
+            var p7 = end - right * t * taperFactor - up * t * taperFactor;
+            var p8 = end - right * t * taperFactor + up * t * taperFactor;
+
+            GL.Color3(color.X, color.Y, color.Z);
+
+            GL.Begin(PrimitiveType.Quads);
+
+            // Side 1
+            GL.Vertex3(p1); GL.Vertex3(p2); GL.Vertex3(p6); GL.Vertex3(p5);
+            // Side 2
+            GL.Vertex3(p2); GL.Vertex3(p3); GL.Vertex3(p7); GL.Vertex3(p6);
+            // Side 3
+            GL.Vertex3(p3); GL.Vertex3(p4); GL.Vertex3(p8); GL.Vertex3(p7);
+            // Side 4
+            GL.Vertex3(p4); GL.Vertex3(p1); GL.Vertex3(p5); GL.Vertex3(p8);
+
+            GL.End();
+
+            // Draw end caps
+            GL.Begin(PrimitiveType.Quads);
+            GL.Vertex3(p1); GL.Vertex3(p4); GL.Vertex3(p3); GL.Vertex3(p2);
+            GL.Vertex3(p5); GL.Vertex3(p6); GL.Vertex3(p7); GL.Vertex3(p8);
+            GL.End();
+
+            // Draw outline for better visibility
+            GL.LineWidth(1.5f);
+            GL.Color3(color.X * 0.6f, color.Y * 0.6f, color.Z * 0.6f);
+
+            GL.Begin(PrimitiveType.Lines);
+            // Edges from start to end
+            GL.Vertex3(p1); GL.Vertex3(p5);
+            GL.Vertex3(p2); GL.Vertex3(p6);
+            GL.Vertex3(p3); GL.Vertex3(p7);
+            GL.Vertex3(p4); GL.Vertex3(p8);
+            GL.End();
+
+            GL.LineWidth(1.0f);
+        }
+
+        /// <summary>
+        /// Draw a gizmo for manipulating joints in rigging mode
+        /// </summary>
+        public void DrawJointGizmo(Joint joint, Vector3 objectPosition)
+        {
+            if (!EnsureLegacySupport("joint gizmo")) return;
+
+            var pos = joint.GetWorldPosition() + objectPosition;
+
+            // Calculate gizmo size based on distance to camera
+            float distToCamera = Math.Abs(_zoom);
+            float gizmoSize = distToCamera * 0.1f;
+
+            GL.Disable(EnableCap.DepthTest);
+            GL.LineWidth(2.5f);
+
+            // Draw coordinate axes
+            GL.Begin(PrimitiveType.Lines);
+
+            // X axis (red)
+            GL.Color3(1.0f, 0.2f, 0.2f);
+            GL.Vertex3(pos);
+            GL.Vertex3(pos + new Vector3(gizmoSize, 0, 0));
+
+            // Y axis (green)
+            GL.Color3(0.2f, 1.0f, 0.2f);
+            GL.Vertex3(pos);
+            GL.Vertex3(pos + new Vector3(0, gizmoSize, 0));
+
+            // Z axis (blue)
+            GL.Color3(0.2f, 0.4f, 1.0f);
+            GL.Vertex3(pos);
+            GL.Vertex3(pos + new Vector3(0, 0, gizmoSize));
+
+            GL.End();
+
+            GL.LineWidth(1.0f);
+            GL.Enable(EnableCap.DepthTest);
+        }
+
+        #endregion
 
         #endregion
 

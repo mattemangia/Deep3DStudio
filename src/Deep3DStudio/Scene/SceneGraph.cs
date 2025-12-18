@@ -17,7 +17,8 @@ namespace Deep3DStudio.Scene
         Camera,
         Group,
         Light,
-        Annotation
+        Annotation,
+        Skeleton
     }
 
     /// <summary>
