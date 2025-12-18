@@ -372,7 +372,7 @@ namespace Deep3DStudio.UI
             {
                 int size = 16;
                 var pixbuf = new Gdk.Pixbuf(Gdk.Colorspace.Rgb, true, 8, size, size);
-                uint pixel = (255 << 24) | (200 << 16) | (0 << 8) | 255; // Yellow
+                uint pixel = ((uint)255 << 24) | ((uint)200 << 16) | ((uint)0 << 8) | 255; // Yellow
                 pixbuf.Fill(pixel);
                 return pixbuf;
             }
