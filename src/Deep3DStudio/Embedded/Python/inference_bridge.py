@@ -29,7 +29,9 @@ def load_model(model_name, weights_path, device=None):
 
         elif model_name == 'triposr':
             from tsr.system import TSR
-            model = TSR.from_pretrained(weights_path, config_name="config.yaml", weight_name="model.ckpt")
+            model_dir = os.path.dirname(weights_path)
+            # Use specific filenames as downloaded by setup_deployment.py
+            model = TSR.from_pretrained(model_dir, config_name="triposr_config.yaml", weight_name="triposr_weights.pth")
             model.renderer.set_bg_color([0, 0, 0])
             model.to(device)
             model.eval()
@@ -38,7 +40,8 @@ def load_model(model_name, weights_path, device=None):
         elif model_name == 'triposf':
             # Mapping TripoSF to TSR architecture (Feed Forward)
             from tsr.system import TSR
-            model = TSR.from_pretrained(weights_path, config_name="config.yaml", weight_name="model.ckpt")
+            model_dir = os.path.dirname(weights_path)
+            model = TSR.from_pretrained(model_dir, config_name="triposf_config.yaml", weight_name="triposf_weights.pth")
             model.to(device)
             model.eval()
             loaded_models[model_name] = model
@@ -47,9 +50,18 @@ def load_model(model_name, weights_path, device=None):
              # LGM for Gaussian Splatting
              from lgm.models import LGM
              try:
+                 # Try loading assuming it matches the extension handling or internal logic
                  model = LGM.load_from_checkpoint(weights_path)
-             except:
-                 state_dict = torch.load(weights_path, map_location='cpu')
+             except Exception as e:
+                 print(f"LGM load_from_checkpoint failed: {e}, trying manual load...")
+                 try:
+                     # Try Safetensors (since we might have downloaded safetensors as .pth)
+                     from safetensors.torch import load_file
+                     state_dict = load_file(weights_path)
+                 except Exception as e2:
+                     print(f"Safetensors load failed: {e2}, trying torch.load...")
+                     state_dict = torch.load(weights_path, map_location='cpu')
+
                  model = LGM()
                  model.load_state_dict(state_dict, strict=False)
 
@@ -60,6 +72,9 @@ def load_model(model_name, weights_path, device=None):
         elif model_name == 'wonder3d':
              from wonder3d.mvdiffusion.pipeline_mvdiffusion import MVDiffusionPipeline
              base_dir = os.path.dirname(weights_path)
+             # Wonder3D usually needs a full directory structure.
+             # If base_dir contains just the .pth, this might fail unless pipeline handles it.
+             # We assume setup has placed necessary config files if available.
              model = MVDiffusionPipeline.from_pretrained(base_dir, torch_dtype=torch.float16 if device == 'cuda' else torch.float32)
              model.to(device)
              loaded_models[model_name] = model
