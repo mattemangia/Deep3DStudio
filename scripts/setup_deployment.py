@@ -52,20 +52,35 @@ MODELS = {
     "triposg": {
         # TripoSG (Gaussian Splatting) -> LGM
         "repo": "https://github.com/3DTopia/LGM.git",
-        "weights": "https://huggingface.co/ashawkey/LGM/resolve/main/model.safetensors",
-        "files": ["lgm/"],
+        "weights": "https://huggingface.co/ashawkey/LGM/resolve/main/model_fp16_fixrot.safetensors",
+        "files": ["core/"], # Will be renamed to lgm in setup
+        "target_name": "lgm",
         "requirements": ["diffusers", "kiui"]
     },
     "wonder3d": {
         "repo": "https://github.com/xxlong0/Wonder3D.git",
-        "weights": "https://huggingface.co/flamehaze111/Wonder3D/resolve/main/mvdiffusion_v1.pth",
-        "files": ["wonder3d/", "mvdiffusion/"],
+        # Wonder3D uses a diffusers folder structure
+        "weights_structure": {
+            "model_index.json": "https://huggingface.co/flamehaze1115/wonder3d-v1.0/resolve/main/model_index.json",
+            "scheduler/scheduler_config.json": "https://huggingface.co/flamehaze1115/wonder3d-v1.0/resolve/main/scheduler/scheduler_config.json",
+            "unet/config.json": "https://huggingface.co/flamehaze1115/wonder3d-v1.0/resolve/main/unet/config.json",
+            "unet/diffusion_pytorch_model.bin": "https://huggingface.co/flamehaze1115/wonder3d-v1.0/resolve/main/unet/diffusion_pytorch_model.bin",
+            "vae/config.json": "https://huggingface.co/flamehaze1115/wonder3d-v1.0/resolve/main/vae/config.json",
+            "vae/diffusion_pytorch_model.bin": "https://huggingface.co/flamehaze1115/wonder3d-v1.0/resolve/main/vae/diffusion_pytorch_model.bin",
+            "feature_extractor/preprocessor_config.json": "https://huggingface.co/flamehaze1115/wonder3d-v1.0/resolve/main/feature_extractor/preprocessor_config.json",
+            "image_encoder/config.json": "https://huggingface.co/flamehaze1115/wonder3d-v1.0/resolve/main/image_encoder/config.json",
+            "image_encoder/pytorch_model.bin": "https://huggingface.co/flamehaze1115/wonder3d-v1.0/resolve/main/image_encoder/pytorch_model.bin"
+        },
+        "files": ["mvdiffusion/"],
+        # Rename target to preserve structure: wonder3d/mvdiffusion
+        "target_name": "wonder3d/mvdiffusion",
         "requirements": ["diffusers", "accelerate", "transformers", "einops", "omegaconf", "fire"]
     },
     "unirig": {
-        "repo": "https://github.com/TencentARC/UniRig.git",
-        "weights": "https://huggingface.co/TencentARC/UniRig/resolve/main/unirig.pth",
-        "files": ["unirig/"],
+        "repo": "https://github.com/VAST-AI-Research/UniRig.git",
+        "weights": "https://huggingface.co/VAST-AI/UniRig/resolve/main/skeleton/articulation-xl_quantization_256/model.ckpt",
+        "files": ["src/"],
+        "target_name": "unirig",
         "requirements": ["torch", "numpy", "scipy"]
     }
 }
@@ -114,10 +129,32 @@ def setup_python_embed(target_dir, target_platform):
 
     if "win" in target_platform:
         python_exe = os.path.join(target_dir, "python", "python.exe")
+        python_root = os.path.join(target_dir, "python")
     else:
         python_exe = os.path.join(target_dir, "python", "bin", "python3")
+        python_root = os.path.join(target_dir, "python")
         if os.path.exists(python_exe):
             os.chmod(python_exe, 0o755)
+
+    # Enable site-packages in python._pth if it exists (common in embedded builds)
+    for item in os.listdir(python_root):
+        if item.endswith("._pth"):
+            pth_file = os.path.join(python_root, item)
+            print(f"Modifying {item} to enable site-packages...")
+            try:
+                with open(pth_file, "r") as f:
+                    content = f.read()
+
+                # Uncomment 'import site' if present, or ensure it's there
+                if "#import site" in content:
+                    content = content.replace("#import site", "import site")
+                elif "import site" not in content:
+                    content += "\nimport site"
+
+                with open(pth_file, "w") as f:
+                    f.write(content)
+            except Exception as e:
+                print(f"Warning: Failed to modify {item}: {e}")
 
     get_pip_path = os.path.join(target_dir, "get-pip.py")
     if not os.path.exists(get_pip_path):
@@ -150,6 +187,11 @@ def setup_python_embed(target_dir, target_platform):
     if os.path.exists(archive_path): os.remove(archive_path)
     if os.path.exists(get_pip_path): os.remove(get_pip_path)
 
+    print("Removing unused Tcl/Tk directories...")
+    tcl_dir = os.path.join(target_dir, "python", "tcl")
+    if os.path.exists(tcl_dir):
+        shutil.rmtree(tcl_dir, onerror=remove_readonly)
+
     return True
 
 def setup_models(models_dir, python_dir, target_platform):
@@ -180,20 +222,63 @@ def setup_models(models_dir, python_dir, target_platform):
         print(f"Processing {name}...")
 
         # 1. Download Weights
-        weight_name = f"{name}_weights.pth"
-        weight_path = os.path.join(models_dir, weight_name)
-        if not os.path.exists(weight_path):
-            print(f"Downloading weights for {name} from {config['weights']}...")
-            try:
-                urllib.request.urlretrieve(config["weights"], weight_path)
-            except Exception as e:
-                print(f"Failed to download weights for {name}: {e}")
+        if "weights_structure" in config:
+            # Complex weights structure (e.g. Wonder3D)
+            base_weight_dir = os.path.join(models_dir, name)
+            if not os.path.exists(base_weight_dir):
+                os.makedirs(base_weight_dir)
+
+            for rel_path, url in config["weights_structure"].items():
+                target_path = os.path.join(base_weight_dir, rel_path)
+                target_dir = os.path.dirname(target_path)
+                if not os.path.exists(target_dir):
+                    os.makedirs(target_dir)
+
+                should_download = True
+                if os.path.exists(target_path):
+                    if os.path.getsize(target_path) > 0:
+                        should_download = False
+                    else:
+                        print(f"File {target_path} exists but is empty. Re-downloading.")
+
+                if should_download:
+                    print(f"Downloading {rel_path}...")
+                    try:
+                        urllib.request.urlretrieve(url, target_path)
+                    except Exception as e:
+                        print(f"Failed to download {rel_path}: {e}")
+
+        elif "weights" in config:
+            # Single weight file
+            weight_name = f"{name}_weights.pth"
+            if name == "triposg": weight_name = "model_fp16_fixrot.safetensors"
+
+            weight_path = os.path.join(models_dir, weight_name)
+
+            should_download = True
+            if os.path.exists(weight_path):
+                if os.path.getsize(weight_path) > 0:
+                    should_download = False
+                else:
+                    print(f"File {weight_path} exists but is empty. Re-downloading.")
+
+            if should_download:
+                print(f"Downloading weights for {name} from {config['weights']}...")
+                try:
+                    urllib.request.urlretrieve(config["weights"], weight_path)
+                    print(f"Successfully downloaded {name} weights.")
+                except Exception as e:
+                    print(f"Failed to download weights for {name}: {e}")
 
         # 1.5 Download Configs
         if "configs" in config:
             for conf_name, conf_url in config["configs"].items():
                 conf_path = os.path.join(models_dir, conf_name)
-                if not os.path.exists(conf_path):
+                should_download_conf = True
+                if os.path.exists(conf_path) and os.path.getsize(conf_path) > 0:
+                    should_download_conf = False
+
+                if should_download_conf:
                     print(f"Downloading config {conf_name}...")
                     try:
                         urllib.request.urlretrieve(conf_url, conf_path)
@@ -219,9 +304,23 @@ def setup_models(models_dir, python_dir, target_platform):
                     print(f"Warning: Source {src} not found in repo {name}")
                     continue
 
+                target_name = config.get("target_name")
+
                 if os.path.isdir(src):
-                    dirname = os.path.basename(src)
-                    dest = os.path.join(site_packages, dirname)
+                    # If target_name is set, rename the directory in site-packages
+                    dirname = target_name if target_name else os.path.basename(src)
+
+                    if target_name and "/" in target_name:
+                         # Handle nested targets like wonder3d/mvdiffusion
+                         parts = target_name.split("/")
+                         # Assume only 1 level of nesting for now (e.g. wonder3d/mvdiffusion)
+                         parent_dir = os.path.join(site_packages, parts[0])
+                         if not os.path.exists(parent_dir):
+                             os.makedirs(parent_dir)
+                         dest = os.path.join(parent_dir, parts[1])
+                    else:
+                         dest = os.path.join(site_packages, dirname)
+
                     if os.path.exists(dest):
                         shutil.rmtree(dest, onerror=remove_readonly)
                     shutil.copytree(src, dest)
@@ -243,7 +342,9 @@ def obfuscate_and_clean(python_dir, target_platform):
     else:
         python_exe = os.path.join(python_dir, "python", "bin", "python3")
 
-    subprocess.check_call([python_exe, "-m", "compileall", python_dir, "-b"])
+    result = subprocess.run([python_exe, "-m", "compileall", python_dir, "-b"], check=False)
+    if result.returncode != 0:
+        print(f"Warning: compileall returned {result.returncode}, but proceeding...")
 
     for root, dirs, files in os.walk(python_dir):
         if ".git" in dirs:
