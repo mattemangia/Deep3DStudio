@@ -371,7 +371,7 @@ namespace Deep3DStudio
 
             int row = 0;
 
-            var header = new Label("<b>DeepMeshPrior - Mesh Denoising & Optimization</b>") { UseMarkup = true, Halign = Align.Start };
+            var header = (new Label("<b>DeepMeshPrior - Mesh Denoising & Optimization</b>") { UseMarkup = true, Halign = Align.Start });
             grid.Attach(header, 0, row++, 2, 1);
 
             grid.Attach(new Label("Iterations:") { Halign = Align.Start }, 0, row, 1, 1);
