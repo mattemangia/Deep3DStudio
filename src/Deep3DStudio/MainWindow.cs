@@ -1519,7 +1519,7 @@ namespace Deep3DStudio
             _riggingPanel.RequestAddJoint += OnAddJoint;
             _riggingPanel.RequestAddBone += OnAddBone;
             _riggingPanel.RequestDeleteSelected += OnDeleteSelectedJoints;
-            _riggingPanel.RequestImportUniRig += OnAutoRig;
+            _riggingPanel.RequestImportUniRig += () => OnAutoRig(null, EventArgs.Empty);
             _riggingPanel.RequestExportRig += () => OnExportRiggedMesh(null, EventArgs.Empty);
             _riggingPanel.RequestCreateHumanoid += () => OnCreateHumanoidSkeleton(null, EventArgs.Empty);
             _riggingPanel.RefreshViewport += () => _viewport.QueueDraw();
