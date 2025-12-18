@@ -1,13 +1,12 @@
 using System;
 using System.IO;
-using Microsoft.ML.OnnxRuntime.Tensors;
 using SkiaSharp;
 
 namespace Deep3DStudio.Model
 {
     public static class ImageUtils
     {
-        public static (DenseTensor<float> tensor, int[] shape) LoadAndPreprocessImage(string filePath, int size = 512)
+        public static (float[] tensor, int[] shape) LoadAndPreprocessImage(string filePath, int size = 512)
         {
             using var decoded = ImageDecoder.DecodeBitmap(filePath);
 
@@ -24,12 +23,10 @@ namespace Deep3DStudio.Model
             newWidth = Math.Max(16, (newWidth / 16) * 16);
             newHeight = Math.Max(16, (newHeight / 16) * 16);
 
-            using var rgba = decoded.Copy(SKColorType.Rgba8888)
-                ?? throw new InvalidOperationException("Unable to convert image to RGBA8888.");
+            using var resized = ResizeBitmap(decoded, newWidth, newHeight);
 
-            using var resized = ResizeBitmap(rgba, newWidth, newHeight);
-
-            var tensor = new DenseTensor<float>(new[] { 1, 3, newHeight, newWidth });
+            // Create float array [1, 3, H, W]
+            float[] tensor = new float[3 * newHeight * newWidth];
 
             for (int y = 0; y < newHeight; y++)
             {
@@ -37,13 +34,20 @@ namespace Deep3DStudio.Model
                 {
                     var pixel = resized.GetPixel(x, y);
 
-                    tensor[0, 0, y, x] = (pixel.Red / 255.0f - 0.5f) / 0.5f;
-                    tensor[0, 1, y, x] = (pixel.Green / 255.0f - 0.5f) / 0.5f;
-                    tensor[0, 2, y, x] = (pixel.Blue / 255.0f - 0.5f) / 0.5f;
+                    // Normalize to [-1, 1]
+                    tensor[0 * newHeight * newWidth + y * newWidth + x] = (pixel.Red / 255.0f - 0.5f) / 0.5f;
+                    tensor[1 * newHeight * newWidth + y * newWidth + x] = (pixel.Green / 255.0f - 0.5f) / 0.5f;
+                    tensor[2 * newHeight * newWidth + y * newWidth + x] = (pixel.Blue / 255.0f - 0.5f) / 0.5f;
                 }
             }
 
-            return (tensor, new int[] { resized.Height, resized.Width });
+            return (tensor, new int[] { 1, 3, newHeight, newWidth });
+        }
+
+        public static (int width, int height) GetImageDimensions(string filePath)
+        {
+            using var decoded = ImageDecoder.DecodeBitmap(filePath);
+            return (decoded.Width, decoded.Height);
         }
 
         public static SKColor[] ExtractColors(string filePath, int width, int height)
@@ -69,11 +73,8 @@ namespace Deep3DStudio.Model
             var info = new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
             var result = new SKBitmap(info);
 
-            using var canvas = new SKCanvas(result);
-            using var image = SKImage.FromBitmap(source);
-            canvas.Clear(SKColors.Transparent);
-            canvas.DrawImage(image, new SKRect(0, 0, width, height));
-            canvas.Flush();
+            // Use high quality sampling
+            source.ScalePixels(result, SKFilterQuality.High);
 
             return result;
         }
@@ -81,7 +82,6 @@ namespace Deep3DStudio.Model
         public static (float r, float g, float b) TurboColormap(float t)
         {
             t = Math.Clamp(t, 0f, 1f);
-
             float r, g, b;
 
             if (t < 0.25f)
