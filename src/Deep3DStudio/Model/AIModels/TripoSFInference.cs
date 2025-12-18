@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using Python.Runtime;
 using Deep3DStudio.Python;
+using Deep3DStudio.Configuration;
 using OpenTK.Mathematics;
 using System.Collections.Generic;
 
@@ -20,9 +21,18 @@ namespace Deep3DStudio.Model.AIModels
             try
             {
                 byte[] imgBytes = File.ReadAllBytes(imagePath);
+
+                // Get settings for model parameters
+                var settings = IniSettings.Instance;
+                int resolution = settings.TripoSFResolution;
+
                 PythonService.Instance.ExecuteWithGIL((scope) =>
                 {
-                    dynamic output = _bridgeModule.infer_triposf(imgBytes.ToPython());
+                    // Pass configured parameters to Python
+                    dynamic output = _bridgeModule.infer_triposf(
+                        imgBytes.ToPython(),
+                        resolution
+                    );
                     if (output != null)
                     {
                         dynamic vertices = output["vertices"];

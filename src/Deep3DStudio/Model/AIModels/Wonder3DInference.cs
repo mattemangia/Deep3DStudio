@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using Python.Runtime;
 using Deep3DStudio.Python;
+using Deep3DStudio.Configuration;
 using OpenTK.Mathematics;
 
 namespace Deep3DStudio.Model.AIModels
@@ -19,12 +20,22 @@ namespace Deep3DStudio.Model.AIModels
             try
             {
                 byte[] imgBytes = File.ReadAllBytes(imagePath);
+
+                // Get settings for model parameters
+                var settings = IniSettings.Instance;
+                int numSteps = settings.Wonder3DSteps;
+                float guidanceScale = settings.Wonder3DGuidanceScale;
+
                 PythonService.Instance.ExecuteWithGIL((scope) =>
                 {
-                    dynamic output = _bridgeModule.infer_wonder3d(imgBytes.ToPython());
+                    // Pass configured parameters to Python
+                    dynamic output = _bridgeModule.infer_wonder3d(
+                        imgBytes.ToPython(),
+                        numSteps,
+                        guidanceScale
+                    );
                     if (output != null)
                     {
-                        // Parsing logic
                         dynamic vertices = output["vertices"];
                         dynamic faces = output["faces"];
                         dynamic colors = output["colors"];

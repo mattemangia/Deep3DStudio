@@ -3,6 +3,7 @@ using System.IO;
 using System.Reflection;
 using Python.Runtime;
 using Deep3DStudio.Python;
+using Deep3DStudio.Configuration;
 
 namespace Deep3DStudio.Model
 {
@@ -19,6 +20,40 @@ namespace Deep3DStudio.Model
         }
 
         public bool IsLoaded => _isLoaded;
+
+        protected string GetDeviceString()
+        {
+            var settings = IniSettings.Instance;
+            return settings.AIDevice switch
+            {
+                AIComputeDevice.CUDA => "cuda",
+                AIComputeDevice.DirectML => "cpu", // DirectML not directly supported by PyTorch, fallback to CPU
+                _ => "cpu"
+            };
+        }
+
+        protected string GetModelPath()
+        {
+            var settings = IniSettings.Instance;
+            string configuredPath = _modelName switch
+            {
+                "triposr" => settings.TripoSRModelPath,
+                "triposg" => settings.TripoSGModelPath,
+                "triposf" => settings.TripoSFModelPath,
+                "wonder3d" => settings.Wonder3DModelPath,
+                "unirig" => settings.UniRigModelPath,
+                _ => $"models/{_modelName}"
+            };
+
+            // If path is relative, make it absolute from app directory
+            if (!Path.IsPathRooted(configuredPath))
+            {
+                configuredPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, configuredPath);
+            }
+
+            // Return the weights file path
+            return Path.Combine(configuredPath, $"{_modelName}_weights.pth");
+        }
 
         protected void Initialize()
         {
@@ -52,15 +87,11 @@ namespace Deep3DStudio.Model
                         sys.modules["deep3dstudio_bridge"] = _bridgeModule;
                     }
 
-                    string modelsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models");
-                    // Assuming naming convention from setup_deployment.py: {name}_weights.pth
-                    // or for TripoSR/others it might be model.ckpt. Adjusting to generic "weights" or specific logic.
-                    // setup_deployment.py uses: weight_name = f"{name}_weights.pth"
+                    string weightsPath = GetModelPath();
+                    string device = GetDeviceString();
 
-                    string weightsPath = Path.Combine(modelsDir, $"{_modelName}_weights.pth");
-
-                    // Call load_model
-                    // _bridgeModule.load_model(_modelName, weightsPath, "cpu");
+                    // Load the model with configured device
+                    _bridgeModule.load_model(_modelName, weightsPath, device);
                 });
 
                 _isLoaded = true;
