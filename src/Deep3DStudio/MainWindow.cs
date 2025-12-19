@@ -796,6 +796,12 @@ namespace Deep3DStudio
             var helpMenuItem = new MenuItem("_Help");
             helpMenuItem.Submenu = helpMenu;
 
+            var aiDiagItem = new MenuItem("AI _Diagnostic");
+            aiDiagItem.Activated += (s, e) => new Deep3DStudio.UI.AIDiagnosticWindow().Show();
+            helpMenu.Append(aiDiagItem);
+
+            helpMenu.Append(new SeparatorMenuItem());
+
             var aboutItem = new MenuItem("_About");
             aboutItem.Activated += OnShowAbout;
             helpMenu.Append(aboutItem);
@@ -2507,10 +2513,52 @@ namespace Deep3DStudio
 
         private void OnShowAbout(object? sender, EventArgs e)
         {
-            var dialog = new MessageDialog(this, DialogFlags.Modal, MessageType.Info, ButtonsType.Ok,
-                "Deep3D Studio\n\nA 3D reconstruction tool using Dust3r and NeRF.\n\nVersion 1.0");
-            dialog.Run();
-            dialog.Destroy();
+            var aboutDialog = new Dialog("About Deep3D Studio", this, DialogFlags.Modal);
+            aboutDialog.AddButton("Close", ResponseType.Close);
+            aboutDialog.SetDefaultSize(400, 300);
+
+            var contentArea = aboutDialog.ContentArea;
+            var vbox = new Box(Orientation.Vertical, 10);
+            vbox.Margin = 20;
+            vbox.Halign = Align.Center;
+
+            // Logo
+            try
+            {
+                var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+                using (var stream = assembly.GetManifestResourceStream("Deep3DStudio.logo.png"))
+                {
+                    if (stream != null)
+                    {
+                        var pixbuf = new Gdk.Pixbuf(stream);
+                        // Scale if too big
+                        if (pixbuf.Width > 128)
+                        {
+                            pixbuf = pixbuf.ScaleSimple(128, 128, Gdk.InterpType.Bilinear);
+                        }
+                        var image = new Image(pixbuf);
+                        vbox.PackStart(image, false, false, 0);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Could not load logo: {ex.Message}");
+            }
+
+            var labelTitle = new Label();
+            labelTitle.Markup = "<span size='x-large' weight='bold'>Deep3D Studio</span>";
+            vbox.PackStart(labelTitle, false, false, 0);
+
+            var labelDesc = new Label("A 3D reconstruction tool using Dust3r and NeRF.\n\nVersion 1.0");
+            labelDesc.Justify = Justification.Center;
+            vbox.PackStart(labelDesc, false, false, 0);
+
+            contentArea.PackStart(vbox, true, true, 0);
+            contentArea.ShowAll();
+
+            aboutDialog.Run();
+            aboutDialog.Destroy();
         }
 
         #endregion

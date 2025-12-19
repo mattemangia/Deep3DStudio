@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Embedded\Python\inference_bridge.py" />
+    <EmbeddedResource Include="logo.png" />
   </ItemGroup>
 
   <Target Name="CopyDistFiles" AfterTargets="Build">
