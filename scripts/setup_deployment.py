@@ -136,23 +136,26 @@ def setup_python_embed(target_dir, target_platform):
         if os.path.exists(python_exe):
             os.chmod(python_exe, 0o755)
 
-    # Enable site-packages in python._pth if it exists (common in embedded builds)
+    # Configure python._pth to use ONLY embedded site-packages (no system Python)
+    # The ._pth file controls sys.path for embedded Python.
+    # IMPORTANT: Do NOT enable "import site" as it will find system Python packages!
     for item in os.listdir(python_root):
         if item.endswith("._pth"):
             pth_file = os.path.join(python_root, item)
-            print(f"Modifying {item} to enable site-packages...")
+            print(f"Configuring {item} for isolated embedded environment...")
             try:
-                with open(pth_file, "r") as f:
-                    content = f.read()
-
-                # Uncomment 'import site' if present, or ensure it's there
-                if "#import site" in content:
-                    content = content.replace("#import site", "import site")
-                elif "import site" not in content:
-                    content += "\nimport site"
-
+                # Write a clean ._pth file with only our paths
+                # Each line is added to sys.path in order
+                # DO NOT include "import site" - it causes system Python interference
+                pth_content = """python310.zip
+Lib
+DLLs
+Lib\\site-packages
+.
+"""
                 with open(pth_file, "w") as f:
-                    f.write(content)
+                    f.write(pth_content)
+                print(f"  Written isolated paths to {item}")
             except Exception as e:
                 print(f"Warning: Failed to modify {item}: {e}")
 
