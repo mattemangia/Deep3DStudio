@@ -178,16 +178,37 @@ def setup_python_embed(target_dir, target_platform):
             print("Downloading get-pip.py...")
             urllib.request.urlretrieve("https://bootstrap.pypa.io/get-pip.py", get_pip_path)
 
+        # Create isolated environment - remove any Python-related env vars that could
+        # cause pip to find/use system packages
+        clean_env = os.environ.copy()
+        python_env_vars = [
+            "PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE", "VIRTUAL_ENV",
+            "PYTHONSTARTUP", "PYTHONEXECUTABLE", "PYTHONNOUSERSITE"
+        ]
+        for var in python_env_vars:
+            clean_env.pop(var, None)
+
+        # Set isolation flags
+        clean_env["PYTHONNOUSERSITE"] = "1"  # Prevent user site-packages
+        clean_env["PYTHONDONTWRITEBYTECODE"] = "1"
+
         print("Installing pip...")
         try:
-            subprocess.check_call([python_exe, get_pip_path])
+            subprocess.check_call([python_exe, get_pip_path], env=clean_env)
         except Exception as e:
             print(f"Pip install failed: {e}")
             return False
 
         print(f"Installing libraries: {', '.join(reqs_list)}")
         try:
-            subprocess.check_call([python_exe, "-m", "pip", "install"] + reqs_list + ["--no-warn-script-location"])
+            # Use --ignore-installed to force install into embedded env even if
+            # packages exist in system Python. Use --no-user to prevent user site-packages.
+            subprocess.check_call([
+                python_exe, "-m", "pip", "install",
+                "--ignore-installed",
+                "--no-user",
+                "--no-warn-script-location"
+            ] + reqs_list, env=clean_env)
         except Exception as e:
             print(f"Lib install failed: {e}")
             return False
