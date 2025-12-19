@@ -156,36 +156,98 @@ def setup_python_embed(target_dir, target_platform):
             except Exception as e:
                 print(f"Warning: Failed to modify {item}: {e}")
 
-    get_pip_path = os.path.join(target_dir, "get-pip.py")
-    if not os.path.exists(get_pip_path):
-        print("Downloading get-pip.py...")
-        urllib.request.urlretrieve("https://bootstrap.pypa.io/get-pip.py", get_pip_path)
+    # Determine execution mode (Native vs Cross-Install)
+    host_os = platform.system().lower()
+    is_compatible = False
+    if "win" in host_os and "win" in target_platform: is_compatible = True
+    elif "linux" in host_os and "linux" in target_platform and ("aarch64" not in target_platform or platform.machine() == 'aarch64'): is_compatible = True
+    elif "darwin" in host_os and "osx" in target_platform: is_compatible = True
 
-    print("Installing pip...")
-    try:
-        subprocess.check_call([python_exe, get_pip_path])
-    except Exception as e:
-        print(f"Pip install failed: {e}")
-        return False
-
-    print("Installing libraries...")
+    # Requirements list
     base_reqs = ["torch", "torchvision", "numpy", "Pillow", "rembg", "onnxruntime", "scipy"]
     all_reqs = set(base_reqs)
     for m in MODELS.values():
         for r in m.get("requirements", []):
             all_reqs.add(r)
-
     reqs_list = sorted(list(all_reqs))
-    print(f"Installing: {', '.join(reqs_list)}")
 
-    try:
-        subprocess.check_call([python_exe, "-m", "pip", "install"] + reqs_list + ["--no-warn-script-location"])
-    except Exception as e:
-        print(f"Lib install failed: {e}")
-        return False
+    if is_compatible:
+        # Native installation
+        get_pip_path = os.path.join(target_dir, "get-pip.py")
+        if not os.path.exists(get_pip_path):
+            print("Downloading get-pip.py...")
+            urllib.request.urlretrieve("https://bootstrap.pypa.io/get-pip.py", get_pip_path)
+
+        print("Installing pip...")
+        try:
+            subprocess.check_call([python_exe, get_pip_path])
+        except Exception as e:
+            print(f"Pip install failed: {e}")
+            return False
+
+        print(f"Installing libraries: {', '.join(reqs_list)}")
+        try:
+            subprocess.check_call([python_exe, "-m", "pip", "install"] + reqs_list + ["--no-warn-script-location"])
+        except Exception as e:
+            print(f"Lib install failed: {e}")
+            return False
+
+        if os.path.exists(get_pip_path): os.remove(get_pip_path)
+
+    else:
+        # Cross-platform installation
+        print(f"Detected cross-platform build (Host: {host_os}, Target: {target_platform}). Using pip cross-install...")
+
+        # 1. Determine target site-packages
+        if "win" in target_platform:
+             site_packages = os.path.join(python_root, "Lib", "site-packages")
+        else:
+             # Find lib/python3.x/site-packages
+             lib_dir = os.path.join(python_root, "lib")
+             if os.path.exists(lib_dir):
+                 py_dirs = [d for d in os.listdir(lib_dir) if d.startswith("python")]
+                 if py_dirs:
+                     site_packages = os.path.join(lib_dir, py_dirs[0], "site-packages")
+                 else:
+                     site_packages = os.path.join(python_root, "lib", f"python{PYTHON_VERSION[:4]}", "site-packages")
+             else:
+                 # Fallback
+                 site_packages = os.path.join(python_root, "lib", f"python{PYTHON_VERSION[:4]}", "site-packages")
+
+        if not os.path.exists(site_packages):
+            os.makedirs(site_packages)
+
+        # 2. Determine pip platform tag
+        pip_platform = None
+        if "win_amd64" in target_platform: pip_platform = "win_amd64"
+        elif "linux_x86_64" in target_platform: pip_platform = "manylinux_2_17_x86_64"
+        elif "linux_aarch64" in target_platform: pip_platform = "manylinux_2_17_aarch64"
+        elif "osx_x86_64" in target_platform: pip_platform = "macosx_10_9_x86_64"
+        elif "osx_arm64" in target_platform: pip_platform = "macosx_11_0_arm64"
+
+        if not pip_platform:
+            print(f"Error: Could not determine pip platform tag for {target_platform}")
+            return False
+
+        print(f"Installing libraries via host pip to {site_packages} (Platform: {pip_platform})...")
+        print(f"Installing: {', '.join(reqs_list)}")
+
+        cmd = [
+            sys.executable, "-m", "pip", "install",
+            "--target", site_packages,
+            "--platform", pip_platform,
+            "--python-version", PYTHON_VERSION[:4], # e.g. "3.10"
+            "--only-binary=:all:"
+        ] + reqs_list
+
+        try:
+            subprocess.check_call(cmd)
+        except Exception as e:
+            print(f"Cross-install failed: {e}")
+            print("Note: Cross-installation requires that all packages have binary wheels available for the target platform.")
+            return False
 
     if os.path.exists(archive_path): os.remove(archive_path)
-    if os.path.exists(get_pip_path): os.remove(get_pip_path)
 
     print("Removing unused Tcl/Tk directories...")
     tcl_dir = os.path.join(target_dir, "python", "tcl")
