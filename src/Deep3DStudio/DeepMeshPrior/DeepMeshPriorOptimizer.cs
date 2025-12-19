@@ -44,8 +44,8 @@ namespace Deep3DStudio.DeepMeshPrior
             // L = I - D^-1 A
             // We have normalized A_hat = D^-0.5 A D^-0.5
             // Standard Laplacian loss usually uses Uniform Laplacian or Cotangent.
-            // The python code used "simple laplacian": v_i - mean(neighbors)
-            // This corresponds to L_uniform = I - D^-1 A_binary
+            // The uniform Laplacian uses v_i - mean(neighbors),
+            // which corresponds to L_uniform = I - D^-1 A_binary.
 
             // Let's build L_uniform
             var L_uniform = BuildUniformLaplacian(inputMesh, device);
@@ -63,8 +63,7 @@ namespace Deep3DStudio.DeepMeshPrior
                 optimizer.zero_grad();
 
                 // Forward
-                // Model outputs delta, we add to x_pos inside forward?
-                // Wait, in Python: return x_pos + dx
+                // Model outputs a delta; we add it to the current positions.
                 var output = model.forward(x, edgeIndex, edgeWeight);
                 var pred_pos = x_pos + output;
 

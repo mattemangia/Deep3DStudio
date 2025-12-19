@@ -65,9 +65,7 @@ namespace Deep3DStudio.UI
 
             this.ShowAll();
 
-            // Auto-run on open
-            // RunDiagnosticsAsync(); // Or let user click? User said "button opens a LOG window where you check..." implying auto or immediate.
-            // I'll make it auto run but with a button to re-run.
+            // Auto-run on open; provide a button for manual re-run.
             Task.Run(RunDiagnosticsAsync);
         }
 

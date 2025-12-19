@@ -37,8 +37,7 @@ namespace Deep3DStudio.DeepMeshPrior
                 AddLayer(h[5], h[6]); // 5 -> 6
                 AddLayer(h[6], h[7]); // 6 -> 7 (Bottleneck)
 
-                // Decoder with Skips (concatenation)
-                // In python code: conv8 input is h[7]+h[6]
+                // Decoder with skip concatenation.
                 AddLayer(h[7] + h[6], h[8]); // 7+6 -> 8
                 AddLayer(h[8] + h[5], h[9]); // 8+5 -> 9
                 AddLayer(h[9] + h[4], h[10]); // 9+4 -> 10
@@ -59,16 +58,7 @@ namespace Deep3DStudio.DeepMeshPrior
 
                 _finalLinear = nn.Linear(h[h.Length-2], h[h.Length-1]); // 16 -> 3
                 register_module("final_linear1", _finalLinear);
-                // Python code has two linear layers at the end for normal net: linear1(dx), relu, linear2(dx)
-                // Wait, python code:
-                // self.linear1 = nn.Linear(h[13], h[14]) -> 32 -> 16
-                // self.linear2 = nn.Linear(h[14], h[15]) -> 16 -> 3
-                // I only added up to conv13 (h[12]->h[13])
-
-                // Let's recheck indices carefully.
-                // conv13: h[12]->h[13] (32->32)
-                // linear1: h[13]->h[14] (32->16)
-                // linear2: h[14]->h[15] (16->3)
+                // Two linear layers at the end: linear1 (32 -> 16) then linear2 (16 -> 3).
 
                 _finalLinear2 = nn.Linear(h[14], h[15]);
                 register_module("final_linear2", _finalLinear2);
@@ -111,11 +101,7 @@ namespace Deep3DStudio.DeepMeshPrior
                 // Skips are used in reverse: skip6, skip5, ..., skip1
                 for(int i=7; i<13; i++)
                 {
-                    var skip = skips[6 - (i - 6)]; // e.g. i=7 => skip[6-1]=skip[5] which is conv6 output?
-                    // Python:
-                    // dx = conv7...
-                    // cat(dx, skip6) -> conv8 (idx 7)
-                    // skip6 is output of conv6.
+                    var skip = skips[6 - (i - 6)];
 
                     dx = torch.cat(new [] { dx, skip }, dim: 1);
                     dx = _convs[i].forward(dx, edgeIndex, edgeWeight);
