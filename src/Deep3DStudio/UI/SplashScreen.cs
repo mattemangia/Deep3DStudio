@@ -9,7 +9,7 @@ namespace Deep3DStudio.UI
         private Label _statusLabel;
         private Spinner _spinner;
 
-        public SplashScreen() : base(Gtk.WindowType.Popup)
+        public SplashScreen() : base(Gtk.WindowType.Toplevel)
         {
             this.TypeHint = WindowTypeHint.Splashscreen;
             this.WindowPosition = WindowPosition.Center;

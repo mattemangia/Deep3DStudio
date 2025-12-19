@@ -146,6 +146,13 @@ namespace Deep3DStudio.Python
             string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string targetDir = Path.Combine(appData, "Deep3DStudio", "python");
 
+            // Fix for nested python folder in zip (e.g. zip contains 'python/' folder at root)
+            string nestedDir = Path.Combine(targetDir, "python");
+            if (Directory.Exists(nestedDir))
+            {
+                return nestedDir;
+            }
+
             if (Directory.Exists(targetDir))
             {
                 return targetDir;
@@ -153,7 +160,13 @@ namespace Deep3DStudio.Python
 
             // Fallback to local directory
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            return Path.Combine(baseDir, "python");
+            string localPython = Path.Combine(baseDir, "python");
+
+            // Also check for nested in local
+            string localNested = Path.Combine(localPython, "python");
+            if (Directory.Exists(localNested)) return localNested;
+
+            return localPython;
         }
 
         private string GetPythonDllPath(string pythonHome)
