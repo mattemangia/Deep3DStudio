@@ -263,10 +263,16 @@ namespace Deep3DStudio.UI
                         Log($"[FAIL] AlignICP execution failed: {ex.Message}");
                     }
 
-                    // User mentioned "iNeRF". There is no explicit "iNeRF" class found.
-                    // Assuming they might mean pose refinement or just checking NeRF capabilities.
-                    // I will log a note about it.
-                    Log("[INFO] iNeRF check: No explicit iNeRF class found. Using VoxelGridNeRF as proxy for NeRF capabilities.");
+                    // Check NeRF initialization with dummy data
+                    try {
+                        var dummyMesh = new MeshData();
+                        dummyMesh.Vertices.Add(new Vector3(0,0,0));
+                        dummyMesh.Colors.Add(new Vector3(1,1,1));
+                        nerf.InitializeFromMesh(new List<MeshData> { dummyMesh });
+                        Log("[OK] VoxelGridNeRF initialized with dummy data.");
+                    } catch (Exception ex) {
+                        Log($"[FAIL] VoxelGridNeRF initialization failed: {ex.Message}");
+                    }
                 }
                 catch (Exception ex)
                 {
