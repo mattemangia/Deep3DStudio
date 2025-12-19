@@ -46,9 +46,19 @@ namespace Deep3DStudio.Model
                 PythonService.Instance.ExecuteWithGIL((scope) =>
                 {
                     dynamic sys = Py.Import("sys");
-                    if (sys.modules.Contains("deep3dstudio_bridge"))
+                    dynamic modules = sys.modules;
+
+                    // Python dict doesn't support C# Contains, use Python semantics
+                    bool hasModule = false;
+                    try {
+                        // Check using Python API if possible, or try-catch
+                        if (modules.__contains__("deep3dstudio_bridge"))
+                            hasModule = true;
+                    } catch { /* ignore */ }
+
+                    if (hasModule)
                     {
-                        _bridgeModule = sys.modules["deep3dstudio_bridge"];
+                        _bridgeModule = modules["deep3dstudio_bridge"];
                     }
                     else
                     {

@@ -802,6 +802,10 @@ namespace Deep3DStudio
 
             helpMenu.Append(new SeparatorMenuItem());
 
+            var logItem = new MenuItem("_Show Log Window");
+            logItem.Activated += (s, e) => Deep3DStudio.UI.LogWindow.Instance.Show();
+            helpMenu.Append(logItem);
+
             var aboutItem = new MenuItem("_About");
             aboutItem.Activated += OnShowAbout;
             helpMenu.Append(aboutItem);

@@ -40,6 +40,18 @@ namespace Deep3DStudio
                 Console.WriteLine($"Warning: Could not set application icon: {ex.Message}");
             }
 
+            // Redirect Console Output to Log Window
+            try
+            {
+                Console.SetOut(new LogWriter(Console.Out, LogWindow.Instance));
+                // Optional: Redirect error too if desired, but might want to keep native error stream
+                // Console.SetError(new LogWriter(Console.Error, LogWindow.Instance));
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to redirect console: {ex.Message}");
+            }
+
             // Initialize Python Environment (Heavy Task)
             splash.UpdateStatus("Initializing Python Environment (this may take a moment)...");
 
