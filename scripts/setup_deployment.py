@@ -147,8 +147,11 @@ def setup_python_embed(target_dir, target_platform):
         else:
             site_packages = os.path.join(lib_dir, "python3.10", "site-packages")
 
-    if not os.path.exists(site_packages):
-        os.makedirs(site_packages)
+    # Clean any existing site-packages to ensure fresh install
+    if os.path.exists(site_packages):
+        print(f"Cleaning existing site-packages: {site_packages}")
+        shutil.rmtree(site_packages, onerror=remove_readonly)
+    os.makedirs(site_packages)
     print(f"Target site-packages: {site_packages}")
 
     # Determine execution mode (Native vs Cross-Install)
@@ -189,7 +192,8 @@ def setup_python_embed(target_dir, target_platform):
 
         print("Installing pip...")
         try:
-            subprocess.check_call([python_exe, get_pip_path], env=clean_env)
+            # Use -I (isolated mode) to ignore any site-packages
+            subprocess.check_call([python_exe, "-I", get_pip_path], env=clean_env)
         except Exception as e:
             print(f"Pip install failed: {e}")
             return False
@@ -197,18 +201,32 @@ def setup_python_embed(target_dir, target_platform):
         print(f"Installing libraries to {site_packages}...")
         print(f"Libraries: {', '.join(reqs_list)}")
         try:
-            # Use --target to FORCE installation to embedded site-packages
-            # This bypasses any system Python detection completely
-            subprocess.check_call([
-                python_exe, "-m", "pip", "install",
-                "--target", site_packages,
-                "--upgrade",
+            # Use --prefix to install in the embedded Python structure
+            # Combined with -I (isolated mode) and --ignore-installed to force fresh install
+            pip_cmd = [
+                python_exe, "-I", "-m", "pip", "install",
+                "--prefix", python_root,
+                "--ignore-installed",
                 "--no-user",
-                "--no-warn-script-location"
-            ] + reqs_list, env=clean_env)
+                "--no-warn-script-location",
+                "-v"  # Verbose output to help debug
+            ] + reqs_list
+            print(f"Running: {' '.join(pip_cmd[:8])} ...")
+            subprocess.check_call(pip_cmd, env=clean_env)
+        except subprocess.CalledProcessError as e:
+            print(f"Lib install failed with return code {e.returncode}")
+            return False
         except Exception as e:
             print(f"Lib install failed: {e}")
             return False
+
+        # Verify installation - list what's in site-packages
+        print(f"Verifying installation in {site_packages}...")
+        if os.path.exists(site_packages):
+            packages = [d for d in os.listdir(site_packages) if not d.endswith('.dist-info')]
+            print(f"  Found {len(packages)} packages: {', '.join(sorted(packages)[:10])}...")
+        else:
+            print(f"  WARNING: site-packages directory not found at {site_packages}")
 
         if os.path.exists(get_pip_path): os.remove(get_pip_path)
 
