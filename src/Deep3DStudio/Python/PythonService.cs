@@ -57,11 +57,51 @@ namespace Deep3DStudio.Python
 
                 Runtime.PythonDLL = pythonDll;
 
-                // Set PYTHONHOME before initialization if needed, though often setting PythonDLL is enough for Embeddable
-                // However, for embeddable python, we often need to set environment variables or python paths manually
-                // if the layout is custom.
-                Environment.SetEnvironmentVariable("PYTHONHOME", pythonHome);
-                Environment.SetEnvironmentVariable("PYTHONPATH", Path.Combine(pythonHome, "Lib", "site-packages") + ";" + pythonHome);
+                // Configure environment to ensure isolated execution and correct path resolution
+                // We must set PYTHONHOME and PYTHONPATH to ensure the embedded environment is found
+                // and system-wide packages (like FEFLOW or Anaconda) are ignored.
+
+                // Construct a robust PYTHONPATH including Lib (standard library) and DLLs (extensions)
+                // This is critical if the zip distribution is a full install (containing Lib folder) rather than an embeddable zip.
+                string libDir = Path.Combine(pythonHome, "Lib");
+                string sitePackages = Path.Combine(libDir, "site-packages");
+                string dllsDir = Path.Combine(pythonHome, "DLLs");
+
+                // Base path
+                string pythonPath = pythonHome;
+
+                // Add Lib if it exists (fixes 'encodings' not found)
+                if (Directory.Exists(libDir))
+                {
+                    pythonPath += Path.PathSeparator + libDir;
+                }
+
+                // Add site-packages
+                if (Directory.Exists(sitePackages))
+                {
+                    pythonPath += Path.PathSeparator + sitePackages;
+                }
+
+                // Add DLLs
+                if (Directory.Exists(dllsDir))
+                {
+                    pythonPath += Path.PathSeparator + dllsDir;
+                }
+
+                // Also check for a zip file (standard embeddable)
+                string zipPath = Path.ChangeExtension(pythonDll, ".zip");
+                if (File.Exists(zipPath))
+                {
+                    pythonPath += Path.PathSeparator + zipPath;
+                }
+
+                Log($"Configuring Python Environment:");
+                Log($"  PYTHONHOME: {pythonHome}");
+                Log($"  PYTHONPATH: {pythonPath}");
+
+                Environment.SetEnvironmentVariable("PYTHONHOME", pythonHome, EnvironmentVariableTarget.Process);
+                Environment.SetEnvironmentVariable("PYTHONPATH", pythonPath, EnvironmentVariableTarget.Process);
+                Environment.SetEnvironmentVariable("PYTHONNOUSERSITE", "1", EnvironmentVariableTarget.Process);
 
                 PythonEngine.Initialize();
                 _threadState = PythonEngine.BeginAllowThreads();
@@ -142,47 +182,89 @@ namespace Deep3DStudio.Python
 
         private string GetPythonHome()
         {
-            // Prioritize the extracted location in AppData
+            // 1. Search in AppData (Extracted location)
             string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string targetDir = Path.Combine(appData, "Deep3DStudio", "python");
 
-            // Fix for nested python folder in zip (e.g. zip contains 'python/' folder at root)
-            string nestedDir = Path.Combine(targetDir, "python");
-            if (Directory.Exists(nestedDir))
-            {
-                return nestedDir;
-            }
+            string? foundHome = FindPythonHomeRecursive(targetDir);
+            if (foundHome != null) return foundHome;
 
-            if (Directory.Exists(targetDir))
-            {
-                return targetDir;
-            }
+            // 2. Search in Local Directory (Dev/Debug mode)
+            string localPython = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "python");
+            foundHome = FindPythonHomeRecursive(localPython);
+            if (foundHome != null) return foundHome;
 
-            // Fallback to local directory
-            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            string localPython = Path.Combine(baseDir, "python");
-
-            // Also check for nested in local
-            string localNested = Path.Combine(localPython, "python");
-            if (Directory.Exists(localNested)) return localNested;
-
+            // 3. Fallback to basic paths if search failed
+            if (Directory.Exists(targetDir)) return targetDir;
             return localPython;
+        }
+
+        private string? FindPythonHomeRecursive(string rootDir)
+        {
+            if (!Directory.Exists(rootDir)) return null;
+
+            // Define the target DLL name based on platform
+            string dllName = "python310.dll";
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) dllName = "libpython3.10.so";
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) dllName = "libpython3.10.dylib";
+
+            // DFS search for the DLL
+            // We use a stack to avoid recursion depth issues, though unlikely here
+            var stack = new Stack<string>();
+            stack.Push(rootDir);
+
+            int safetyCounter = 0;
+            while (stack.Count > 0 && safetyCounter++ < 1000)
+            {
+                string currentDir = stack.Pop();
+
+                // Check if DLL exists here
+                string dllPath = Path.Combine(currentDir, dllName);
+                if (File.Exists(dllPath))
+                {
+                    // Special case for Unix: libpython is often in 'lib' subdir, but PYTHONHOME is the parent
+                    if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                    {
+                        if (Path.GetFileName(currentDir) == "lib")
+                        {
+                            return Directory.GetParent(currentDir)?.FullName ?? currentDir;
+                        }
+                    }
+                    return currentDir;
+                }
+
+                try
+                {
+                    foreach (string dir in Directory.GetDirectories(currentDir))
+                    {
+                        stack.Push(dir);
+                    }
+                }
+                catch { /* Ignore access errors */ }
+            }
+
+            return null;
         }
 
         private string GetPythonDllPath(string pythonHome)
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                // Windows embeddable usually has python3xx.dll in the root of the python folder
                 return Path.Combine(pythonHome, "python310.dll");
             }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
-                return Path.Combine(pythonHome, "lib", "libpython3.10.so");
+                // If pythonHome was set to the root (parent of lib), adjust path
+                string libPath = Path.Combine(pythonHome, "lib", "libpython3.10.so");
+                if (File.Exists(libPath)) return libPath;
+                // Fallback if home points directly to lib (unlikely with FindPythonHomeRecursive logic but possible)
+                return Path.Combine(pythonHome, "libpython3.10.so");
             }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
             {
-                return Path.Combine(pythonHome, "lib", "libpython3.10.dylib");
+                string libPath = Path.Combine(pythonHome, "lib", "libpython3.10.dylib");
+                if (File.Exists(libPath)) return libPath;
+                return Path.Combine(pythonHome, "libpython3.10.dylib");
             }
 
             throw new PlatformNotSupportedException("Unsupported platform for embedded Python.");
