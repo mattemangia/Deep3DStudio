@@ -2,6 +2,8 @@ using System;
 using Gtk;
 using Deep3DStudio.Icons;
 using Deep3DStudio.Configuration;
+using Deep3DStudio.UI;
+using Deep3DStudio.Python;
 
 namespace Deep3DStudio
 {
@@ -16,10 +18,16 @@ namespace Deep3DStudio
 
             Application.Init();
 
+            // Show Splash Screen
+            var splash = new SplashScreen();
+            splash.Show();
+            splash.UpdateStatus("Loading Settings...");
+
             // Initialize settings from INI file (platform-specific location)
             var settings = IniSettings.Instance;
             Console.WriteLine($"Settings loaded from: {IniSettings.GetSettingsPath()}");
 
+            splash.UpdateStatus("Initializing Application Icons...");
             // Set default application icon for all windows
             try
             {
@@ -32,12 +40,41 @@ namespace Deep3DStudio
                 Console.WriteLine($"Warning: Could not set application icon: {ex.Message}");
             }
 
+            // Initialize Python Environment (Heavy Task)
+            splash.UpdateStatus("Initializing Python Environment (this may take a moment)...");
+
+            // Hook up logging to splash screen
+            Action<string> logHandler = (msg) => {
+                if (msg != null && msg.Length > 0 && msg != "\n")
+                    splash.UpdateStatus(msg.Trim());
+            };
+            PythonService.Instance.OnLogOutput += logHandler;
+
+            try
+            {
+                // Force initialization now to show progress on splash
+                // This will extract the zip if needed
+                PythonService.Instance.Initialize();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Python init warning: {ex.Message}");
+                splash.UpdateStatus("Python init warning (check console)");
+                // Continue, as some features might work or user can fix in settings
+            }
+            finally
+            {
+                PythonService.Instance.OnLogOutput -= logHandler;
+            }
+
             var app = new Application("org.Deep3DStudio.Deep3DStudio", GLib.ApplicationFlags.None);
             app.Register(GLib.Cancellable.Current);
 
+            splash.UpdateStatus("Loading User Interface...");
             var win = new MainWindow();
             app.AddWindow(win);
 
+            splash.Destroy();
             win.Show();
             Application.Run();
 
