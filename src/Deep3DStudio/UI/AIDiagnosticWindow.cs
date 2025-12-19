@@ -132,28 +132,57 @@ namespace Deep3DStudio.UI
                 UpdateProgress(0.3, "Checking Model Files...");
 
                 // 2. Check Models
-                // Check standard model paths
                 string modelsDir = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models");
-                string[] keyModels = new string[] {
-                    "dust3r.onnx", // Or whatever structure
-                    // Need to know actual model file names.
-                    // Based on inference_bridge.py or common knowledge.
-                    // Let's check 'models' dir content if it exists.
+
+                // List of expected files/folders based on user input
+                var expectedFiles = new Dictionary<string, bool>
+                {
+                    { "dust3r_weights.pth", false },
+                    { "model_fp16_fixrot.safetensors", false },
+                    { "triposf_config.yaml", false },
+                    { "triposf_weights.pth", false },
+                    { "triposg_weights.pth", false },
+                    { "triposr_config.yaml", false },
+                    { "triposr_weights.pth", false },
+                    { "unirig_weights.pth", false },
+                    // Wonder3D structure
+                    { "wonder3d/model_index.json", false },
+                    { "wonder3d/feature_extractor/preprocessor_config.json", false },
+                    { "wonder3d/image_encoder/config.json", false },
+                    { "wonder3d/image_encoder/pytorch_model.bin", false },
+                    { "wonder3d/scheduler/scheduler_config.json", false },
+                    { "wonder3d/unet/config.json", false },
+                    { "wonder3d/unet/diffusion_pytorch_model.bin", false },
+                    { "wonder3d/vae/config.json", false },
+                    { "wonder3d/vae/diffusion_pytorch_model.bin", false }
                 };
 
                 if (System.IO.Directory.Exists(modelsDir))
                 {
-                    Log($"[OK] Models directory exists: {modelsDir}");
-                    var files = System.IO.Directory.GetFiles(modelsDir, "*.*", SearchOption.AllDirectories);
-                    Log($"Found {files.Length} files in models directory.");
-                    foreach(var f in files)
+                    Log($"[OK] Models directory found at: {modelsDir}");
+
+                    // Iterate and check
+                    int foundCount = 0;
+                    foreach(var key in new List<string>(expectedFiles.Keys))
                     {
-                        Log($" - {System.IO.Path.GetFileName(f)} ({new System.IO.FileInfo(f).Length / 1024 / 1024} MB)");
+                        string fullPath = System.IO.Path.Combine(modelsDir, key);
+                        if (System.IO.File.Exists(fullPath))
+                        {
+                            expectedFiles[key] = true;
+                            foundCount++;
+                            Log($"[OK] Found: {key}");
+                        }
+                        else
+                        {
+                            Log($"[FAIL] Missing: {key}");
+                        }
                     }
+
+                    Log($"Summary: Found {foundCount} / {expectedFiles.Count} required model files.");
                 }
                 else
                 {
-                    Log($"[WARN] Models directory not found at {modelsDir}");
+                    Log($"[FAIL] Models directory not found at {modelsDir}");
                 }
 
                 UpdateProgress(0.5, "Initializing Python & Imports...");
