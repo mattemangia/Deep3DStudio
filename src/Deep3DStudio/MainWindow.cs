@@ -2518,9 +2518,14 @@ namespace Deep3DStudio
             aboutDialog.SetDefaultSize(400, 300);
 
             var contentArea = aboutDialog.ContentArea;
+            // Set dark theme
+            var black = new Gdk.Color(0, 0, 0);
+            contentArea.ModifyBg(StateType.Normal, black);
+
             var vbox = new Box(Orientation.Vertical, 10);
             vbox.Margin = 20;
             vbox.Halign = Align.Center;
+            vbox.ModifyBg(StateType.Normal, black);
 
             // Logo
             try
@@ -2547,11 +2552,12 @@ namespace Deep3DStudio
             }
 
             var labelTitle = new Label();
-            labelTitle.Markup = "<span size='x-large' weight='bold'>Deep3D Studio</span>";
+            labelTitle.Markup = "<span size='x-large' weight='bold' foreground='#FFFFFF'>Deep3D Studio</span>";
             vbox.PackStart(labelTitle, false, false, 0);
 
             var labelDesc = new Label("A 3D reconstruction tool using Dust3r and NeRF.\n\nVersion 1.0");
             labelDesc.Justify = Justification.Center;
+            labelDesc.ModifyFg(StateType.Normal, new Gdk.Color(220, 220, 220));
             vbox.PackStart(labelDesc, false, false, 0);
 
             contentArea.PackStart(vbox, true, true, 0);

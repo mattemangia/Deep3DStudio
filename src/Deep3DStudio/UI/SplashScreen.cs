@@ -48,11 +48,11 @@ namespace Deep3DStudio.UI
 
             // Title
             var titleLabel = new Label();
-            titleLabel.Markup = "<span size='xx-large' weight='bold'>Deep3D Studio</span>";
+            titleLabel.Markup = "<span size='xx-large' weight='bold' foreground='#FFFFFF'>Deep3D Studio</span>";
             vbox.PackStart(titleLabel, false, false, 5);
 
             var subtitleLabel = new Label("AI-Powered 3D Reconstruction");
-            subtitleLabel.ModifyFg(StateType.Normal, new Gdk.Color(120, 120, 120));
+            subtitleLabel.ModifyFg(StateType.Normal, new Gdk.Color(200, 200, 200));
             vbox.PackStart(subtitleLabel, false, false, 0);
 
             // Spinner container to center it
@@ -61,6 +61,12 @@ namespace Deep3DStudio.UI
             _spinner.SetSizeRequest(32, 32);
             _spinner.Active = true;
             _spinner.Start();
+
+            // Style spinner white using CSS
+            var cssProvider = new CssProvider();
+            cssProvider.LoadFromData("spinner { color: #FFFFFF; }");
+            _spinner.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
+
             spinnerBox.PackStart(new Label(""), true, true, 0); // Spacer
             spinnerBox.PackStart(_spinner, false, false, 0);
             spinnerBox.PackStart(new Label(""), true, true, 0); // Spacer
@@ -68,13 +74,14 @@ namespace Deep3DStudio.UI
 
             // Status
             _statusLabel = new Label("Initializing...");
-            _statusLabel.ModifyFg(StateType.Normal, new Gdk.Color(100, 100, 100));
+            _statusLabel.ModifyFg(StateType.Normal, new Gdk.Color(180, 180, 180));
             vbox.PackStart(_statusLabel, false, false, 5);
 
-            // Background color (White)
-            this.ModifyBg(StateType.Normal, new Gdk.Color(255, 255, 255));
-            frame.ModifyBg(StateType.Normal, new Gdk.Color(255, 255, 255));
-            vbox.ModifyBg(StateType.Normal, new Gdk.Color(255, 255, 255));
+            // Background color (Black)
+            var black = new Gdk.Color(0, 0, 0);
+            this.ModifyBg(StateType.Normal, black);
+            frame.ModifyBg(StateType.Normal, black);
+            vbox.ModifyBg(StateType.Normal, black);
 
             this.ShowAll();
         }
