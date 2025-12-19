@@ -193,6 +193,26 @@ namespace Deep3DStudio.UI
 
                     Log("[OK] Python Engine Initialized.");
 
+                    // Log sys.path for debugging
+                    using (global::Python.Runtime.Py.GIL())
+                    {
+                        try
+                        {
+                            dynamic sys = global::Python.Runtime.Py.Import("sys");
+                            Log("[INFO] Current sys.path:");
+                            foreach (var path in sys.path)
+                            {
+                                string pathStr = path.ToString();
+                                bool exists = System.IO.Directory.Exists(pathStr) || System.IO.File.Exists(pathStr);
+                                Log($"  {(exists ? "[EXISTS]" : "[MISSING]")} {pathStr}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"[WARN] Could not retrieve sys.path: {ex.Message}");
+                        }
+                    }
+
                     // Try importing key libraries
                     string[] libs = new string[] { "numpy", "torch", "cv2", "PIL" };
 

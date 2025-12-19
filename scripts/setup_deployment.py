@@ -164,7 +164,7 @@ def setup_python_embed(target_dir, target_platform):
     elif "darwin" in host_os and "osx" in target_platform: is_compatible = True
 
     # Requirements list
-    base_reqs = ["torch", "torchvision", "numpy", "Pillow", "rembg", "onnxruntime", "scipy"]
+    base_reqs = ["torch", "torchvision", "numpy", "Pillow", "opencv-python", "rembg", "onnxruntime", "scipy"]
     all_reqs = set(base_reqs)
     for m in MODELS.values():
         for r in m.get("requirements", []):

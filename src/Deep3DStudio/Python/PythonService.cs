@@ -62,10 +62,52 @@ namespace Deep3DStudio.Python
 
                 Runtime.PythonDLL = pythonDll;
 
-                // Construct paths for the embedded environment
-                string libDir = Path.Combine(pythonHome, "Lib");
-                string sitePackages = Path.Combine(libDir, "site-packages");
-                string dllsDir = Path.Combine(pythonHome, "DLLs");
+                // Construct paths for the embedded environment (platform-specific)
+                string libDir;
+                string sitePackages;
+                string dllsDir;
+
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                    // Windows: pythonHome/Lib and pythonHome/Lib/site-packages
+                    libDir = Path.Combine(pythonHome, "Lib");
+                    sitePackages = Path.Combine(libDir, "site-packages");
+                    dllsDir = Path.Combine(pythonHome, "DLLs");
+                }
+                else
+                {
+                    // Linux/macOS: pythonHome/lib/python3.10 and pythonHome/lib/python3.10/site-packages
+                    string libBase = Path.Combine(pythonHome, "lib");
+
+                    // Find the python3.x directory dynamically
+                    string? pythonLibDir = null;
+                    if (Directory.Exists(libBase))
+                    {
+                        foreach (string dir in Directory.GetDirectories(libBase))
+                        {
+                            string dirName = Path.GetFileName(dir);
+                            if (dirName.StartsWith("python3"))
+                            {
+                                pythonLibDir = dir;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (pythonLibDir != null)
+                    {
+                        libDir = pythonLibDir;
+                        sitePackages = Path.Combine(pythonLibDir, "site-packages");
+                        dllsDir = Path.Combine(pythonLibDir, "lib-dynload");
+                    }
+                    else
+                    {
+                        // Fallback to expected structure
+                        libDir = Path.Combine(libBase, "python3.10");
+                        sitePackages = Path.Combine(libDir, "site-packages");
+                        dllsDir = Path.Combine(libDir, "lib-dynload");
+                    }
+                }
 
                 // Build the PYTHONPATH - order matters!
                 var pathComponents = new List<string>();
@@ -83,7 +125,7 @@ namespace Deep3DStudio.Python
                     pathComponents.Add(libDir);
                 }
 
-                // DLLs directory (binary extensions)
+                // DLLs/lib-dynload directory (binary extensions)
                 if (Directory.Exists(dllsDir))
                 {
                     pathComponents.Add(dllsDir);
@@ -101,9 +143,13 @@ namespace Deep3DStudio.Python
                 string pythonPath = string.Join(Path.PathSeparator.ToString(), pathComponents);
 
                 Log($"Configuring Python Environment (ISOLATED MODE):");
+                Log($"  Platform: {(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "Windows" : RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "Linux" : "macOS")}");
                 Log($"  PYTHONHOME: {pythonHome}");
-                Log($"  PYTHONPATH: {pythonPath}");
                 Log($"  Python DLL: {pythonDll}");
+                Log($"  Lib Dir: {libDir} (exists: {Directory.Exists(libDir)})");
+                Log($"  Site-packages: {sitePackages} (exists: {Directory.Exists(sitePackages)})");
+                Log($"  DLLs/lib-dynload: {dllsDir} (exists: {Directory.Exists(dllsDir)})");
+                Log($"  PYTHONPATH: {pythonPath}");
 
                 // Set Python.NET properties BEFORE initialization (this is the key fix)
                 PythonEngine.PythonHome = pythonHome;
