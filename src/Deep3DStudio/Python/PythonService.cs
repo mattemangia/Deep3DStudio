@@ -1,9 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using Python.Runtime;
-using Deep3DStudio.Configuration; // Assuming for logging or settings
+using Deep3DStudio.Configuration;
 
 namespace Deep3DStudio.Python
 {
@@ -52,69 +53,211 @@ namespace Deep3DStudio.Python
                 if (!File.Exists(pythonDll))
                 {
                     Log($"Error: Python DLL not found at {pythonDll}");
-                    // Fallback or throw? For now log.
+                    throw new FileNotFoundException($"Python DLL not found at {pythonDll}");
                 }
+
+                // CRITICAL: Clear any existing Python environment variables FIRST
+                // This prevents system Python installations (like FEFLOW, Anaconda) from interfering
+                ClearSystemPythonEnvironment();
 
                 Runtime.PythonDLL = pythonDll;
 
-                // Configure environment to ensure isolated execution and correct path resolution
-                // We must set PYTHONHOME and PYTHONPATH to ensure the embedded environment is found
-                // and system-wide packages (like FEFLOW or Anaconda) are ignored.
-
-                // Construct a robust PYTHONPATH including Lib (standard library) and DLLs (extensions)
-                // This is critical if the zip distribution is a full install (containing Lib folder) rather than an embeddable zip.
+                // Construct paths for the embedded environment
                 string libDir = Path.Combine(pythonHome, "Lib");
                 string sitePackages = Path.Combine(libDir, "site-packages");
                 string dllsDir = Path.Combine(pythonHome, "DLLs");
 
-                // Base path
-                string pythonPath = pythonHome;
+                // Build the PYTHONPATH - order matters!
+                var pathComponents = new List<string>();
 
-                // Add Lib if it exists (fixes 'encodings' not found)
+                // Standard library zip (if exists) - highest priority for standard library
+                string stdlibZip = Path.Combine(pythonHome, "python310.zip");
+                if (File.Exists(stdlibZip))
+                {
+                    pathComponents.Add(stdlibZip);
+                }
+
+                // Lib directory (standard library)
                 if (Directory.Exists(libDir))
                 {
-                    pythonPath += Path.PathSeparator + libDir;
+                    pathComponents.Add(libDir);
                 }
 
-                // Add site-packages
-                if (Directory.Exists(sitePackages))
-                {
-                    pythonPath += Path.PathSeparator + sitePackages;
-                }
-
-                // Add DLLs
+                // DLLs directory (binary extensions)
                 if (Directory.Exists(dllsDir))
                 {
-                    pythonPath += Path.PathSeparator + dllsDir;
+                    pathComponents.Add(dllsDir);
                 }
 
-                // Also check for a zip file (standard embeddable)
-                string zipPath = Path.ChangeExtension(pythonDll, ".zip");
-                if (File.Exists(zipPath))
+                // site-packages (third-party packages)
+                if (Directory.Exists(sitePackages))
                 {
-                    pythonPath += Path.PathSeparator + zipPath;
+                    pathComponents.Add(sitePackages);
                 }
 
-                Log($"Configuring Python Environment:");
+                // Base Python home
+                pathComponents.Add(pythonHome);
+
+                string pythonPath = string.Join(Path.PathSeparator.ToString(), pathComponents);
+
+                Log($"Configuring Python Environment (ISOLATED MODE):");
                 Log($"  PYTHONHOME: {pythonHome}");
                 Log($"  PYTHONPATH: {pythonPath}");
+                Log($"  Python DLL: {pythonDll}");
 
+                // Set Python.NET properties BEFORE initialization (this is the key fix)
+                PythonEngine.PythonHome = pythonHome;
+                PythonEngine.PythonPath = pythonPath;
+
+                // Also set environment variables as backup
                 Environment.SetEnvironmentVariable("PYTHONHOME", pythonHome, EnvironmentVariableTarget.Process);
                 Environment.SetEnvironmentVariable("PYTHONPATH", pythonPath, EnvironmentVariableTarget.Process);
+
+                // Isolation flags - prevent loading from user/system locations
                 Environment.SetEnvironmentVariable("PYTHONNOUSERSITE", "1", EnvironmentVariableTarget.Process);
+                Environment.SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "1", EnvironmentVariableTarget.Process);
 
                 PythonEngine.Initialize();
                 _threadState = PythonEngine.BeginAllowThreads();
                 _isInitialized = true;
 
+                // Post-initialization: Verify and clean sys.path
+                CleanSysPath(pythonHome);
+
                 SetupStdioRedirection();
 
-                Log($"Python initialized. Home: {pythonHome}, DLL: {pythonDll}");
+                Log($"Python initialized successfully. Home: {pythonHome}");
             }
             catch (Exception ex)
             {
                 Log($"Failed to initialize Python: {ex.Message}");
                 throw;
+            }
+        }
+
+        /// <summary>
+        /// Clears any system Python environment variables that could interfere with our embedded Python.
+        /// This is critical to prevent other Python installations from being picked up.
+        /// </summary>
+        private void ClearSystemPythonEnvironment()
+        {
+            // List of environment variables that could cause Python to look in wrong places
+            string[] pythonEnvVars = {
+                "PYTHONHOME",
+                "PYTHONPATH",
+                "PYTHONSTARTUP",
+                "PYTHONUSERBASE",
+                "PYTHONEXECUTABLE",
+                "PYTHONWARNINGS",
+                "PYTHONHASHSEED",
+                "PYTHONIOENCODING",
+                "PYTHONLEGACYWINDOWSFSENCODING",
+                "PYTHONLEGACYWINDOWSSTDIO",
+                "PYTHONCOERCECLOCALE",
+                "PYTHONDEVMODE",
+                "PYTHONUTF8",
+                "PYTHONFAULTHANDLER",
+                "PYTHONTRACEMALLOC",
+                "PYTHONPROFILEIMPORTTIME",
+                "PYTHONMALLOC",
+                "PYTHONMALLOCSTATS"
+            };
+
+            foreach (var varName in pythonEnvVars)
+            {
+                string? existingValue = Environment.GetEnvironmentVariable(varName);
+                if (!string.IsNullOrEmpty(existingValue))
+                {
+                    Log($"  Clearing system {varName}: {existingValue}");
+                    Environment.SetEnvironmentVariable(varName, null, EnvironmentVariableTarget.Process);
+                }
+            }
+
+            // Also clear VIRTUAL_ENV if set
+            string? virtualEnv = Environment.GetEnvironmentVariable("VIRTUAL_ENV");
+            if (!string.IsNullOrEmpty(virtualEnv))
+            {
+                Log($"  Clearing VIRTUAL_ENV: {virtualEnv}");
+                Environment.SetEnvironmentVariable("VIRTUAL_ENV", null, EnvironmentVariableTarget.Process);
+            }
+        }
+
+        /// <summary>
+        /// After Python initialization, clean sys.path to remove any paths outside our embedded environment.
+        /// </summary>
+        private void CleanSysPath(string pythonHome)
+        {
+            using (Py.GIL())
+            {
+                try
+                {
+                    dynamic sys = Py.Import("sys");
+
+                    // Normalize our pythonHome for comparison
+                    string normalizedHome = Path.GetFullPath(pythonHome).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                    // Get current sys.path as a list
+                    var currentPath = new List<string>();
+                    foreach (var item in sys.path)
+                    {
+                        currentPath.Add(item.ToString());
+                    }
+
+                    Log($"  Checking sys.path ({currentPath.Count} entries)...");
+
+                    // Filter to only keep paths under our pythonHome
+                    var cleanedPath = new List<string>();
+                    var removedPaths = new List<string>();
+
+                    foreach (string path in currentPath)
+                    {
+                        if (string.IsNullOrEmpty(path))
+                        {
+                            continue;
+                        }
+
+                        string normalizedPath;
+                        try
+                        {
+                            normalizedPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                        }
+                        catch
+                        {
+                            // Invalid path, skip it
+                            removedPaths.Add(path);
+                            continue;
+                        }
+
+                        // Keep the path if it's under our pythonHome or is a zip file in pythonHome
+                        if (normalizedPath.StartsWith(normalizedHome, StringComparison.OrdinalIgnoreCase))
+                        {
+                            cleanedPath.Add(path);
+                        }
+                        else
+                        {
+                            removedPaths.Add(path);
+                        }
+                    }
+
+                    // Log removed paths
+                    foreach (string removed in removedPaths)
+                    {
+                        Log($"  Removed external path from sys.path: {removed}");
+                    }
+
+                    // Rebuild sys.path with only our paths
+                    sys.path.clear();
+                    foreach (string path in cleanedPath)
+                    {
+                        sys.path.append(path);
+                    }
+
+                    Log($"  sys.path cleaned: {cleanedPath.Count} paths retained, {removedPaths.Count} external paths removed");
+                }
+                catch (Exception ex)
+                {
+                    Log($"  Warning: Failed to clean sys.path: {ex.Message}");
+                }
             }
         }
 
