@@ -57,11 +57,51 @@ namespace Deep3DStudio.Python
 
                 Runtime.PythonDLL = pythonDll;
 
-                // Set PYTHONHOME before initialization if needed, though often setting PythonDLL is enough for Embeddable
-                // However, for embeddable python, we often need to set environment variables or python paths manually
-                // if the layout is custom.
-                Environment.SetEnvironmentVariable("PYTHONHOME", pythonHome);
-                Environment.SetEnvironmentVariable("PYTHONPATH", Path.Combine(pythonHome, "Lib", "site-packages") + ";" + pythonHome);
+                // Configure environment to ensure isolated execution and correct path resolution
+                // We must set PYTHONHOME and PYTHONPATH to ensure the embedded environment is found
+                // and system-wide packages (like FEFLOW or Anaconda) are ignored.
+
+                // Construct a robust PYTHONPATH including Lib (standard library) and DLLs (extensions)
+                // This is critical if the zip distribution is a full install (containing Lib folder) rather than an embeddable zip.
+                string libDir = Path.Combine(pythonHome, "Lib");
+                string sitePackages = Path.Combine(libDir, "site-packages");
+                string dllsDir = Path.Combine(pythonHome, "DLLs");
+
+                // Base path
+                string pythonPath = pythonHome;
+
+                // Add Lib if it exists (fixes 'encodings' not found)
+                if (Directory.Exists(libDir))
+                {
+                    pythonPath += Path.PathSeparator + libDir;
+                }
+
+                // Add site-packages
+                if (Directory.Exists(sitePackages))
+                {
+                    pythonPath += Path.PathSeparator + sitePackages;
+                }
+
+                // Add DLLs
+                if (Directory.Exists(dllsDir))
+                {
+                    pythonPath += Path.PathSeparator + dllsDir;
+                }
+
+                // Also check for a zip file (standard embeddable)
+                string zipPath = Path.ChangeExtension(pythonDll, ".zip");
+                if (File.Exists(zipPath))
+                {
+                    pythonPath += Path.PathSeparator + zipPath;
+                }
+
+                Log($"Configuring Python Environment:");
+                Log($"  PYTHONHOME: {pythonHome}");
+                Log($"  PYTHONPATH: {pythonPath}");
+
+                Environment.SetEnvironmentVariable("PYTHONHOME", pythonHome, EnvironmentVariableTarget.Process);
+                Environment.SetEnvironmentVariable("PYTHONPATH", pythonPath, EnvironmentVariableTarget.Process);
+                Environment.SetEnvironmentVariable("PYTHONNOUSERSITE", "1", EnvironmentVariableTarget.Process);
 
                 PythonEngine.Initialize();
                 _threadState = PythonEngine.BeginAllowThreads();
@@ -146,6 +186,13 @@ namespace Deep3DStudio.Python
             string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string targetDir = Path.Combine(appData, "Deep3DStudio", "python");
 
+            // Fix for nested python folder in zip (e.g. zip contains 'python/' folder at root)
+            string nestedDir = Path.Combine(targetDir, "python");
+            if (Directory.Exists(nestedDir))
+            {
+                return nestedDir;
+            }
+
             if (Directory.Exists(targetDir))
             {
                 return targetDir;
@@ -153,7 +200,13 @@ namespace Deep3DStudio.Python
 
             // Fallback to local directory
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            return Path.Combine(baseDir, "python");
+            string localPython = Path.Combine(baseDir, "python");
+
+            // Also check for nested in local
+            string localNested = Path.Combine(localPython, "python");
+            if (Directory.Exists(localNested)) return localNested;
+
+            return localPython;
         }
 
         private string GetPythonDllPath(string pythonHome)
