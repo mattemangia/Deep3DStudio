@@ -136,28 +136,20 @@ def setup_python_embed(target_dir, target_platform):
         if os.path.exists(python_exe):
             os.chmod(python_exe, 0o755)
 
-    # Configure python._pth to use ONLY embedded site-packages (no system Python)
-    # The ._pth file controls sys.path for embedded Python.
-    # IMPORTANT: Do NOT enable "import site" as it will find system Python packages!
-    for item in os.listdir(python_root):
-        if item.endswith("._pth"):
-            pth_file = os.path.join(python_root, item)
-            print(f"Configuring {item} for isolated embedded environment...")
-            try:
-                # Write a clean ._pth file with only our paths
-                # Each line is added to sys.path in order
-                # DO NOT include "import site" - it causes system Python interference
-                pth_content = """python310.zip
-Lib
-DLLs
-Lib\\site-packages
-.
-"""
-                with open(pth_file, "w") as f:
-                    f.write(pth_content)
-                print(f"  Written isolated paths to {item}")
-            except Exception as e:
-                print(f"Warning: Failed to modify {item}: {e}")
+    # Determine site-packages path for this platform
+    if "win" in target_platform:
+        site_packages = os.path.join(python_root, "Lib", "site-packages")
+    else:
+        lib_dir = os.path.join(python_root, "lib")
+        py_dirs = [d for d in os.listdir(lib_dir) if d.startswith("python")] if os.path.exists(lib_dir) else []
+        if py_dirs:
+            site_packages = os.path.join(lib_dir, py_dirs[0], "site-packages")
+        else:
+            site_packages = os.path.join(lib_dir, "python3.10", "site-packages")
+
+    if not os.path.exists(site_packages):
+        os.makedirs(site_packages)
+    print(f"Target site-packages: {site_packages}")
 
     # Determine execution mode (Native vs Cross-Install)
     host_os = platform.system().lower()
@@ -202,13 +194,15 @@ Lib\\site-packages
             print(f"Pip install failed: {e}")
             return False
 
-        print(f"Installing libraries: {', '.join(reqs_list)}")
+        print(f"Installing libraries to {site_packages}...")
+        print(f"Libraries: {', '.join(reqs_list)}")
         try:
-            # Use --ignore-installed to force install into embedded env even if
-            # packages exist in system Python. Use --no-user to prevent user site-packages.
+            # Use --target to FORCE installation to embedded site-packages
+            # This bypasses any system Python detection completely
             subprocess.check_call([
                 python_exe, "-m", "pip", "install",
-                "--ignore-installed",
+                "--target", site_packages,
+                "--upgrade",
                 "--no-user",
                 "--no-warn-script-location"
             ] + reqs_list, env=clean_env)
@@ -270,6 +264,26 @@ Lib\\site-packages
             print(f"Cross-install failed: {e}")
             print("Note: Cross-installation requires that all packages have binary wheels available for the target platform.")
             return False
+
+    # AFTER installation: Configure python._pth for runtime isolation
+    # This ensures the embedded Python doesn't see system packages when running
+    print("Configuring Python for runtime isolation...")
+    for item in os.listdir(python_root):
+        if item.endswith("._pth"):
+            pth_file = os.path.join(python_root, item)
+            print(f"  Configuring {item}...")
+            try:
+                # Write isolated paths - NO "import site" to prevent system Python interference
+                if "win" in target_platform:
+                    pth_content = "python310.zip\nLib\nDLLs\nLib\\site-packages\n.\n"
+                else:
+                    # Unix uses different path structure
+                    pth_content = "lib/python3.10\nlib/python3.10/lib-dynload\nlib/python3.10/site-packages\n.\n"
+                with open(pth_file, "w") as f:
+                    f.write(pth_content)
+                print(f"  Written isolated paths to {item}")
+            except Exception as e:
+                print(f"Warning: Failed to modify {item}: {e}")
 
     if os.path.exists(archive_path): os.remove(archive_path)
 
