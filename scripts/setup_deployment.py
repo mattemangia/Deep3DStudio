@@ -367,11 +367,24 @@ def create_zip(source_dir, output_zip):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default="dist", help="Output directory")
-    parser.add_argument("--platform", default="win_amd64", help="Target platform")
+    parser.add_argument("--platform", default="win_amd64", help="Target platform: win_amd64, linux_x86_64, linux_aarch64, osx_x86_64, osx_arm64 (or aliases: win-x64, linux-x64, linux-arm64, mac-x64, mac-arm64)")
     args = parser.parse_args()
 
+    # Normalize platform aliases
+    platform_map = {
+        "win-x64": "win_amd64",
+        "linux-x64": "linux_x86_64",
+        "linux-arm64": "linux_aarch64",
+        "mac-x64": "osx_x86_64",
+        "mac-arm64": "osx_arm64",
+        "osx-x64": "osx_x86_64",
+        "osx-arm64": "osx_arm64"
+    }
+
+    target_platform = platform_map.get(args.platform.lower(), args.platform)
+
     # Separate python env by platform
-    platform_dir = os.path.join(args.output, args.platform)
+    platform_dir = os.path.join(args.output, target_platform)
     python_dir = os.path.join(platform_dir, "python")
 
     # Models are shared, keep them in root of dist
@@ -388,9 +401,9 @@ if __name__ == "__main__":
              print("WARNING: You are running on Linux but targeting a non-Linux platform.")
              print("This will likely FAIL.")
 
-        if setup_python_embed(python_dir, args.platform):
-            setup_models(models_dir, python_dir, args.platform)
-            obfuscate_and_clean(python_dir, args.platform)
+        if setup_python_embed(python_dir, target_platform):
+            setup_models(models_dir, python_dir, target_platform)
+            obfuscate_and_clean(python_dir, target_platform)
 
             # Zip python env
             python_zip = os.path.join(platform_dir, "python_env.zip")
@@ -399,7 +412,7 @@ if __name__ == "__main__":
             # Optionally remove the unzipped folder to save space?
             # shutil.rmtree(python_dir, onerror=remove_readonly)
 
-            print(f"Deployment setup complete for {args.platform}.")
+            print(f"Deployment setup complete for {target_platform}.")
             print(f"Artifacts located in {platform_dir} and {models_dir}")
         else:
             print("Setup failed.")
