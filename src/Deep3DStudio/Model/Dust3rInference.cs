@@ -81,6 +81,8 @@ namespace Deep3DStudio.Model
                     string weightsPath = Path.Combine(modelsDir, "dust3r_weights.pth");
                     string device = GetDeviceString();
 
+                    Console.WriteLine($"[Dust3r] Initializing model from: {weightsPath} on device: {device}");
+
                     // Load the model with configured device
                     _bridgeModule.load_model("dust3r", weightsPath, device);
                 });

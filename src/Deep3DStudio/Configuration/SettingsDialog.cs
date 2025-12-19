@@ -15,14 +15,9 @@ namespace Deep3DStudio.Configuration
         private ColorButton _bgColorButton;
         private ColorButton _gridColorButton;
 
-        // NeRF settings
-        private SpinButton _nerfIterationsSpin;
-        private SpinButton _voxelSizeSpin;
-        private SpinButton _learningRateSpin;
-
         public SettingsDialog(Gtk.Window parent) : base("Settings", parent, DialogFlags.Modal)
         {
-            this.SetDefaultSize(450, 550);
+            this.SetDefaultSize(450, 400);
 
             var vbox = this.ContentArea;
             vbox.Margin = 20;
@@ -45,7 +40,7 @@ namespace Deep3DStudio.Configuration
             generalBox.PackStart(_deviceCombo, false, false, 0);
 
             // Meshing Algorithm
-            generalBox.PackStart(new Label("Meshing Algorithm:") { Halign = Align.Start }, false, false, 0);
+            generalBox.PackStart(new Label("Default Meshing Algorithm:") { Halign = Align.Start }, false, false, 0);
             _meshingCombo = new ComboBoxText();
             foreach (var name in Enum.GetNames(typeof(MeshingAlgorithm)))
                 _meshingCombo.AppendText(name);
@@ -53,7 +48,7 @@ namespace Deep3DStudio.Configuration
             generalBox.PackStart(_meshingCombo, false, false, 0);
 
             // Mesh Refinement
-            generalBox.PackStart(new Label("Mesh Refinement:") { Halign = Align.Start }, false, false, 0);
+            generalBox.PackStart(new Label("Default Refinement Method:") { Halign = Align.Start }, false, false, 0);
             _meshRefineCombo = new ComboBoxText();
             foreach (var name in Enum.GetNames(typeof(MeshRefinementMethod)))
                 _meshRefineCombo.AppendText(name);
@@ -61,7 +56,7 @@ namespace Deep3DStudio.Configuration
             generalBox.PackStart(_meshRefineCombo, false, false, 0);
 
             // Reconstruction Method
-            generalBox.PackStart(new Label("Reconstruction Method:") { Halign = Align.Start }, false, false, 0);
+            generalBox.PackStart(new Label("Default Reconstruction:") { Halign = Align.Start }, false, false, 0);
             _reconCombo = new ComboBoxText();
             foreach (var name in Enum.GetNames(typeof(ReconstructionMethod)))
                 _reconCombo.AppendText(name);
@@ -85,101 +80,6 @@ namespace Deep3DStudio.Configuration
             generalBox.PackStart(_bboxCombo, false, false, 0);
 
             notebook.AppendPage(generalBox, new Label("General"));
-
-            // ===== NeRF Tab =====
-            var nerfBox = new Box(Orientation.Vertical, 8);
-            nerfBox.Margin = 10;
-
-            nerfBox.PackStart(new Label("<b>NeRF Training Parameters</b>") { UseMarkup = true, Halign = Align.Start }, false, false, 5);
-
-            // Iterations
-            var iterBox = new Box(Orientation.Horizontal, 10);
-            iterBox.PackStart(new Label("Training Iterations:") { Halign = Align.Start }, false, false, 0);
-            _nerfIterationsSpin = new SpinButton(1, 500, 5);
-            _nerfIterationsSpin.Value = IniSettings.Instance.NeRFIterations;
-            _nerfIterationsSpin.TooltipText = "Number of training iterations for NeRF refinement (default: 50)";
-            iterBox.PackEnd(_nerfIterationsSpin, false, false, 0);
-            nerfBox.PackStart(iterBox, false, false, 0);
-
-            // Voxel Grid Size
-            var voxelBox = new Box(Orientation.Horizontal, 10);
-            voxelBox.PackStart(new Label("Voxel Grid Size:") { Halign = Align.Start }, false, false, 0);
-            _voxelSizeSpin = new SpinButton(32, 512, 16);
-            _voxelSizeSpin.Value = IniSettings.Instance.VoxelGridSize;
-            _voxelSizeSpin.TooltipText = "Resolution of the voxel grid (default: 128). Higher = more detail but slower.";
-            voxelBox.PackEnd(_voxelSizeSpin, false, false, 0);
-            nerfBox.PackStart(voxelBox, false, false, 0);
-
-            // Learning Rate
-            var lrBox = new Box(Orientation.Horizontal, 10);
-            lrBox.PackStart(new Label("Learning Rate:") { Halign = Align.Start }, false, false, 0);
-            _learningRateSpin = new SpinButton(0.001, 1.0, 0.01);
-            _learningRateSpin.Digits = 3;
-            _learningRateSpin.Value = IniSettings.Instance.NeRFLearningRate;
-            _learningRateSpin.TooltipText = "SGD learning rate for NeRF optimization (default: 0.1)";
-            lrBox.PackEnd(_learningRateSpin, false, false, 0);
-            nerfBox.PackStart(lrBox, false, false, 0);
-
-            // Info label
-            var infoLabel = new Label("<small>Note: Higher iterations and grid size require more time and memory.</small>")
-            {
-                UseMarkup = true,
-                Halign = Align.Start,
-                Wrap = true
-            };
-            nerfBox.PackStart(infoLabel, false, false, 10);
-
-            notebook.AppendPage(nerfBox, new Label("NeRF"));
-
-            // ===== Gaussian SDF Tab =====
-            var gsBox = new Box(Orientation.Vertical, 8);
-            gsBox.Margin = 10;
-
-            gsBox.PackStart(new Label("<b>Gaussian SDF Refiner Parameters</b>") { UseMarkup = true, Halign = Align.Start }, false, false, 5);
-
-            // Grid Resolution
-            var gsResBox = new Box(Orientation.Horizontal, 10);
-            gsResBox.PackStart(new Label("Grid Resolution:") { Halign = Align.Start }, false, false, 0);
-            var _gsResSpin = new SpinButton(32, 512, 16);
-            _gsResSpin.Value = IniSettings.Instance.GaussianSDFGridResolution;
-            _gsResSpin.TooltipText = "Resolution of the voxel grid (default: 128).";
-            _gsResSpin.ValueChanged += (s, e) => IniSettings.Instance.GaussianSDFGridResolution = (int)_gsResSpin.Value;
-            gsResBox.PackEnd(_gsResSpin, false, false, 0);
-            gsBox.PackStart(gsResBox, false, false, 0);
-
-            // Sigma
-            var gsSigmaBox = new Box(Orientation.Horizontal, 10);
-            gsSigmaBox.PackStart(new Label("Gaussian Sigma:") { Halign = Align.Start }, false, false, 0);
-            var _gsSigmaSpin = new SpinButton(0.1, 10.0, 0.1);
-            _gsSigmaSpin.Digits = 2;
-            _gsSigmaSpin.Value = IniSettings.Instance.GaussianSDFSigma;
-            _gsSigmaSpin.TooltipText = "Standard deviation of the Gaussian smoothing kernel.";
-            _gsSigmaSpin.ValueChanged += (s, e) => IniSettings.Instance.GaussianSDFSigma = (float)_gsSigmaSpin.Value;
-            gsSigmaBox.PackEnd(_gsSigmaSpin, false, false, 0);
-            gsBox.PackStart(gsSigmaBox, false, false, 0);
-
-            // Iterations
-            var gsIterBox = new Box(Orientation.Horizontal, 10);
-            gsIterBox.PackStart(new Label("Smoothing Iterations:") { Halign = Align.Start }, false, false, 0);
-            var _gsIterSpin = new SpinButton(0, 10, 1);
-            _gsIterSpin.Value = IniSettings.Instance.GaussianSDFIterations;
-            _gsIterSpin.TooltipText = "Number of smoothing passes (default: 1).";
-            _gsIterSpin.ValueChanged += (s, e) => IniSettings.Instance.GaussianSDFIterations = (int)_gsIterSpin.Value;
-            gsIterBox.PackEnd(_gsIterSpin, false, false, 0);
-            gsBox.PackStart(gsIterBox, false, false, 0);
-
-            // Iso Level
-            var gsIsoBox = new Box(Orientation.Horizontal, 10);
-            gsIsoBox.PackStart(new Label("Iso Level:") { Halign = Align.Start }, false, false, 0);
-            var _gsIsoSpin = new SpinButton(-1.0, 1.0, 0.05);
-            _gsIsoSpin.Digits = 2;
-            _gsIsoSpin.Value = IniSettings.Instance.GaussianSDFIsoLevel;
-            _gsIsoSpin.TooltipText = "Surface extraction iso-level (default: 0.0).";
-            _gsIsoSpin.ValueChanged += (s, e) => IniSettings.Instance.GaussianSDFIsoLevel = (float)_gsIsoSpin.Value;
-            gsIsoBox.PackEnd(_gsIsoSpin, false, false, 0);
-            gsBox.PackStart(gsIsoBox, false, false, 0);
-
-            notebook.AppendPage(gsBox, new Label("Gaussian SDF"));
 
             // ===== Viewport Tab =====
             var viewportBox = new Box(Orientation.Vertical, 8);
@@ -269,10 +169,6 @@ namespace Deep3DStudio.Configuration
             _bboxCombo.Active = (int)IniSettings.Instance.BoundingBoxStyle;
             _meshRefineCombo.Active = (int)IniSettings.Instance.MeshRefinement;
 
-            _nerfIterationsSpin.Value = IniSettings.Instance.NeRFIterations;
-            _voxelSizeSpin.Value = IniSettings.Instance.VoxelGridSize;
-            _learningRateSpin.Value = IniSettings.Instance.NeRFLearningRate;
-
             _bgColorButton.Rgba = new RGBA
             {
                 Red = IniSettings.Instance.ViewportBgR,
@@ -304,11 +200,6 @@ namespace Deep3DStudio.Configuration
             settings.CoordSystem = (CoordinateSystem)_coordCombo.Active;
             settings.BoundingBoxStyle = (BoundingBoxMode)_bboxCombo.Active;
             settings.MeshRefinement = (MeshRefinementMethod)_meshRefineCombo.Active;
-
-            // NeRF settings
-            settings.NeRFIterations = (int)_nerfIterationsSpin.Value;
-            settings.VoxelGridSize = (int)_voxelSizeSpin.Value;
-            settings.NeRFLearningRate = (float)_learningRateSpin.Value;
 
             // Viewport colors
             var bgColor = _bgColorButton.Rgba;

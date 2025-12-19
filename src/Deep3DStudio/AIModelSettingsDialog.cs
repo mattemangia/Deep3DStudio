@@ -12,14 +12,9 @@ namespace Deep3DStudio
     {
         private readonly IniSettings _settings;
 
-        // General
+        // General (Defaults)
         private ComboBoxText _imageTo3DCombo;
-        private ComboBoxText _reconstructionCombo;
-        private ComboBoxText _meshingModelCombo;
-        private ComboBoxText _meshRefinementCombo;
         private ComboBoxText _riggingCombo;
-
-        // Compute Device (for all models)
         private ComboBoxText _computeDeviceCombo;
 
         // TripoSR
@@ -45,6 +40,17 @@ namespace Deep3DStudio
         private SpinButton _deepMeshPriorLearningRate;
         private SpinButton _deepMeshPriorLaplacianWeight;
 
+        // Gaussian SDF
+        private SpinButton _gsResSpin;
+        private SpinButton _gsSigmaSpin;
+        private SpinButton _gsIterSpin;
+        private SpinButton _gsIsoSpin;
+
+        // NeRF
+        private SpinButton _nerfIterationsSpin;
+        private SpinButton _voxelSizeSpin;
+        private SpinButton _learningRateSpin;
+
         // UniRig
         private SpinButton _uniRigMaxJoints;
         private Entry _uniRigModelPath;
@@ -60,19 +66,21 @@ namespace Deep3DStudio
         {
             _settings = settings;
 
-            SetDefaultSize(600, 500);
+            SetDefaultSize(700, 550);
             BorderWidth = 10;
 
             var notebook = new Notebook();
             notebook.TabPos = PositionType.Left;
 
             // Add tabs
-            notebook.AppendPage(CreateGeneralTab(), new Label("General"));
+            notebook.AppendPage(CreateDefaultsTab(), new Label("Defaults"));
+            notebook.AppendPage(CreateNeRFTab(), new Label("NeRF"));
             notebook.AppendPage(CreateTripoSRTab(), new Label("TripoSR"));
             notebook.AppendPage(CreateLGMTab(), new Label("LGM"));
             notebook.AppendPage(CreateWonder3DTab(), new Label("Wonder3D"));
             notebook.AppendPage(CreateTripoSFTab(), new Label("TripoSF"));
             notebook.AppendPage(CreateDeepMeshPriorTab(), new Label("DeepMeshPrior"));
+            notebook.AppendPage(CreateGaussianSDFTab(), new Label("Gaussian SDF"));
             notebook.AppendPage(CreateUniRigTab(), new Label("UniRig"));
             notebook.AppendPage(CreateMergerTab(), new Label("Point Cloud"));
 
@@ -86,7 +94,7 @@ namespace Deep3DStudio
             ShowAll();
         }
 
-        private Widget CreateGeneralTab()
+        private Widget CreateDefaultsTab()
         {
             var grid = new Grid
             {
@@ -99,71 +107,116 @@ namespace Deep3DStudio
 
             int row = 0;
 
-            // Reconstruction model
-            grid.Attach(new Label("Reconstruction Model:") { Halign = Align.Start }, 0, row, 1, 1);
-            _reconstructionCombo = new ComboBoxText();
-            foreach (var name in Enum.GetNames(typeof(ReconstructionMethod)))
-                _reconstructionCombo.AppendText(name);
-            grid.Attach(_reconstructionCombo, 1, row++, 1, 1);
+            // Header
+            var header = new Label("<b>Pipeline Defaults</b>") { UseMarkup = true, Halign = Align.Start };
+            grid.Attach(header, 0, row++, 2, 1);
 
-            // Meshing / extraction model
-            grid.Attach(new Label("Meshing Model:") { Halign = Align.Start }, 0, row, 1, 1);
-            _meshingModelCombo = new ComboBoxText();
-            foreach (var name in Enum.GetNames(typeof(MeshingAlgorithm)))
-                _meshingModelCombo.AppendText(name);
-            grid.Attach(_meshingModelCombo, 1, row++, 1, 1);
+            // Compute device
+            grid.Attach(new Label("AI Compute Device:") { Halign = Align.Start }, 0, row, 1, 1);
+            _computeDeviceCombo = new ComboBoxText();
+            foreach (var name in Enum.GetNames(typeof(AIComputeDevice)))
+                _computeDeviceCombo.AppendText(name);
+            grid.Attach(_computeDeviceCombo, 1, row++, 1, 1);
 
-            // Mesh refinement
-            grid.Attach(new Label("Mesh Refinement:") { Halign = Align.Start }, 0, row, 1, 1);
-            _meshRefinementCombo = new ComboBoxText();
-            foreach (var name in Enum.GetNames(typeof(MeshRefinementMethod)))
-                _meshRefinementCombo.AppendText(name);
-            grid.Attach(_meshRefinementCombo, 1, row++, 1, 1);
+            grid.Attach(new Separator(Orientation.Horizontal), 0, row++, 2, 1);
 
             // Image to 3D model
             grid.Attach(new Label("Default Image→3D Model:") { Halign = Align.Start }, 0, row, 1, 1);
             _imageTo3DCombo = new ComboBoxText();
-            _imageTo3DCombo.AppendText("None");
-            _imageTo3DCombo.AppendText("TripoSR");
-            _imageTo3DCombo.AppendText("LGM");
-            _imageTo3DCombo.AppendText("Wonder3D");
+            foreach (var name in Enum.GetNames(typeof(ImageTo3DModel)))
+                _imageTo3DCombo.AppendText(name);
             grid.Attach(_imageTo3DCombo, 1, row++, 1, 1);
 
             // Rigging method
             grid.Attach(new Label("Rigging Method:") { Halign = Align.Start }, 0, row, 1, 1);
             _riggingCombo = new ComboBoxText();
-            _riggingCombo.AppendText("None");
-            _riggingCombo.AppendText("UniRig");
+            foreach (var name in Enum.GetNames(typeof(RiggingMethod)))
+                _riggingCombo.AppendText(name);
             grid.Attach(_riggingCombo, 1, row++, 1, 1);
-
-            row++;
-            grid.Attach(new Separator(Orientation.Horizontal), 0, row++, 2, 1);
-
-            // Compute device
-            grid.Attach(new Label("AI Compute Device:") { Halign = Align.Start }, 0, row, 1, 1);
-            _computeDeviceCombo = new ComboBoxText();
-            _computeDeviceCombo.AppendText("CPU");
-            _computeDeviceCombo.AppendText("CUDA (NVIDIA)");
-            _computeDeviceCombo.AppendText("DirectML (AMD/Intel)");
-            grid.Attach(_computeDeviceCombo, 1, row++, 1, 1);
 
             // Info text
             row++;
             var infoLabel = new Label(
-                "Configure default AI models for each pipeline stage.\n\n" +
-                "Image→3D: Converts single/multi images to 3D.\n" +
-                "Mesh Extraction: Converts point clouds/SDFs to meshes.\n" +
-                "Rigging: Auto-generates skeleton and weights.\n\n" +
-                "Compute Device:\n" +
-                "• CPU: Slowest but always available.\n" +
-                "• CUDA: NVIDIA GPUs (fastest).\n" +
-                "• DirectML: AMD/Intel GPUs on Windows.")
+                "Configure default AI models and compute hardware.\n\n" +
+                "Note: Meshing and Reconstruction methods are configured in general Settings.")
             {
                 Halign = Align.Start,
                 Wrap = true,
                 MaxWidthChars = 50
             };
             grid.Attach(infoLabel, 0, row, 2, 1);
+
+            return grid;
+        }
+
+        private Widget CreateNeRFTab()
+        {
+            var grid = new Grid
+            {
+                ColumnSpacing = 10,
+                RowSpacing = 10,
+                MarginStart = 10,
+                MarginEnd = 10,
+                MarginTop = 10
+            };
+
+            int row = 0;
+            grid.Attach(new Label("<b>NeRF Reconstruction Parameters</b>") { UseMarkup = true, Halign = Align.Start }, 0, row++, 2, 1);
+
+            // Iterations
+            grid.Attach(new Label("Training Iterations:") { Halign = Align.Start }, 0, row, 1, 1);
+            _nerfIterationsSpin = new SpinButton(1, 1000, 10);
+            grid.Attach(_nerfIterationsSpin, 1, row++, 1, 1);
+
+            // Voxel Grid Size
+            grid.Attach(new Label("Voxel Grid Size:") { Halign = Align.Start }, 0, row, 1, 1);
+            _voxelSizeSpin = new SpinButton(32, 512, 16);
+            grid.Attach(_voxelSizeSpin, 1, row++, 1, 1);
+
+            // Learning Rate
+            grid.Attach(new Label("Learning Rate:") { Halign = Align.Start }, 0, row, 1, 1);
+            _learningRateSpin = new SpinButton(0.001, 1.0, 0.01);
+            _learningRateSpin.Digits = 3;
+            grid.Attach(_learningRateSpin, 1, row++, 1, 1);
+
+            return grid;
+        }
+
+        private Widget CreateGaussianSDFTab()
+        {
+            var grid = new Grid
+            {
+                ColumnSpacing = 10,
+                RowSpacing = 10,
+                MarginStart = 10,
+                MarginEnd = 10,
+                MarginTop = 10
+            };
+
+            int row = 0;
+            grid.Attach(new Label("<b>Gaussian SDF Refiner Parameters</b>") { UseMarkup = true, Halign = Align.Start }, 0, row++, 2, 1);
+
+            // Grid Resolution
+            grid.Attach(new Label("Grid Resolution:") { Halign = Align.Start }, 0, row, 1, 1);
+            _gsResSpin = new SpinButton(32, 512, 16);
+            grid.Attach(_gsResSpin, 1, row++, 1, 1);
+
+            // Sigma
+            grid.Attach(new Label("Gaussian Sigma:") { Halign = Align.Start }, 0, row, 1, 1);
+            _gsSigmaSpin = new SpinButton(0.1, 10.0, 0.1);
+            _gsSigmaSpin.Digits = 2;
+            grid.Attach(_gsSigmaSpin, 1, row++, 1, 1);
+
+            // Iterations
+            grid.Attach(new Label("Smoothing Iterations:") { Halign = Align.Start }, 0, row, 1, 1);
+            _gsIterSpin = new SpinButton(0, 10, 1);
+            grid.Attach(_gsIterSpin, 1, row++, 1, 1);
+
+            // Iso Level
+            grid.Attach(new Label("Iso Level:") { Halign = Align.Start }, 0, row, 1, 1);
+            _gsIsoSpin = new SpinButton(-1.0, 1.0, 0.05);
+            _gsIsoSpin.Digits = 2;
+            grid.Attach(_gsIsoSpin, 1, row++, 1, 1);
 
             return grid;
         }
@@ -181,7 +234,6 @@ namespace Deep3DStudio
 
             int row = 0;
 
-            // Header
             var header = new Label("<b>TripoSR - Fast Single-Image 3D</b>") { UseMarkup = true, Halign = Align.Start };
             grid.Attach(header, 0, row++, 2, 1);
 
@@ -197,19 +249,6 @@ namespace Deep3DStudio
             pathBox.PackStart(_tripoSRModelPath, true, true, 0);
             pathBox.PackStart(browseBtn, false, false, 0);
             grid.Attach(pathBox, 1, row++, 1, 1);
-
-            // Info
-            row++;
-            var info = new Label(
-                "TripoSR generates 3D models from a single image in ~0.5s.\n\n" +
-                "Resolution: Higher values = more detail but slower.\n" +
-                "Recommended: 256 for preview, 384-512 for final.")
-            {
-                Halign = Align.Start,
-                Wrap = true,
-                MaxWidthChars = 50
-            };
-            grid.Attach(info, 0, row, 2, 1);
 
             return grid;
         }
@@ -246,19 +285,6 @@ namespace Deep3DStudio
             pathBox.PackStart(_lgmModelPath, true, true, 0);
             pathBox.PackStart(browseBtn, false, false, 0);
             grid.Attach(pathBox, 1, row++, 1, 1);
-
-            row++;
-            var info = new Label(
-                "LGM uses Gaussian Splatting for high-quality\n" +
-                "single-image 3D reconstruction.\n\n" +
-                "Flow Steps: More steps = better quality, slower.\n" +
-                "Recommended: 25-50 steps for good balance.")
-            {
-                Halign = Align.Start,
-                Wrap = true,
-                MaxWidthChars = 50
-            };
-            grid.Attach(info, 0, row, 2, 1);
 
             return grid;
         }
@@ -297,19 +323,6 @@ namespace Deep3DStudio
             pathBox.PackStart(browseBtn, false, false, 0);
             grid.Attach(pathBox, 1, row++, 1, 1);
 
-            row++;
-            var info = new Label(
-                "Wonder3D generates multi-view images using\n" +
-                "cross-domain diffusion for consistent 3D.\n\n" +
-                "Steps: 20-50 recommended.\n" +
-                "Guidance Scale: Higher = more prompt adherence.")
-            {
-                Halign = Align.Start,
-                Wrap = true,
-                MaxWidthChars = 50
-            };
-            grid.Attach(info, 0, row, 2, 1);
-
             return grid;
         }
 
@@ -341,19 +354,6 @@ namespace Deep3DStudio
             pathBox.PackStart(_tripoSFModelPath, true, true, 0);
             pathBox.PackStart(browseBtn, false, false, 0);
             grid.Attach(pathBox, 1, row++, 1, 1);
-
-            row++;
-            var info = new Label(
-                "TripoSF uses SparseFlex for ultra-high resolution\n" +
-                "mesh generation (up to 1024³).\n\n" +
-                "Resolution: 256=4GB, 512=8GB, 1024=12GB VRAM.\n" +
-                "Handles open surfaces (cloth, leaves) well.")
-            {
-                Halign = Align.Start,
-                Wrap = true,
-                MaxWidthChars = 50
-            };
-            grid.Attach(info, 0, row, 2, 1);
 
             return grid;
         }
@@ -388,19 +388,6 @@ namespace Deep3DStudio
             _deepMeshPriorLaplacianWeight.Digits = 2;
             grid.Attach(_deepMeshPriorLaplacianWeight, 1, row++, 1, 1);
 
-            row++;
-            var info = new Label(
-                "DeepMeshPrior uses a Graph Convolutional Network (GCN)\n" +
-                "to optimize the mesh structure and remove noise.\n\n" +
-                "Iterations: More = smoother but slower.\n" +
-                "Laplacian Weight: Controls smoothness strength.")
-            {
-                Halign = Align.Start,
-                Wrap = true,
-                MaxWidthChars = 50
-            };
-            grid.Attach(info, 0, row, 2, 1);
-
             return grid;
         }
 
@@ -432,19 +419,6 @@ namespace Deep3DStudio
             pathBox.PackStart(_uniRigModelPath, true, true, 0);
             pathBox.PackStart(browseBtn, false, false, 0);
             grid.Attach(pathBox, 1, row++, 1, 1);
-
-            row++;
-            var info = new Label(
-                "UniRig auto-generates skeleton and skinning\n" +
-                "weights for any 3D mesh.\n\n" +
-                "Max Joints: Typical human=50-70, detailed=100+.\n" +
-                "Works on arbitrary topology meshes.")
-            {
-                Halign = Align.Start,
-                Wrap = true,
-                MaxWidthChars = 50
-            };
-            grid.Attach(info, 0, row, 2, 1);
 
             return grid;
         }
@@ -484,19 +458,6 @@ namespace Deep3DStudio
             _mergerOutlierThreshold.Digits = 1;
             grid.Attach(_mergerOutlierThreshold, 1, row++, 1, 1);
 
-            row++;
-            var info = new Label(
-                "Settings for merging multiple point clouds.\n\n" +
-                "Voxel Size: Downsampling resolution.\n" +
-                "ICP Iterations: More = better alignment, slower.\n" +
-                "Outlier Ratio: Lower = more aggressive filtering.")
-            {
-                Halign = Align.Start,
-                Wrap = true,
-                MaxWidthChars = 50
-            };
-            grid.Attach(info, 0, row, 2, 1);
-
             return grid;
         }
 
@@ -520,11 +481,19 @@ namespace Deep3DStudio
         {
             // General
             _imageTo3DCombo.Active = (int)_settings.ImageTo3D;
-            _reconstructionCombo.Active = (int)_settings.ReconstructionMethod;
-            _meshingModelCombo.Active = (int)_settings.MeshingAlgo;
-            _meshRefinementCombo.Active = (int)_settings.MeshRefinement;
             _riggingCombo.Active = (int)_settings.RiggingModel;
             _computeDeviceCombo.Active = (int)_settings.AIDevice;
+
+            // NeRF
+            _nerfIterationsSpin.Value = _settings.NeRFIterations;
+            _voxelSizeSpin.Value = _settings.VoxelGridSize;
+            _learningRateSpin.Value = _settings.NeRFLearningRate;
+
+            // GaussianSDF
+            _gsResSpin.Value = _settings.GaussianSDFGridResolution;
+            _gsSigmaSpin.Value = _settings.GaussianSDFSigma;
+            _gsIterSpin.Value = _settings.GaussianSDFIterations;
+            _gsIsoSpin.Value = _settings.GaussianSDFIsoLevel;
 
             // TripoSR
             _tripoSRResolution.Value = _settings.TripoSRResolution;
@@ -564,17 +533,19 @@ namespace Deep3DStudio
         {
             // General
             _settings.ImageTo3D = (ImageTo3DModel)_imageTo3DCombo.Active;
-            _settings.ReconstructionMethod = (ReconstructionMethod)_reconstructionCombo.Active;
-            _settings.MeshingAlgo = (MeshingAlgorithm)_meshingModelCombo.Active;
-            _settings.MeshRefinement = (MeshRefinementMethod)_meshRefinementCombo.Active;
-            _settings.MeshExtraction = _settings.MeshingAlgo switch
-            {
-                MeshingAlgorithm.DeepMeshPrior => MeshExtractionMethod.DeepMeshPrior,
-                MeshingAlgorithm.TripoSF => MeshExtractionMethod.TripoSF,
-                _ => MeshExtractionMethod.MarchingCubes
-            };
             _settings.RiggingModel = (RiggingMethod)_riggingCombo.Active;
             _settings.AIDevice = (AIComputeDevice)_computeDeviceCombo.Active;
+
+            // NeRF
+            _settings.NeRFIterations = (int)_nerfIterationsSpin.Value;
+            _settings.VoxelGridSize = (int)_voxelSizeSpin.Value;
+            _settings.NeRFLearningRate = (float)_learningRateSpin.Value;
+
+            // GaussianSDF
+            _settings.GaussianSDFGridResolution = (int)_gsResSpin.Value;
+            _settings.GaussianSDFSigma = (float)_gsSigmaSpin.Value;
+            _settings.GaussianSDFIterations = (int)_gsIterSpin.Value;
+            _settings.GaussianSDFIsoLevel = (float)_gsIsoSpin.Value;
 
             // TripoSR
             _settings.TripoSRResolution = (int)_tripoSRResolution.Value;

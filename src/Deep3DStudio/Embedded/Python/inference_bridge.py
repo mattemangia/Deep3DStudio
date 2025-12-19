@@ -17,11 +17,18 @@ def load_model(model_name, weights_path, device=None):
     if device is None:
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    print(f"Loading {model_name} from {weights_path} on {device}...")
+    abs_path = os.path.abspath(weights_path)
+    print(f"Loading {model_name} from {abs_path} on {device}...")
+
+    if not os.path.exists(weights_path):
+        print(f"Error: Model file does not exist at {abs_path}")
+        return False
 
     try:
         if model_name == 'dust3r':
             from dust3r.model import AsymmetricCroCo3DStereo
+            # Dust3r expects the checkpoint file directly for from_pretrained if it's a local file
+            print(f"Calling AsymmetricCroCo3DStereo.from_pretrained with {weights_path}")
             model = AsymmetricCroCo3DStereo.from_pretrained(weights_path)
             model.to(device)
             model.eval()
