@@ -38,7 +38,7 @@ namespace Deep3DStudio.Model
             string configuredPath = _modelName switch
             {
                 "triposr" => settings.TripoSRModelPath,
-                "triposg" => settings.TripoSGModelPath,
+                "lgm" => settings.LGMModelPath,
                 "triposf" => settings.TripoSFModelPath,
                 "wonder3d" => settings.Wonder3DModelPath,
                 "unirig" => settings.UniRigModelPath,

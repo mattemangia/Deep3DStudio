@@ -136,7 +136,7 @@ namespace Deep3DStudio.UI
                 var expectedFiles = new Dictionary<string, bool>
                 {
                     { "dust3r_weights.pth", false },
-                    { "model_fp16_fixrot.safetensors", false },  // TripoSG weights (LGM model)
+                    { "model_fp16_fixrot.safetensors", false },  // LGM (Large Multi-View Gaussian) weights
                     { "triposf_config.yaml", false },
                     { "triposf_weights.pth", false },
                     { "triposr_config.yaml", false },

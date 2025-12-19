@@ -26,10 +26,10 @@ namespace Deep3DStudio
         private SpinButton _tripoSRResolution;
         private Entry _tripoSRModelPath;
 
-        // TripoSG
-        private SpinButton _tripoSGFlowSteps;
-        private SpinButton _tripoSGResolution;
-        private Entry _tripoSGModelPath;
+        // LGM (Large Multi-View Gaussian Model)
+        private SpinButton _lgmFlowSteps;
+        private SpinButton _lgmResolution;
+        private Entry _lgmModelPath;
 
         // Wonder3D
         private SpinButton _wonder3DSteps;
@@ -69,7 +69,7 @@ namespace Deep3DStudio
             // Add tabs
             notebook.AppendPage(CreateGeneralTab(), new Label("General"));
             notebook.AppendPage(CreateTripoSRTab(), new Label("TripoSR"));
-            notebook.AppendPage(CreateTripoSGTab(), new Label("TripoSG"));
+            notebook.AppendPage(CreateLGMTab(), new Label("LGM"));
             notebook.AppendPage(CreateWonder3DTab(), new Label("Wonder3D"));
             notebook.AppendPage(CreateTripoSFTab(), new Label("TripoSF"));
             notebook.AppendPage(CreateDeepMeshPriorTab(), new Label("DeepMeshPrior"));
@@ -125,7 +125,7 @@ namespace Deep3DStudio
             _imageTo3DCombo = new ComboBoxText();
             _imageTo3DCombo.AppendText("None");
             _imageTo3DCombo.AppendText("TripoSR");
-            _imageTo3DCombo.AppendText("TripoSG");
+            _imageTo3DCombo.AppendText("LGM");
             _imageTo3DCombo.AppendText("Wonder3D");
             grid.Attach(_imageTo3DCombo, 1, row++, 1, 1);
 
@@ -214,7 +214,7 @@ namespace Deep3DStudio
             return grid;
         }
 
-        private Widget CreateTripoSGTab()
+        private Widget CreateLGMTab()
         {
             var grid = new Grid
             {
@@ -227,30 +227,30 @@ namespace Deep3DStudio
 
             int row = 0;
 
-            var header = new Label("<b>TripoSG - High-Quality Image→3D</b>") { UseMarkup = true, Halign = Align.Start };
+            var header = new Label("<b>LGM - Large Multi-View Gaussian Model</b>") { UseMarkup = true, Halign = Align.Start };
             grid.Attach(header, 0, row++, 2, 1);
 
             grid.Attach(new Label("Flow Steps:") { Halign = Align.Start }, 0, row, 1, 1);
-            _tripoSGFlowSteps = new SpinButton(10, 100, 5);
-            grid.Attach(_tripoSGFlowSteps, 1, row++, 1, 1);
+            _lgmFlowSteps = new SpinButton(10, 100, 5);
+            grid.Attach(_lgmFlowSteps, 1, row++, 1, 1);
 
             grid.Attach(new Label("Resolution:") { Halign = Align.Start }, 0, row, 1, 1);
-            _tripoSGResolution = new SpinButton(256, 1024, 128);
-            grid.Attach(_tripoSGResolution, 1, row++, 1, 1);
+            _lgmResolution = new SpinButton(256, 1024, 128);
+            grid.Attach(_lgmResolution, 1, row++, 1, 1);
 
             grid.Attach(new Label("Model Path:") { Halign = Align.Start }, 0, row, 1, 1);
             var pathBox = new Box(Orientation.Horizontal, 5);
-            _tripoSGModelPath = new Entry { WidthChars = 40 };
+            _lgmModelPath = new Entry { WidthChars = 40 };
             var browseBtn = new Button("...");
-            browseBtn.Clicked += (s, e) => BrowseFolder(_tripoSGModelPath);
-            pathBox.PackStart(_tripoSGModelPath, true, true, 0);
+            browseBtn.Clicked += (s, e) => BrowseFolder(_lgmModelPath);
+            pathBox.PackStart(_lgmModelPath, true, true, 0);
             pathBox.PackStart(browseBtn, false, false, 0);
             grid.Attach(pathBox, 1, row++, 1, 1);
 
             row++;
             var info = new Label(
-                "TripoSG uses rectified flow transformers (1.5B params)\n" +
-                "for high-quality single-image 3D reconstruction.\n\n" +
+                "LGM uses Gaussian Splatting for high-quality\n" +
+                "single-image 3D reconstruction.\n\n" +
                 "Flow Steps: More steps = better quality, slower.\n" +
                 "Recommended: 25-50 steps for good balance.")
             {
@@ -530,10 +530,10 @@ namespace Deep3DStudio
             _tripoSRResolution.Value = _settings.TripoSRResolution;
             _tripoSRModelPath.Text = _settings.TripoSRModelPath;
 
-            // TripoSG
-            _tripoSGFlowSteps.Value = _settings.TripoSGFlowSteps;
-            _tripoSGResolution.Value = _settings.TripoSGResolution;
-            _tripoSGModelPath.Text = _settings.TripoSGModelPath;
+            // LGM
+            _lgmFlowSteps.Value = _settings.LGMFlowSteps;
+            _lgmResolution.Value = _settings.LGMResolution;
+            _lgmModelPath.Text = _settings.LGMModelPath;
 
             // Wonder3D
             _wonder3DSteps.Value = _settings.Wonder3DSteps;
@@ -580,10 +580,10 @@ namespace Deep3DStudio
             _settings.TripoSRResolution = (int)_tripoSRResolution.Value;
             _settings.TripoSRModelPath = _tripoSRModelPath.Text;
 
-            // TripoSG
-            _settings.TripoSGFlowSteps = (int)_tripoSGFlowSteps.Value;
-            _settings.TripoSGResolution = (int)_tripoSGResolution.Value;
-            _settings.TripoSGModelPath = _tripoSGModelPath.Text;
+            // LGM
+            _settings.LGMFlowSteps = (int)_lgmFlowSteps.Value;
+            _settings.LGMResolution = (int)_lgmResolution.Value;
+            _settings.LGMModelPath = _lgmModelPath.Text;
 
             // Wonder3D
             _settings.Wonder3DSteps = (int)_wonder3DSteps.Value;

@@ -49,11 +49,11 @@ MODELS = {
         "files": ["tsr/"],
         "requirements": []
     },
-    "triposg": {
-        # TripoSG (Gaussian Splatting) -> LGM
+    "lgm": {
+        # LGM (Large Multi-View Gaussian Model) for Gaussian Splatting
         "repo": "https://github.com/3DTopia/LGM.git",
         "weights": "https://huggingface.co/ashawkey/LGM/resolve/main/model_fp16_fixrot.safetensors",
-        "files": ["core/"], # Will be renamed to lgm in setup
+        "files": ["core/"],
         "target_name": "lgm",
         "requirements": ["diffusers", "kiui"]
     },
@@ -351,7 +351,7 @@ def setup_models(models_dir, python_dir, target_platform):
         elif "weights" in config:
             # Single weight file
             weight_name = f"{name}_weights.pth"
-            if name == "triposg": weight_name = "model_fp16_fixrot.safetensors"
+            if name == "lgm": weight_name = "model_fp16_fixrot.safetensors"
 
             weight_path = os.path.join(models_dir, weight_name)
 

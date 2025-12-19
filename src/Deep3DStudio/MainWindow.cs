@@ -659,9 +659,9 @@ namespace Deep3DStudio
             tripoSRItem.Activated += OnTripoSRGenerate;
             imageTo3DMenu.Append(tripoSRItem);
 
-            var tripoSGItem = new MenuItem("Tripo_SG (High Quality)");
-            tripoSGItem.Activated += OnTripoSGGenerate;
-            imageTo3DMenu.Append(tripoSGItem);
+            var lgmItem = new MenuItem("_LGM (High Quality)");
+            lgmItem.Activated += OnLGMGenerate;
+            imageTo3DMenu.Append(lgmItem);
 
             var wonder3DItem = new MenuItem("_Wonder3D (Multi-View)");
             wonder3DItem.Activated += OnWonder3DGenerate;
@@ -1438,7 +1438,7 @@ namespace Deep3DStudio
             _workflowCombo.AppendText("NeRF (Refined)");
             _workflowCombo.AppendText("Interior Scan");
             _workflowCombo.AppendText("TripoSR (Single Image)");
-            _workflowCombo.AppendText("TripoSG (High Quality)");
+            _workflowCombo.AppendText("LGM (High Quality)");
             _workflowCombo.AppendText("Wonder3D (Multi-View)");
             _workflowCombo.AppendText("Dust3r + DeepMeshPrior");
             _workflowCombo.AppendText("Dust3r + NeRF + DeepMeshPrior");
@@ -1872,16 +1872,16 @@ namespace Deep3DStudio
             RunAIWorkflowAsync(AIModels.WorkflowPipeline.ImageToTripoSR);
         }
 
-        private void OnTripoSGGenerate(object? sender, EventArgs e)
+        private void OnLGMGenerate(object? sender, EventArgs e)
         {
             if (_imagePaths.Count == 0)
             {
-                ShowMessage("No Images", "Please load at least one image for TripoSG generation.");
+                ShowMessage("No Images", "Please load at least one image for LGM generation.");
                 return;
             }
 
-            _statusLabel.Text = "Running TripoSG high-quality 3D generation...";
-            RunAIWorkflowAsync(AIModels.WorkflowPipeline.ImageToTripoSG);
+            _statusLabel.Text = "Running LGM high-quality 3D generation...";
+            RunAIWorkflowAsync(AIModels.WorkflowPipeline.ImageToLGM);
         }
 
         private void OnWonder3DGenerate(object? sender, EventArgs e)
@@ -3446,7 +3446,7 @@ namespace Deep3DStudio
 
                 if (meshingAlgo == MeshingAlgorithm.DeepMeshPrior ||
                     meshingAlgo == MeshingAlgorithm.TripoSF ||
-                    meshingAlgo == MeshingAlgorithm.TripoSG)
+                    meshingAlgo == MeshingAlgorithm.LGM)
                 {
                     bool aiMeshSuccess = await RunAIMeshingAsync(meshingAlgo, "AI Meshing");
                     if (!aiMeshSuccess)
@@ -3562,8 +3562,8 @@ namespace Deep3DStudio
                         Steps = new List<AIModels.WorkflowStep> { AIModels.WorkflowStep.TripoSFRefinement }
                     };
                     break;
-                case MeshingAlgorithm.TripoSG:
-                    pipeline = AIModels.WorkflowPipeline.ImageToTripoSG;
+                case MeshingAlgorithm.LGM:
+                    pipeline = AIModels.WorkflowPipeline.ImageToLGM;
                     break;
                 case MeshingAlgorithm.GaussianSDF:
                     pipeline = new AIModels.WorkflowPipeline
@@ -3664,7 +3664,7 @@ namespace Deep3DStudio
                 case MeshingAlgorithm.Blocky: return new BlockMesher();
                 case MeshingAlgorithm.DeepMeshPrior:
                 case MeshingAlgorithm.TripoSF:
-                case MeshingAlgorithm.TripoSG:
+                case MeshingAlgorithm.LGM:
                     Console.WriteLine($"Meshing algorithm {algo} is AI-driven; falling back to MarchingCubes for geometry extraction.");
                     return new MarchingCubesMesher();
                 case MeshingAlgorithm.MarchingCubes: default: return new MarchingCubesMesher();

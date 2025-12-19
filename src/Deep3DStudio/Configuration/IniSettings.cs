@@ -39,7 +39,7 @@ namespace Deep3DStudio.Configuration
     {
         None,
         TripoSR,
-        TripoSG,
+        LGM,
         Wonder3D
     }
 
@@ -100,9 +100,9 @@ namespace Deep3DStudio.Configuration
         public int TripoSRResolution { get; set; } = 256;
         public int TripoSRMarchingCubesRes { get; set; } = 128;
 
-        // TripoSG Settings
-        public int TripoSGFlowSteps { get; set; } = 25;
-        public int TripoSGQueryResolution { get; set; } = 128;
+        // LGM Settings
+        public int LGMFlowSteps { get; set; } = 25;
+        public int LGMQueryResolution { get; set; } = 128;
 
         // Wonder3D Settings
         public int Wonder3DDiffusionSteps { get; set; } = 50;
@@ -129,7 +129,7 @@ namespace Deep3DStudio.Configuration
 
         // AI Model Paths (relative to app directory or absolute)
         public string TripoSRModelPath { get; set; } = "models/triposr";
-        public string TripoSGModelPath { get; set; } = "models/triposg";
+        public string LGMModelPath { get; set; } = "models/lgm";
         public string Wonder3DModelPath { get; set; } = "models/wonder3d";
         public string UniRigModelPath { get; set; } = "models/unirig";
         public string TripoSFModelPath { get; set; } = "models/triposf";
@@ -137,7 +137,7 @@ namespace Deep3DStudio.Configuration
         // Additional AI Model Settings
         public AIComputeDevice AIDevice { get; set; } = AIComputeDevice.CUDA;
         public bool UseCudaForAI { get => AIDevice == AIComputeDevice.CUDA; set => AIDevice = value ? AIComputeDevice.CUDA : AIComputeDevice.CPU; }
-        public int TripoSGResolution { get; set; } = 512;
+        public int LGMResolution { get; set; } = 512;
         public int Wonder3DSteps { get; set; } = 50;
         public float Wonder3DGuidanceScale { get; set; } = 3.0f;
 
@@ -350,12 +350,12 @@ namespace Deep3DStudio.Configuration
                     writer.WriteLine($"ModelPath={TripoSRModelPath}");
                     writer.WriteLine();
 
-                    // [TripoSG] section
-                    writer.WriteLine("[TripoSG]");
-                    writer.WriteLine($"FlowSteps={TripoSGFlowSteps}");
-                    writer.WriteLine($"QueryResolution={TripoSGQueryResolution}");
-                    writer.WriteLine($"Resolution={TripoSGResolution}");
-                    writer.WriteLine($"ModelPath={TripoSGModelPath}");
+                    // [LGM] section
+                    writer.WriteLine("[LGM]");
+                    writer.WriteLine($"FlowSteps={LGMFlowSteps}");
+                    writer.WriteLine($"QueryResolution={LGMQueryResolution}");
+                    writer.WriteLine($"Resolution={LGMResolution}");
+                    writer.WriteLine($"ModelPath={LGMModelPath}");
                     writer.WriteLine();
 
                     // [Wonder3D] section
@@ -506,13 +506,13 @@ namespace Deep3DStudio.Configuration
             if (TryGetValue("TripoSR", "ModelPath", out string? tsrPath))
                 TripoSRModelPath = tsrPath ?? TripoSRModelPath;
 
-            // [TripoSG]
-            if (TryGetValue("TripoSG", "FlowSteps", out string? tsgFlowStr) && int.TryParse(tsgFlowStr, out var tsgFlow))
-                TripoSGFlowSteps = Math.Clamp(tsgFlow, 10, 100);
-            if (TryGetValue("TripoSG", "QueryResolution", out string? tsgQryStr) && int.TryParse(tsgQryStr, out var tsgQry))
-                TripoSGQueryResolution = Math.Clamp(tsgQry, 64, 256);
-            if (TryGetValue("TripoSG", "ModelPath", out string? tsgPath))
-                TripoSGModelPath = tsgPath ?? TripoSGModelPath;
+            // [LGM]
+            if (TryGetValue("LGM", "FlowSteps", out string? lgmFlowStr) && int.TryParse(lgmFlowStr, out var lgmFlow))
+                LGMFlowSteps = Math.Clamp(lgmFlow, 10, 100);
+            if (TryGetValue("LGM", "QueryResolution", out string? lgmQryStr) && int.TryParse(lgmQryStr, out var lgmQry))
+                LGMQueryResolution = Math.Clamp(lgmQry, 64, 256);
+            if (TryGetValue("LGM", "ModelPath", out string? lgmPath))
+                LGMModelPath = lgmPath ?? LGMModelPath;
 
             // [Wonder3D]
             if (TryGetValue("Wonder3D", "DiffusionSteps", out string? w3dStepsStr) && int.TryParse(w3dStepsStr, out var w3dSteps))
@@ -562,9 +562,9 @@ namespace Deep3DStudio.Configuration
             else if (TryGetValue("AIModels", "UseCuda", out string? useCudaStr) && bool.TryParse(useCudaStr, out var useCuda))
                 AIDevice = useCuda ? AIComputeDevice.CUDA : AIComputeDevice.CPU;
 
-            // [TripoSG] additional settings
-            if (TryGetValue("TripoSG", "Resolution", out string? tsgResStr) && int.TryParse(tsgResStr, out var tsgRes))
-                TripoSGResolution = Math.Clamp(tsgRes, 256, 1024);
+            // [LGM] additional settings
+            if (TryGetValue("LGM", "Resolution", out string? lgmResStr) && int.TryParse(lgmResStr, out var lgmRes))
+                LGMResolution = Math.Clamp(lgmRes, 256, 1024);
 
             // [Wonder3D] additional settings
             if (TryGetValue("Wonder3D", "Steps", out string? w3dSteps2Str) && int.TryParse(w3dSteps2Str, out var w3dSteps2))
@@ -649,10 +649,10 @@ namespace Deep3DStudio.Configuration
             TripoSRMarchingCubesRes = 128;
             TripoSRModelPath = "models/triposr";
 
-            // TripoSG
-            TripoSGFlowSteps = 25;
-            TripoSGQueryResolution = 128;
-            TripoSGModelPath = "models/triposg";
+            // LGM
+            LGMFlowSteps = 25;
+            LGMQueryResolution = 128;
+            LGMModelPath = "models/lgm";
 
             // Wonder3D
             Wonder3DDiffusionSteps = 50;
