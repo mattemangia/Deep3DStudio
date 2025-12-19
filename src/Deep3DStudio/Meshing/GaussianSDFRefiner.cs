@@ -51,12 +51,8 @@ namespace Deep3DStudio.Meshing
                 progressCallback?.Invoke("Computing Signed Distance Field...", 0.2f);
 
                 // 2. Compute SDF (Signed Distance Field)
-                // For each voxel, find distance to nearest triangle.
-                // Optimization: Use a KD-Tree or just Parallel.For if mesh is small enough.
-                // Since we don't have a KD-Tree implementation handy in pure C# without dependencies, we'll use a naive parallel approach
-                // but optimize by checking bounding boxes of triangles first? Or just brute force for now (production ready means working, brute force is reliable but slow).
-                // Actually, for "Academic Production Ready", we should at least try to be somewhat efficient.
-                // Let's use a simple spatial hash or just brute force with Parallel.For which scales okay for moderate meshes.
+                // For each voxel, find distance to the nearest triangle. Without a KD-Tree,
+                // use a parallel brute-force scan, which is adequate for moderate meshes.
 
                 var triangles = new List<(Vector3 p1, Vector3 p2, Vector3 p3)>();
                 for (int i = 0; i < inputMesh.Indices.Count; i += 3)
@@ -77,29 +73,20 @@ namespace Deep3DStudio.Meshing
                             Vector3 p = min + new Vector3(x * step, y * step, z * step);
                             float minDist = float.MaxValue;
 
-                            // Naive check against all triangles
+                            // Brute-force check against all triangles
                             foreach (var tri in triangles)
                             {
                                 float dist = PointToTriangleDistance(p, tri.p1, tri.p2, tri.p3);
                                 if (dist < minDist) minDist = dist;
                             }
 
-                            // Sign calculation is tricky without normals or water-tightness.
-                            // We will assume unsigned distance for smoothing, then subtract iso-level.
-                            // Or use normals if available to determine sign.
-                            // Let's use unsigned distance for robust "wrapping" (Surface Reconstruction).
+                            // Without a reliable inside/outside test, use unsigned distance.
                             sdf[x, y, z] = minDist;
                         }
                     }
                 });
 
-                // Sign correction (optional, if we want to distinguish inside/outside)
-                // For mesh refinement, we often want to reconstruct the surface.
-                // If we treat it as a density field (0 at surface, increasing away), we can smooth it.
-                // But Marching Cubes expects positive/negative crossing.
-                // Let's negate the distance so surface is at 0, and inside is positive? No, usually SDF is negative inside.
-                // Without a solid inside/outside test (ray casting), we might produce a "shell" if we just use distance.
-                // Valid approach: Use normal of closest triangle to determine sign.
+                // Sign correction (optional) uses the closest triangle normal as a heuristic.
 
                 progressCallback?.Invoke("Correcting SDF Signs...", 0.4f);
                  Parallel.For(0, resX, x =>
@@ -151,9 +138,7 @@ namespace Deep3DStudio.Meshing
                 progressCallback?.Invoke("Extracting Refined Mesh...", 0.8f);
 
                 // 4. Extract Mesh (Marching Cubes)
-                // We reuse MarchingCubesMesher logic or implement a simple one.
-                // Since MarchingCubesMesher exists, let's see if we can use it or if it's tied to other structures.
-                // We'll implement a direct MC here to be self-contained and "Production Ready" without risky dependencies.
+                // Use the local extractor to avoid extra dependencies.
 
                 var refinedMesh = ExtractIsoSurface(sdf, resX, resY, resZ, min, step, isoLevel);
 
@@ -177,9 +162,7 @@ namespace Deep3DStudio.Meshing
             }
             for (int i = 0; i < kernel.Length; i++) kernel[i] /= sum;
 
-            // Separable convolution: X, then Y, then Z
-            // Note: For large grids, this is expensive. We'll do a simple 3x3x3 or just X/Y/Z passes.
-            // Let's do 3 passes.
+            // Separable convolution: X, then Y, then Z.
 
             float[,,] temp1 = new float[w, h, d];
             float[,,] temp2 = new float[w, h, d];

@@ -15,8 +15,8 @@ namespace Deep3DStudio.DeepMeshPrior
 
         public static Tensor MeshLaplacianLoss(Tensor pred_pos, int[][] ve, int[][] edges, Device device)
         {
-            // This method seems to contain Python code copy-pasted.
-            // We should use the explicit Laplacian loss implemented below.
+            // Placeholder for an edge-list Laplacian loss; use the explicit Laplacian
+            // implementation until this variant is wired up.
             return torch.tensor(0.0f, device: device);
         }
 

@@ -7,11 +7,12 @@ namespace Deep3DStudio.Meshing
 {
     public class SurfaceNetsMesher : IMesher
     {
-        // Naive Surface Nets:
-        // 1. For each cube, if it contains an edge intersection, create a vertex in the center (or average of intersections).
+        // Basic Surface Nets:
+        // 1. For each cube with an edge intersection, create a vertex at the average of edge crossings.
         // 2. For each edge crossing the surface, create a quad connecting the 4 adjacent cube vertices.
-
-        // This produces a dual mesh compared to Marching Cubes and is generally smoother/more relaxed than MC but retains blocky topology if not smoothed.
+        //
+        // This produces a dual mesh compared to Marching Cubes and is generally smoother than MC,
+        // though it can retain blocky topology without additional smoothing.
 
         public MeshData GenerateMesh(float[,,] densityGrid, Vector3 origin, float voxelSize, float isoLevel)
         {
@@ -46,7 +47,7 @@ namespace Deep3DStudio.Meshing
                         if (mask != 0 && mask != 255) // Surface intersects this cell
                         {
                             // Calculate vertex position as average of all edge crossing points
-                            // This produces smoother results than naive center placement
+                            // Averaging edge crossings produces smoother results than center placement.
                             Vector3 avgPos = Vector3.Zero;
                             int count = 0;
 
