@@ -102,12 +102,17 @@ def load_model(model_name, weights_path, device=None):
         return False
 
 def infer_dust3r(images_bytes_list):
+    print(f"[Bridge] Starting Dust3r inference with {len(images_bytes_list)} images...")
     model = loaded_models.get('dust3r')
-    if not model: return []
+    if not model:
+        print("[Bridge] Dust3r model not loaded!")
+        return []
 
     from dust3r.inference import inference
 
     pil_images = [Image.open(io.BytesIO(b)).convert('RGB') for b in images_bytes_list]
+    print(f"[Bridge] Images loaded. Sizes: {[img.size for img in pil_images]}")
+
     processed_images = []
     for img in pil_images:
         w, h = img.size
@@ -119,6 +124,7 @@ def infer_dust3r(images_bytes_list):
 
     try:
         device = next(model.parameters()).device
+        print(f"[Bridge] Running Dust3r inference on {device}...")
         preds, preds_all = inference( [(processed_images, model)], batch_size=1, device=device )
         scene = preds[0]
 
@@ -132,204 +138,279 @@ def infer_dust3r(images_bytes_list):
             valid_pts = pts[mask]
             valid_colors = img_np[mask]
 
+            print(f"[Bridge] Image {i}: {len(valid_pts)} valid points (conf > 1.2)")
+
             results.append({
                 'vertices': valid_pts.astype(np.float32),
                 'colors': valid_colors.astype(np.float32),
                 'faces': np.array([], dtype=np.int32),
                 'confidence': conf[mask].flatten().astype(np.float32)
             })
+        print(f"[Bridge] Dust3r inference complete. Returned {len(results)} results.")
 
     except Exception as e:
-        print(f"Dust3r Inference Error: {e}")
+        print(f"[Bridge] Dust3r Inference Error: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
     return results
 
 def infer_triposr(image_bytes, resolution=256, mc_resolution=128):
+    print(f"[Bridge] Starting TripoSR inference (res={resolution}, mc_res={mc_resolution})...")
     model = loaded_models.get('triposr')
-    if not model: return None
+    if not model:
+        print("[Bridge] TripoSR model not loaded!")
+        return None
 
-    img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
     try:
-        from rembg import remove
-        img = remove(img)
-    except: pass
+        img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        print(f"[Bridge] Input image size: {img.size}")
 
-    # Use configured resolution for input
-    img = img.resize((resolution, resolution))
-    device = next(model.parameters()).device
+        try:
+            from rembg import remove
+            print("[Bridge] Removing background with rembg...")
+            img = remove(img)
+        except Exception as e:
+            print(f"[Bridge] Rembg failed or missing: {e}")
 
-    with torch.no_grad():
-        scene_codes = model(img, device=device)
-        mesh = model.extract_mesh(scene_codes, resolution=mc_resolution)[0]
+        # Use configured resolution for input
+        img = img.resize((resolution, resolution))
+        device = next(model.parameters()).device
+        print(f"[Bridge] Running inference on {device}...")
 
-        vertices = mesh.vertices
-        faces = mesh.faces
-        if hasattr(mesh.visual, 'vertex_colors'):
-            colors = mesh.visual.vertex_colors[:, :3] / 255.0
-        else:
-            colors = np.ones_like(vertices) * 0.5
+        with torch.no_grad():
+            scene_codes = model(img, device=device)
+            mesh = model.extract_mesh(scene_codes, resolution=mc_resolution)[0]
 
-    return {
-        'vertices': vertices.astype(np.float32),
-        'faces': faces.astype(np.int32),
-        'colors': colors.astype(np.float32)
-    }
+            vertices = mesh.vertices
+            faces = mesh.faces
+            if hasattr(mesh.visual, 'vertex_colors'):
+                colors = mesh.visual.vertex_colors[:, :3] / 255.0
+            else:
+                colors = np.ones_like(vertices) * 0.5
+
+        print(f"[Bridge] TripoSR complete. Vertices: {len(vertices)}, Faces: {len(faces)}")
+
+        return {
+            'vertices': vertices.astype(np.float32),
+            'faces': faces.astype(np.int32),
+            'colors': colors.astype(np.float32)
+        }
+    except Exception as e:
+        print(f"[Bridge] TripoSR Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 def infer_triposf(image_bytes, resolution=512):
     # TripoSF (Feed Forward) using TSR architecture
+    print(f"[Bridge] Starting TripoSF inference (res={resolution})...")
     model = loaded_models.get('triposf')
-    if not model: return None
+    if not model:
+        print("[Bridge] TripoSF model not loaded!")
+        return None
 
-    img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
     try:
-        from rembg import remove
-        img = remove(img)
-    except: pass
+        img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        print(f"[Bridge] Input image size: {img.size}")
 
-    # Use configured resolution
-    img = img.resize((resolution, resolution))
-    device = next(model.parameters()).device
+        try:
+            from rembg import remove
+            img = remove(img)
+        except: pass
 
-    with torch.no_grad():
-        scene_codes = model(img, device=device)
-        mesh = model.extract_mesh(scene_codes, resolution=resolution)[0]
-        vertices = mesh.vertices
-        faces = mesh.faces
-        if hasattr(mesh.visual, 'vertex_colors'):
-            colors = mesh.visual.vertex_colors[:, :3] / 255.0
-        else:
-            colors = np.ones_like(vertices) * 0.5
+        # Use configured resolution
+        img = img.resize((resolution, resolution))
+        device = next(model.parameters()).device
+        print(f"[Bridge] Running inference on {device}...")
 
-    return {
-        'vertices': vertices.astype(np.float32),
-        'faces': faces.astype(np.int32),
-        'colors': colors.astype(np.float32)
-    }
+        with torch.no_grad():
+            scene_codes = model(img, device=device)
+            mesh = model.extract_mesh(scene_codes, resolution=resolution)[0]
+            vertices = mesh.vertices
+            faces = mesh.faces
+            if hasattr(mesh.visual, 'vertex_colors'):
+                colors = mesh.visual.vertex_colors[:, :3] / 255.0
+            else:
+                colors = np.ones_like(vertices) * 0.5
+
+        print(f"[Bridge] TripoSF complete. Vertices: {len(vertices)}, Faces: {len(faces)}")
+
+        return {
+            'vertices': vertices.astype(np.float32),
+            'faces': faces.astype(np.int32),
+            'colors': colors.astype(np.float32)
+        }
+    except Exception as e:
+        print(f"[Bridge] TripoSF Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 def infer_lgm(image_bytes, resolution=512, flow_steps=25):
+    print(f"[Bridge] Starting LGM inference (res={resolution}, steps={flow_steps})...")
     model = loaded_models.get('lgm')
-    if not model: return None
+    if not model:
+        print("[Bridge] LGM model not loaded!")
+        return None
 
-    img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-    device = next(model.parameters()).device
+    try:
+        img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        print(f"[Bridge] Input image size: {img.size}")
+        device = next(model.parameters()).device
 
-    # Preprocess for LGM: Use configured resolution, normalized
-    img = img.resize((resolution, resolution))
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-    ])
-    img_tensor = transform(img).unsqueeze(0).to(device)
+        # Preprocess for LGM: Use configured resolution, normalized
+        img = img.resize((resolution, resolution))
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+        ])
+        img_tensor = transform(img).unsqueeze(0).to(device)
+        print(f"[Bridge] Running inference on {device}...")
 
-    with torch.no_grad():
-        # LGM inference with flow steps if supported
-        if hasattr(model, 'forward') and 'num_steps' in model.forward.__code__.co_varnames:
-            gaussians = model(img_tensor, num_steps=flow_steps)
-        else:
-            gaussians = model(img_tensor)
-
-        if 'means3D' in gaussians:
-            means = gaussians['means3D'].squeeze(0).cpu().numpy()
-            if 'rgb' in gaussians:
-                colors = gaussians['rgb'].squeeze(0).cpu().numpy()
+        with torch.no_grad():
+            # LGM inference with flow steps if supported
+            if hasattr(model, 'forward') and 'num_steps' in model.forward.__code__.co_varnames:
+                gaussians = model(img_tensor, num_steps=flow_steps)
             else:
-                colors = np.ones_like(means) * 0.5
-        else:
-            means = np.zeros((1,3), dtype=np.float32)
-            colors = np.zeros((1,3), dtype=np.float32)
+                gaussians = model(img_tensor)
 
-        vertices = means
-        faces = np.array([], dtype=np.int32)
+            if 'means3D' in gaussians:
+                means = gaussians['means3D'].squeeze(0).cpu().numpy()
+                if 'rgb' in gaussians:
+                    colors = gaussians['rgb'].squeeze(0).cpu().numpy()
+                else:
+                    colors = np.ones_like(means) * 0.5
+            else:
+                print("[Bridge] Warning: No means3D in output")
+                means = np.zeros((1,3), dtype=np.float32)
+                colors = np.zeros((1,3), dtype=np.float32)
 
-    return {
-        'vertices': vertices.astype(np.float32),
-        'faces': faces.astype(np.int32),
-        'colors': colors.astype(np.float32)
-    }
+            vertices = means
+            faces = np.array([], dtype=np.int32)
+
+        print(f"[Bridge] LGM complete. Generated {len(vertices)} Gaussians (points).")
+
+        return {
+            'vertices': vertices.astype(np.float32),
+            'faces': faces.astype(np.int32),
+            'colors': colors.astype(np.float32)
+        }
+    except Exception as e:
+        print(f"[Bridge] LGM Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 def infer_wonder3d(image_bytes, num_steps=50, guidance_scale=3.0):
+    print(f"[Bridge] Starting Wonder3D inference (steps={num_steps}, scale={guidance_scale})...")
     model = loaded_models.get('wonder3d')
-    if not model: return None
+    if not model:
+        print("[Bridge] Wonder3D model not loaded!")
+        return None
 
-    img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+    try:
+        img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        print(f"[Bridge] Input image size: {img.size}")
 
-    with torch.no_grad():
-        batch = model(img, num_inference_steps=num_steps, guidance_scale=guidance_scale, output_type='pt')
-        images = batch.images[0].permute(0, 2, 3, 1).cpu().numpy()
+        with torch.no_grad():
+            batch = model(img, num_inference_steps=num_steps, guidance_scale=guidance_scale, output_type='pt')
+            images = batch.images[0].permute(0, 2, 3, 1).cpu().numpy()
+            print(f"[Bridge] Generated multi-view images shape: {images.shape}")
 
-        vertices = []
-        colors = []
+            vertices = []
+            colors = []
 
-        rots = [
-            np.eye(3),
-            np.array([[0,0,-1],[0,1,0],[1,0,0]]),
-            np.array([[-1,0,0],[0,1,0],[0,0,-1]]),
-            np.array([[0,0,1],[0,1,0],[-1,0,0]]),
-            np.array([[1,0,0],[0,0,1],[0,-1,0]]),
-            np.array([[1,0,0],[0,0,-1],[0,1,0]])
-        ]
+            rots = [
+                np.eye(3),
+                np.array([[0,0,-1],[0,1,0],[1,0,0]]),
+                np.array([[-1,0,0],[0,1,0],[0,0,-1]]),
+                np.array([[0,0,1],[0,1,0],[-1,0,0]]),
+                np.array([[1,0,0],[0,0,1],[0,-1,0]]),
+                np.array([[1,0,0],[0,0,-1],[0,1,0]])
+            ]
 
-        for v in range(6):
-            img_v = images[v]
-            H, W, _ = img_v.shape
-            grid_y, grid_x = np.mgrid[:H, :W]
-            u = (grid_x - W/2) / (W/2)
-            v_ = (grid_y - H/2) / (H/2)
-            z = np.ones_like(u) * 0.0
+            for v in range(6):
+                img_v = images[v]
+                H, W, _ = img_v.shape
+                grid_y, grid_x = np.mgrid[:H, :W]
+                u = (grid_x - W/2) / (W/2)
+                v_ = (grid_y - H/2) / (H/2)
+                z = np.ones_like(u) * 0.0
 
-            pts = np.stack([u, v_, z], axis=-1).reshape(-1, 3)
-            pts = pts @ rots[v].T
-            col = img_v.reshape(-1, 3)
+                pts = np.stack([u, v_, z], axis=-1).reshape(-1, 3)
+                pts = pts @ rots[v].T
+                col = img_v.reshape(-1, 3)
 
-            vertices.append(pts)
-            colors.append(col)
+                vertices.append(pts)
+                colors.append(col)
 
-        all_verts = np.concatenate(vertices, axis=0)
-        all_cols = np.concatenate(colors, axis=0)
+            all_verts = np.concatenate(vertices, axis=0)
+            all_cols = np.concatenate(colors, axis=0)
 
-        idx = np.random.choice(len(all_verts), min(len(all_verts), 100000), replace=False)
+            target_count = 100000
+            idx = np.random.choice(len(all_verts), min(len(all_verts), target_count), replace=False)
 
-    return {
-        'vertices': all_verts[idx].astype(np.float32),
-        'faces': np.array([], dtype=np.int32),
-        'colors': all_cols[idx].astype(np.float32)
-    }
+            print(f"[Bridge] Wonder3D complete. Sampled {len(idx)} points from views.")
+
+        return {
+            'vertices': all_verts[idx].astype(np.float32),
+            'faces': np.array([], dtype=np.int32),
+            'colors': all_cols[idx].astype(np.float32)
+        }
+    except Exception as e:
+        print(f"[Bridge] Wonder3D Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 def infer_unirig_mesh_bytes(vertices_bytes, faces_bytes, max_joints=64):
+    print(f"[Bridge] Starting UniRig inference (max_joints={max_joints})...")
     model = loaded_models.get('unirig')
-    if not model: return None
+    if not model:
+        print("[Bridge] UniRig model not loaded!")
+        return None
 
-    vertices = np.frombuffer(vertices_bytes, dtype=np.float32).reshape(-1, 3)
-    faces = np.frombuffer(faces_bytes, dtype=np.int32).reshape(-1, 3)
+    try:
+        vertices = np.frombuffer(vertices_bytes, dtype=np.float32).reshape(-1, 3)
+        faces = np.frombuffer(faces_bytes, dtype=np.int32).reshape(-1, 3)
+        print(f"[Bridge] Input mesh: {len(vertices)} vertices, {len(faces)} faces")
 
-    device = next(model.parameters()).device
-    verts_t = torch.tensor(vertices, dtype=torch.float32).unsqueeze(0).to(device)
-    faces_t = torch.tensor(faces, dtype=torch.int32).unsqueeze(0).to(device)
+        device = next(model.parameters()).device
+        verts_t = torch.tensor(vertices, dtype=torch.float32).unsqueeze(0).to(device)
+        faces_t = torch.tensor(faces, dtype=torch.int32).unsqueeze(0).to(device)
 
-    with torch.no_grad():
-        # Pass max_joints if model supports it
-        if hasattr(model, 'forward') and 'max_joints' in model.forward.__code__.co_varnames:
-            output = model(verts_t, faces_t, max_joints=max_joints)
-        else:
-            output = model(verts_t, faces_t)
+        with torch.no_grad():
+            # Pass max_joints if model supports it
+            if hasattr(model, 'forward') and 'max_joints' in model.forward.__code__.co_varnames:
+                output = model(verts_t, faces_t, max_joints=max_joints)
+            else:
+                output = model(verts_t, faces_t)
 
-        joints = output['joints'][0].cpu().numpy()
-        parents = output['parents'][0].cpu().numpy()
-        weights = output['weights'][0].cpu().numpy()
+            joints = output['joints'][0].cpu().numpy()
+            parents = output['parents'][0].cpu().numpy()
+            weights = output['weights'][0].cpu().numpy()
 
-        # Limit to max_joints if needed
-        if len(joints) > max_joints:
-            joints = joints[:max_joints]
-            parents = parents[:max_joints]
-            weights = weights[:, :max_joints]
+            # Limit to max_joints if needed
+            if len(joints) > max_joints:
+                joints = joints[:max_joints]
+                parents = parents[:max_joints]
+                weights = weights[:, :max_joints]
 
-    return {
-        'joint_positions': joints.astype(np.float32),
-        'parent_indices': parents.astype(np.int32),
-        'skinning_weights': weights.astype(np.float32),
-        'joint_names': [f"Joint_{i}" for i in range(len(joints))]
-    }
+        print(f"[Bridge] UniRig complete. Generated {len(joints)} joints.")
+
+        return {
+            'joint_positions': joints.astype(np.float32),
+            'parent_indices': parents.astype(np.int32),
+            'skinning_weights': weights.astype(np.float32),
+            'joint_names': [f"Joint_{i}" for i in range(len(joints))]
+        }
+    except Exception as e:
+        print(f"[Bridge] UniRig Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 def infer_unirig(image_bytes):
     return None
