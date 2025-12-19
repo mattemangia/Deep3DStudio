@@ -3293,17 +3293,32 @@ namespace Deep3DStudio
         private async Task<bool> RunPointCloudGeneration()
         {
             var settings = IniSettings.Instance;
-            bool requiresMultiView = settings.ReconstructionMethod == ReconstructionMethod.Dust3r ||
-                                     settings.ReconstructionMethod == ReconstructionMethod.FeatureMatching;
+
+            // Determine effective method from Workflow Combo
+            ReconstructionMethod method = settings.ReconstructionMethod;
+            string workflow = _workflowCombo.ActiveText;
+
+            if (!string.IsNullOrEmpty(workflow))
+            {
+                if (workflow.Contains("TripoSR")) method = ReconstructionMethod.TripoSR;
+                else if (workflow.Contains("Wonder3D")) method = ReconstructionMethod.Wonder3D;
+                else if (workflow.Contains("Dust3r")) method = ReconstructionMethod.Dust3r;
+            }
+
+            // Special check for LGM workflow to allow single image pass-through (handled in Meshing phase)
+            bool isLGM = !string.IsNullOrEmpty(workflow) && workflow.Contains("LGM");
+
+            bool requiresMultiView = !isLGM && (method == ReconstructionMethod.Dust3r ||
+                                     method == ReconstructionMethod.FeatureMatching);
             int minImages = requiresMultiView ? 2 : 1;
 
             if (_imagePaths.Count < minImages)
             {
-                ShowMessage($"Please add at least {minImages} image{(minImages > 1 ? "s" : "")} for {settings.ReconstructionMethod}.");
+                ShowMessage($"Please add at least {minImages} image{(minImages > 1 ? "s" : "")} for {method}.");
                 return false;
             }
 
-            _statusLabel.Text = $"Estimating Geometry ({settings.ReconstructionMethod}) on {settings.Device}...";
+            _statusLabel.Text = $"Estimating Geometry ({method}) on {settings.Device}...";
 
             while (Application.EventsPending()) Application.RunIteration();
 
@@ -3311,7 +3326,14 @@ namespace Deep3DStudio
             {
                 SceneResult result = new SceneResult();
 
-                switch (settings.ReconstructionMethod)
+                // If LGM, we skip point generation here as it happens in RunMeshing (ImageToLGM pipeline)
+                if (isLGM)
+                {
+                    _statusLabel.Text = "LGM Workflow selected. Point cloud generation step skipped (handled in Meshing).";
+                    return true;
+                }
+
+                switch (method)
                 {
                     case ReconstructionMethod.Dust3r:
                         if (!_inference.IsLoaded)
@@ -3428,7 +3450,10 @@ namespace Deep3DStudio
 
         private async Task RunMeshing()
         {
-            if (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0)
+            string workflow = _workflowCombo.ActiveText;
+            bool isLGM = !string.IsNullOrEmpty(workflow) && workflow.Contains("LGM");
+
+            if (!isLGM && (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0))
             {
                 // Try to build result from current scene if possible?
                 // For now, require point cloud generation first
@@ -3436,13 +3461,16 @@ namespace Deep3DStudio
                 return;
             }
 
-            string workflow = _workflowCombo.ActiveText;
             _statusLabel.Text = $"Meshing ({workflow})...";
             while (Application.EventsPending()) Application.RunIteration();
 
             try
             {
                 var meshingAlgo = IniSettings.Instance.MeshingAlgo;
+
+                // Override if workflow implies a specific AI method
+                if (isLGM) meshingAlgo = MeshingAlgorithm.LGM;
+
                 if ((meshingAlgo == MeshingAlgorithm.DeepMeshPrior || meshingAlgo == MeshingAlgorithm.TripoSF) &&
                     (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0))
                 {
