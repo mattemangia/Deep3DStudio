@@ -101,7 +101,7 @@ namespace Deep3DStudio.Model.AIModels
     }
 
     /// <summary>
-    /// Interface for image-to-3D models (TripoSR, TripoSG, Wonder3D).
+    /// Interface for image-to-3D models (TripoSR, LGM, Wonder3D).
     /// </summary>
     public interface IImageTo3DModel : IAIModelInference
     {

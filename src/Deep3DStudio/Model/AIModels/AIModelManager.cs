@@ -18,7 +18,7 @@ namespace Deep3DStudio.Model.AIModels
         Dust3rReconstruction,
         SfMReconstruction,
         TripoSRGeneration,
-        TripoSGGeneration,
+        LGMGeneration,
         Wonder3DGeneration,
         TripoSFRefinement,
         DeepMeshPriorRefinement,
@@ -64,11 +64,11 @@ namespace Deep3DStudio.Model.AIModels
             Steps = new List<WorkflowStep> { WorkflowStep.LoadImages, WorkflowStep.TripoSRGeneration }
         };
 
-         public static WorkflowPipeline ImageToTripoSG => new()
+         public static WorkflowPipeline ImageToLGM => new()
         {
-            Name = "Image -> TripoSG -> Mesh",
-            Description = "Single image to 3D using TripoSG",
-            Steps = new List<WorkflowStep> { WorkflowStep.LoadImages, WorkflowStep.TripoSGGeneration }
+            Name = "Image -> LGM -> Mesh",
+            Description = "Single image to 3D using LGM (Large Multi-View Gaussian Model)",
+            Steps = new List<WorkflowStep> { WorkflowStep.LoadImages, WorkflowStep.LGMGeneration }
         };
 
         public static WorkflowPipeline ImageToWonder3D => new()
@@ -139,7 +139,7 @@ namespace Deep3DStudio.Model.AIModels
         {
             ImageToDust3rToMesh,
             ImageToTripoSR,
-            ImageToTripoSG,
+            ImageToLGM,
             ImageToWonder3D,
             Dust3rToDeepMeshPrior,
             Dust3rToNeRFToMesh,
@@ -155,7 +155,7 @@ namespace Deep3DStudio.Model.AIModels
 
         private TripoSRInference? _tripoSR;
         private TripoSFInference? _tripoSF;
-        private TripoSGInference? _tripoSG;
+        private LGMInference? _lgm;
         private Wonder3DInference? _wonder3D;
         private UniRigInference? _uniRig;
         private Dust3rInference? _dust3r;
@@ -169,7 +169,7 @@ namespace Deep3DStudio.Model.AIModels
 
         public TripoSRInference? TripoSR => _tripoSR ??= new TripoSRInference();
         public TripoSFInference? TripoSF => _tripoSF ??= new TripoSFInference();
-        public TripoSGInference? TripoSG => _tripoSG ??= new TripoSGInference();
+        public LGMInference? LGM => _lgm ??= new LGMInference();
         public Wonder3DInference? Wonder3D => _wonder3D ??= new Wonder3DInference();
         public UniRigInference? UniRig => _uniRig ??= new UniRigInference();
         public Dust3rInference? Dust3r => _dust3r ??= new Dust3rInference();
@@ -189,7 +189,7 @@ namespace Deep3DStudio.Model.AIModels
                     switch (model)
                     {
                         case ImageTo3DModel.TripoSR: mesh = TripoSR?.GenerateFromImage(imagePath); break;
-                        case ImageTo3DModel.TripoSG: mesh = TripoSG?.GenerateFromImage(imagePath); break;
+                        case ImageTo3DModel.LGM: mesh = LGM?.GenerateFromImage(imagePath); break;
                         case ImageTo3DModel.Wonder3D: mesh = Wonder3D?.GenerateFromImage(imagePath); break;
                     }
 
@@ -243,9 +243,9 @@ namespace Deep3DStudio.Model.AIModels
                                 currentResult = await GenerateFromSingleImageAsync(imagePaths[0], ImageTo3DModel.TripoSR);
                             break;
 
-                        case WorkflowStep.TripoSGGeneration:
+                        case WorkflowStep.LGMGeneration:
                             if (imagePaths != null && imagePaths.Count > 0)
-                                currentResult = await GenerateFromSingleImageAsync(imagePaths[0], ImageTo3DModel.TripoSG);
+                                currentResult = await GenerateFromSingleImageAsync(imagePaths[0], ImageTo3DModel.LGM);
                             break;
 
                         case WorkflowStep.Wonder3DGeneration:
@@ -310,7 +310,7 @@ namespace Deep3DStudio.Model.AIModels
         {
             _tripoSR?.Dispose(); _tripoSR = null;
             _tripoSF?.Dispose(); _tripoSF = null;
-            _tripoSG?.Dispose(); _tripoSG = null;
+            _lgm?.Dispose(); _lgm = null;
             _wonder3D?.Dispose(); _wonder3D = null;
             _uniRig?.Dispose(); _uniRig = null;
             _dust3r?.Dispose(); _dust3r = null;

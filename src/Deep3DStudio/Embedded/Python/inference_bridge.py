@@ -46,8 +46,8 @@ def load_model(model_name, weights_path, device=None):
             model.eval()
             loaded_models[model_name] = model
 
-        elif model_name == 'triposg':
-             # LGM for Gaussian Splatting
+        elif model_name == 'lgm':
+             # LGM (Large Multi-View Gaussian Model) for Gaussian Splatting
              from lgm.models import LGM
              try:
                  # Try loading assuming it matches the extension handling or internal logic
@@ -200,8 +200,8 @@ def infer_triposf(image_bytes, resolution=512):
         'colors': colors.astype(np.float32)
     }
 
-def infer_triposg(image_bytes, resolution=512, flow_steps=25):
-    model = loaded_models.get('triposg')
+def infer_lgm(image_bytes, resolution=512, flow_steps=25):
+    model = loaded_models.get('lgm')
     if not model: return None
 
     img = Image.open(io.BytesIO(image_bytes)).convert('RGB')

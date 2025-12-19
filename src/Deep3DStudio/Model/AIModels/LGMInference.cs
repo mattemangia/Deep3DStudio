@@ -7,9 +7,9 @@ using OpenTK.Mathematics;
 
 namespace Deep3DStudio.Model.AIModels
 {
-    public class TripoSGInference : BasePythonInference
+    public class LGMInference : BasePythonInference
     {
-        public TripoSGInference() : base("triposg") { }
+        public LGMInference() : base("lgm") { }
 
         public MeshData GenerateFromImage(string imagePath)
         {
@@ -23,13 +23,13 @@ namespace Deep3DStudio.Model.AIModels
 
                 // Get settings for model parameters
                 var settings = IniSettings.Instance;
-                int resolution = settings.TripoSGResolution;
-                int flowSteps = settings.TripoSGFlowSteps;
+                int resolution = settings.LGMResolution;
+                int flowSteps = settings.LGMFlowSteps;
 
                 PythonService.Instance.ExecuteWithGIL((scope) =>
                 {
                     // Pass configured parameters to Python
-                    dynamic output = _bridgeModule.infer_triposg(
+                    dynamic output = _bridgeModule.infer_lgm(
                         imgBytes.ToPython(),
                         resolution,
                         flowSteps
@@ -57,7 +57,7 @@ namespace Deep3DStudio.Model.AIModels
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"TripoSG Inference failed: {ex.Message}");
+                Console.WriteLine($"LGM Inference failed: {ex.Message}");
             }
             return mesh;
         }

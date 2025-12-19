@@ -49,11 +49,11 @@ MODELS = {
         "files": ["tsr/"],
         "requirements": []
     },
-    "triposg": {
-        # TripoSG (Gaussian Splatting) -> LGM
+    "lgm": {
+        # LGM (Large Multi-View Gaussian Model) for Gaussian Splatting
         "repo": "https://github.com/3DTopia/LGM.git",
         "weights": "https://huggingface.co/ashawkey/LGM/resolve/main/model_fp16_fixrot.safetensors",
-        "files": ["core/"], # Will be renamed to lgm in setup
+        "files": ["core/"],
         "target_name": "lgm",
         "requirements": ["diffusers", "kiui"]
     },
@@ -136,25 +136,20 @@ def setup_python_embed(target_dir, target_platform):
         if os.path.exists(python_exe):
             os.chmod(python_exe, 0o755)
 
-    # Enable site-packages in python._pth if it exists (common in embedded builds)
-    for item in os.listdir(python_root):
-        if item.endswith("._pth"):
-            pth_file = os.path.join(python_root, item)
-            print(f"Modifying {item} to enable site-packages...")
-            try:
-                with open(pth_file, "r") as f:
-                    content = f.read()
+    # Determine site-packages path for this platform
+    if "win" in target_platform:
+        site_packages = os.path.join(python_root, "Lib", "site-packages")
+    else:
+        lib_dir = os.path.join(python_root, "lib")
+        py_dirs = [d for d in os.listdir(lib_dir) if d.startswith("python")] if os.path.exists(lib_dir) else []
+        if py_dirs:
+            site_packages = os.path.join(lib_dir, py_dirs[0], "site-packages")
+        else:
+            site_packages = os.path.join(lib_dir, "python3.10", "site-packages")
 
-                # Uncomment 'import site' if present, or ensure it's there
-                if "#import site" in content:
-                    content = content.replace("#import site", "import site")
-                elif "import site" not in content:
-                    content += "\nimport site"
-
-                with open(pth_file, "w") as f:
-                    f.write(content)
-            except Exception as e:
-                print(f"Warning: Failed to modify {item}: {e}")
+    if not os.path.exists(site_packages):
+        os.makedirs(site_packages)
+    print(f"Target site-packages: {site_packages}")
 
     # Determine execution mode (Native vs Cross-Install)
     host_os = platform.system().lower()
@@ -199,13 +194,15 @@ def setup_python_embed(target_dir, target_platform):
             print(f"Pip install failed: {e}")
             return False
 
-        print(f"Installing libraries: {', '.join(reqs_list)}")
+        print(f"Installing libraries to {site_packages}...")
+        print(f"Libraries: {', '.join(reqs_list)}")
         try:
-            # Use --ignore-installed to force install into embedded env even if
-            # packages exist in system Python. Use --no-user to prevent user site-packages.
+            # Use --target to FORCE installation to embedded site-packages
+            # This bypasses any system Python detection completely
             subprocess.check_call([
                 python_exe, "-m", "pip", "install",
-                "--ignore-installed",
+                "--target", site_packages,
+                "--upgrade",
                 "--no-user",
                 "--no-warn-script-location"
             ] + reqs_list, env=clean_env)
@@ -267,6 +264,26 @@ def setup_python_embed(target_dir, target_platform):
             print(f"Cross-install failed: {e}")
             print("Note: Cross-installation requires that all packages have binary wheels available for the target platform.")
             return False
+
+    # AFTER installation: Configure python._pth for runtime isolation
+    # This ensures the embedded Python doesn't see system packages when running
+    print("Configuring Python for runtime isolation...")
+    for item in os.listdir(python_root):
+        if item.endswith("._pth"):
+            pth_file = os.path.join(python_root, item)
+            print(f"  Configuring {item}...")
+            try:
+                # Write isolated paths - NO "import site" to prevent system Python interference
+                if "win" in target_platform:
+                    pth_content = "python310.zip\nLib\nDLLs\nLib\\site-packages\n.\n"
+                else:
+                    # Unix uses different path structure
+                    pth_content = "lib/python3.10\nlib/python3.10/lib-dynload\nlib/python3.10/site-packages\n.\n"
+                with open(pth_file, "w") as f:
+                    f.write(pth_content)
+                print(f"  Written isolated paths to {item}")
+            except Exception as e:
+                print(f"Warning: Failed to modify {item}: {e}")
 
     if os.path.exists(archive_path): os.remove(archive_path)
 
@@ -334,7 +351,7 @@ def setup_models(models_dir, python_dir, target_platform):
         elif "weights" in config:
             # Single weight file
             weight_name = f"{name}_weights.pth"
-            if name == "triposg": weight_name = "model_fp16_fixrot.safetensors"
+            if name == "lgm": weight_name = "model_fp16_fixrot.safetensors"
 
             weight_path = os.path.join(models_dir, weight_name)
 

@@ -21,7 +21,7 @@ namespace Deep3DStudio.Configuration
         Blocky,
         DeepMeshPrior,
         TripoSF,
-        TripoSG,
+        LGM,
         GaussianSDF
     }
 
