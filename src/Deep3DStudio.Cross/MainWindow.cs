@@ -339,12 +339,15 @@ namespace Deep3DStudio
                 }
 
                 _viewport.Render((int)vpX, (int)vpY, (int)vpW, (int)vpH, ClientSize.X, ClientSize.Y);
+                CheckError("After Viewport");
 
                 // Render UI
                 RenderUI();
             }
 
+            CheckError("Before ImGui");
             _controller.Render();
+            CheckError("After ImGui");
 
             // Check for OpenGL errors
             var err = GL.GetError();
@@ -354,6 +357,15 @@ namespace Deep3DStudio
             }
 
             SwapBuffers();
+        }
+
+        private void CheckError(string stage)
+        {
+            var err = GL.GetError();
+            if (err != OpenTK.Graphics.OpenGL.ErrorCode.NoError && err != OpenTK.Graphics.OpenGL.ErrorCode.InvalidFramebufferOperation)
+            {
+                Console.WriteLine($"OpenGL Error at MainWindow {stage}: {err}");
+            }
         }
 
         protected override void OnUnload()
@@ -835,7 +847,7 @@ namespace Deep3DStudio
                 var size = new System.Numerics.Vector2(28, 28);
 
                 // Focus
-                if (ImGui.ImageButton("##Focus", _iconFactory.GetIcon(IconType.Select), size))
+                if (ImGui.ImageButton("##Focus", _iconFactory.GetIcon(IconType.Focus), size))
                     _viewport.FocusOnSelection();
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Focus on Selection (F)");
 
