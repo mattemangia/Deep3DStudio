@@ -188,26 +188,32 @@ namespace Deep3DStudio.Viewport
         private int CreateIcon(SKColor bg, Action<SKCanvas, int, int> drawAction)
         {
             int size = 64;
-            using (var bitmap = new SKBitmap(size, size, SKColorType.Rgba8888, SKAlphaType.Premul))
+            // Use BGRA8888 which is the native format on most platforms
+            using (var bitmap = new SKBitmap(size, size, SKColorType.Bgra8888, SKAlphaType.Premul))
             using (var canvas = new SKCanvas(bitmap))
             {
                 canvas.Clear(SKColors.Transparent);
 
-                // Draw simple background shape or keep transparent
-                // drawAction should draw white/colored icon content
-
+                // Draw icon content
                 drawAction(canvas, size, size);
 
-                // Upload
+                // Upload texture
                 int tex;
                 GL.GenTextures(1, out tex);
                 GL.BindTexture(TextureTarget.Texture2D, tex);
                 GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
                 GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
 
-                // SKBitmap in Rgba8888 is R, G, B, A in memory
+                GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+
+                // Use BGRA format to match SkiaSharp's internal format
                 GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, size, size, 0,
-                    PixelFormat.Rgba, PixelType.UnsignedByte, bitmap.GetPixels());
+                    PixelFormat.Bgra, PixelType.UnsignedByte, bitmap.GetPixels());
+
+                GL.PixelStore(PixelStoreParameter.UnpackAlignment, 4);
+                GL.BindTexture(TextureTarget.Texture2D, 0);
 
                 return tex;
             }
