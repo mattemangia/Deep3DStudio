@@ -95,17 +95,28 @@ namespace Deep3DStudio
             _viewport = new ThreeDView();
             _viewport.SetSceneGraph(_sceneGraph);
             _viewport.ObjectPicked += OnViewportObjectPicked;
+            // Ensure viewport has minimum size
+            _viewport.SetSizeRequest(400, 300);
 
             var mainVBox = new Box(Orientation.Vertical, 0);
+            mainVBox.Visible = true;
             this.Add(mainVBox);
+
+            Console.WriteLine("MainWindow: Creating UI components...");
 
             // 1. Menu Bar
             var menuBar = CreateMenuBar();
+            menuBar.Visible = true;
+            menuBar.SetSizeRequest(-1, 25); // Minimum height
             mainVBox.PackStart(menuBar, false, false, 0);
+            Console.WriteLine("MainWindow: Menu bar created");
 
             // 2. Toolbar (Top)
             var toolbar = CreateToolbar();
+            toolbar.Visible = true;
+            toolbar.SetSizeRequest(-1, 35); // Minimum height
             mainVBox.PackStart(toolbar, false, false, 0);
+            Console.WriteLine("MainWindow: Toolbar created");
 
             // 3. Main Content Area
             var contentBox = new Box(Orientation.Horizontal, 0);
@@ -137,9 +148,13 @@ namespace Deep3DStudio
             _mainHPaned.Position = settings.LastPanelWidth;
 
             _statusLabel.Halign = Align.Start;
+            _statusLabel.Visible = true;
             var statusBox = new Box(Orientation.Horizontal, 5);
+            statusBox.Visible = true;
+            statusBox.SetSizeRequest(-1, 25); // Minimum height
             statusBox.PackStart(_statusLabel, true, true, 5);
             mainVBox.PackStart(statusBox, false, false, 2);
+            Console.WriteLine("MainWindow: Status bar created");
 
             // Load Initial Settings
             ApplyViewSettings();
@@ -148,7 +163,9 @@ namespace Deep3DStudio
             Gtk.Drag.DestSet(this, DestDefaults.All, new TargetEntry[] { new TargetEntry("text/uri-list", 0, 0) }, Gdk.DragAction.Copy);
             this.DragDataReceived += OnDragDataReceived;
 
+            Console.WriteLine("MainWindow: Calling ShowAll()");
             this.ShowAll();
+            Console.WriteLine("MainWindow: ShowAll() completed");
         }
 
         /// <summary>
