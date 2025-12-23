@@ -1,0 +1,7 @@
+bin/
+obj/
+*.user
+*.suo
+.vs/
+python_env/
+models/
