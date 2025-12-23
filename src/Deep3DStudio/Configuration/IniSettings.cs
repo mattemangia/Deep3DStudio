@@ -609,6 +609,11 @@ namespace Deep3DStudio.Configuration
             Load();
         }
 
+        public void Reset()
+        {
+            ResetToDefaults();
+        }
+
         /// <summary>
         /// Resets all settings to their default values.
         /// </summary>

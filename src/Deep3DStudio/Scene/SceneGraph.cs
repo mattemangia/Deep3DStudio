@@ -509,6 +509,8 @@ namespace Deep3DStudio.Scene
         public GroupObject Root { get; }
         public List<SceneObject> SelectedObjects { get; } = new List<SceneObject>();
 
+        public int ObjectCount => GetAllObjects().Count;
+
         public event EventHandler<SceneObject>? ObjectAdded;
         public event EventHandler<SceneObject>? ObjectRemoved;
         public event EventHandler<SceneObject>? ObjectSelected;
