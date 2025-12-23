@@ -67,6 +67,10 @@ namespace Deep3DStudio.Viewport
 
         public void Render(int width, int height)
         {
+            // Ensure fixed-function pipeline is active (disable any active shaders from ImGui)
+            GL.UseProgram(0);
+            GL.BindVertexArray(0);
+
             if (height == 0) height = 1;
 
             // Setup Matrices

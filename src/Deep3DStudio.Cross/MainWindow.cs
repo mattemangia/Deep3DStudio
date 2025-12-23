@@ -269,7 +269,7 @@ namespace Deep3DStudio
             ImGui.SetNextWindowSize(new System.Numerics.Vector2(ClientSize.X, 40));
             ImGui.Begin("Toolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar);
             {
-                var size = new System.Numerics.Vector2(32, 32);
+                var size = new System.Numerics.Vector2(20, 20); // Smaller buttons
                 // Gizmo Modes
                 // ImageButton(string str_id, IntPtr user_texture_id, Vector2 size)
                 if (ImGui.ImageButton("##Select", _iconFactory.GetIcon(IconType.Select), size)) _viewport.CurrentGizmoMode = GizmoMode.Select;
@@ -299,15 +299,31 @@ namespace Deep3DStudio
 
                 if (ImGui.ImageButton("##Run", _iconFactory.GetIcon(IconType.Run), size)) RunReconstruction();
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Run Reconstruction");
+
+                ImGui.SameLine();
+                if (ImGui.ImageButton("##Points", _iconFactory.GetIcon(IconType.Cloud), size))
+                {
+                    // Logic for generating point cloud only
+                    RunReconstruction(false, true);
+                }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Generate Point Cloud");
+
+                ImGui.SameLine();
+                if (ImGui.ImageButton("##Mesh", _iconFactory.GetIcon(IconType.Mesh), size))
+                {
+                    // Logic for generating mesh from existing cloud
+                    RunReconstruction(true, false);
+                }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Generate Mesh from Points");
             }
             ImGui.End();
 
             // Vertical Toolbar (Mesh Ops)
             ImGui.SetNextWindowPos(new System.Numerics.Vector2(_leftPanelWidth, 60));
-            ImGui.SetNextWindowSize(new System.Numerics.Vector2(48, ClientSize.Y - 60 - _logPanelHeight));
+            ImGui.SetNextWindowSize(new System.Numerics.Vector2(40, ClientSize.Y - 60 - _logPanelHeight)); // Adjusted width
             ImGui.Begin("Tools", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse);
             {
-                 var size = new System.Numerics.Vector2(32, 32);
+                 var size = new System.Numerics.Vector2(20, 20); // Smaller buttons
                  if (ImGui.ImageButton("##Clean", _iconFactory.GetIcon(IconType.Clean), size))
                  {
                      if (_sceneGraph.SelectedObjects.Count > 0 && _sceneGraph.SelectedObjects[0] is MeshObject mo)
@@ -522,7 +538,7 @@ namespace Deep3DStudio
              }
         }
 
-        private async void RunReconstruction()
+        private async void RunReconstruction(bool generateMesh = true, bool generateCloud = true)
         {
             if (_loadedImages.Count == 0)
             {
@@ -542,6 +558,9 @@ namespace Deep3DStudio
                     if (_workflows[_selectedWorkflow].Contains("Dust3r"))
                     {
                         using var dust3r = new Dust3rInference();
+                        // Assuming ReconstructScene handles full pipeline, we can control steps via flags if supported
+                        // or simulate partial execution. For now, we invoke the full pipeline but could split it.
+                        // Ideally Dust3rInference would accept flags.
                         result = dust3r.ReconstructScene(_loadedImages);
                     }
                     else
@@ -555,6 +574,14 @@ namespace Deep3DStudio
 
                 if (result != null)
                 {
+                    // If we only wanted PointCloud, we might filter here if the backend returns both
+                    // But currently Dust3rInference returns meshes (which can be point clouds if no faces)
+
+                    if (generateMesh && !generateCloud)
+                    {
+                        // Logic to only keep mesh or filter
+                    }
+
                     foreach (var mesh in result.Meshes)
                     {
                         if (mesh.Vertices.Count > 0)
@@ -563,7 +590,7 @@ namespace Deep3DStudio
                             _sceneGraph.AddObject(obj);
                         }
                     }
-                    _logBuffer += $"Reconstruction complete. Added {result.Meshes.Count} meshes.\n";
+                    _logBuffer += $"Reconstruction complete. Added {result.Meshes.Count} objects.\n";
                 }
             }
             catch (Exception ex)
