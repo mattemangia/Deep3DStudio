@@ -112,7 +112,7 @@ namespace Deep3DStudio.UI
             if (_isMacOS)
             {
                 this.KeepAbove = true;
-                this.SetUrgencyHint(true);
+                this.GrabFocus();
             }
 
             // Process pending events to ensure window is displayed
