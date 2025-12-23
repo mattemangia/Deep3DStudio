@@ -16,6 +16,18 @@ namespace Deep3DStudio
             // This is critical for GL.Begin/GL.End calls in the viewport.
             Environment.SetEnvironmentVariable("MESA_GL_VERSION_OVERRIDE", "3.3COMPAT");
 
+            // macOS-specific: Ensure proper GTK backend and rendering
+            // This fixes the grey screen issue on macOS after installing gtk3+
+            if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+                System.Runtime.InteropServices.OSPlatform.OSX))
+            {
+                // Force GTK to use Quartz backend on macOS for proper window rendering
+                Environment.SetEnvironmentVariable("GDK_BACKEND", "quartz");
+
+                // Disable client-side decorations which can cause rendering issues on macOS
+                Environment.SetEnvironmentVariable("GTK_CSD", "0");
+            }
+
             Application.Init();
 
             // Show Splash Screen
@@ -74,8 +86,21 @@ namespace Deep3DStudio
             var win = new MainWindow();
             app.AddWindow(win);
 
+            // Process any pending events before destroying splash
+            while (Application.EventsPending())
+                Application.RunIteration();
+
             splash.Destroy();
-            win.Show();
+
+            // ShowAll is critical for proper rendering, especially on macOS
+            // This ensures all widgets are properly initialized and visible
+            win.ShowAll();
+
+            // Process events again to ensure window is fully rendered on macOS
+            // This fixes the grey screen issue by ensuring the UI is drawn before entering the main loop
+            while (Application.EventsPending())
+                Application.RunIteration();
+
             Application.Run();
 
             // Prevent premature garbage collection of the Gtk.Application instance

@@ -453,7 +453,18 @@ def setup_models(models_dir, python_dir, target_platform):
                shutil.rmtree(temp_repo, onerror=remove_readonly)
 
 def obfuscate_and_clean(python_dir, target_platform):
-    print("Compiling to bytecode and removing sources...")
+    """
+    Compile Python source files to bytecode and clean up unnecessary files.
+
+    IMPORTANT NOTE: We do NOT remove .py source files because:
+    1. opencv-python (cv2) and other packages with namespace packages require source files
+    2. Many packages use __file__ or __path__ to locate resources and will fail without .py files
+    3. Some packages have dynamic imports that require source files to be present
+    4. The AI diagnostic and model loading functionality depends on these libraries
+
+    This change fixes the "can't find cv2 and other libraries" issue when running AI diagnostic.
+    """
+    print("Compiling to bytecode and cleaning sources...")
 
     if "win" in target_platform:
         python_exe = os.path.join(python_dir, "python", "python.exe")
@@ -464,14 +475,16 @@ def obfuscate_and_clean(python_dir, target_platform):
     if result.returncode != 0:
         print(f"Warning: compileall returned {result.returncode}, but proceeding...")
 
+    # Keep .py source files to ensure library compatibility
+    # The bytecode (.pyc) files will still be used for faster loading
+    print("Keeping .py source files to ensure library compatibility...")
+    print("  This is required for opencv-python, PIL, and other packages to work correctly")
+
+    # Only remove .git directories to save space
     for root, dirs, files in os.walk(python_dir):
         if ".git" in dirs:
             shutil.rmtree(os.path.join(root, ".git"), onerror=remove_readonly)
             dirs.remove(".git")
-
-        for file in files:
-            if file.endswith(".py"):
-                os.remove(os.path.join(root, file))
 
 def create_zip(source_dir, output_zip):
     print(f"Zipping {source_dir} to {output_zip}...")

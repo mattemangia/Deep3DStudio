@@ -77,13 +77,44 @@ namespace Deep3DStudio.UI
             _statusLabel.ModifyFg(StateType.Normal, new Gdk.Color(180, 180, 180));
             vbox.PackStart(_statusLabel, false, false, 5);
 
-            // Background color (Black)
-            var black = new Gdk.Color(0, 0, 0);
-            this.ModifyBg(StateType.Normal, black);
-            frame.ModifyBg(StateType.Normal, black);
-            vbox.ModifyBg(StateType.Normal, black);
+            // Background color (Dark theme)
+            // Use CSS for better cross-platform compatibility, especially on macOS
+            var cssProvider = new CssProvider();
+            try
+            {
+                cssProvider.LoadFromData(@"
+                    window {
+                        background-color: #1a1a1a;
+                    }
+                    frame {
+                        background-color: #1a1a1a;
+                    }
+                    box {
+                        background-color: #1a1a1a;
+                    }
+                ");
+                this.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
+                frame.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
+                vbox.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
+            }
+            catch
+            {
+                // Fallback to ModifyBg if CSS fails
+                var black = new Gdk.Color(26, 26, 26);
+                this.ModifyBg(StateType.Normal, black);
+                frame.ModifyBg(StateType.Normal, black);
+                vbox.ModifyBg(StateType.Normal, black);
+            }
 
             this.ShowAll();
+
+            // macOS: Process events to ensure proper rendering
+            if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+                System.Runtime.InteropServices.OSPlatform.OSX))
+            {
+                while (Application.EventsPending())
+                    Application.RunIteration();
+            }
         }
 
         public void UpdateStatus(string message)
