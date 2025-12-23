@@ -515,10 +515,24 @@ namespace Deep3DStudio.Viewport
 
         // Track grid vertex count for modern GL
         private int _gridVertexCount = 0;
+        private bool _renderDebugLogged = false;
 
         private void OnRender(object? sender, RenderArgs args)
         {
-            if (!_loaded) return;
+            if (!_loaded)
+            {
+                if (!_renderDebugLogged)
+                {
+                    Console.WriteLine("OnRender: Not loaded yet, skipping");
+                }
+                return;
+            }
+
+            if (!_renderDebugLogged)
+            {
+                Console.WriteLine($"OnRender: First render - useModernGL={_useModernGL}, legacySupported={_legacySupported}, gridVertexCount={_gridVertexCount}");
+                _renderDebugLogged = true;
+            }
 
             // If neither modern GL nor legacy is supported, we can't render
             if (!_useModernGL && !_legacySupported)
@@ -596,6 +610,13 @@ namespace Deep3DStudio.Viewport
                     // On macOS Metal, only 1.0 line width is supported
                     GL.BindVertexArray(_axesVao);
                     GL.DrawArrays(PrimitiveType.Lines, 0, 6);
+                }
+
+                // Check for GL errors
+                var err = GL.GetError();
+                if (err != ErrorCode.NoError && !_renderDebugLogged)
+                {
+                    Console.WriteLine($"GL Error after modern rendering: {err}");
                 }
 
                 // Draw point clouds using modern GL
