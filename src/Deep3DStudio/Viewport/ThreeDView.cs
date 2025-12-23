@@ -121,6 +121,9 @@ namespace Deep3DStudio.Viewport
             // while maintaining support for fixed-function pipeline commands.
             this.SetRequiredVersion(3, 3);
 
+            // Enable automatic rendering - critical for GLArea to work on macOS
+            this.AutoRender = true;
+
             this.HasFocus = true;
             this.CanFocus = true;
             this.AddEvents((int)Gdk.EventMask.ButtonPressMask |
@@ -132,6 +135,7 @@ namespace Deep3DStudio.Viewport
             this.Realized += OnRealized;
             this.Render += OnRender;
             this.Unrealized += OnUnrealized;
+            this.Mapped += OnMapped;
 
             this.ButtonPressEvent += OnButtonPress;
             this.ButtonReleaseEvent += OnButtonRelease;
@@ -141,6 +145,13 @@ namespace Deep3DStudio.Viewport
 
             UpdateCropCorners();
             _frameTimer.Start();
+        }
+
+        private void OnMapped(object? sender, EventArgs e)
+        {
+            Console.WriteLine($"ThreeDView: Mapped - triggering initial render");
+            // Trigger initial render when widget becomes visible
+            this.QueueRender();
         }
 
         private bool EnsureLegacySupport(string feature)
@@ -161,16 +172,16 @@ namespace Deep3DStudio.Viewport
         public void SetSceneGraph(SceneGraph sceneGraph)
         {
             _sceneGraph = sceneGraph;
-            _sceneGraph.SelectionChanged += (s, e) => this.QueueDraw();
-            _sceneGraph.SceneChanged += (s, e) => this.QueueDraw();
+            _sceneGraph.SelectionChanged += (s, e) => this.QueueRender();
+            _sceneGraph.SceneChanged += (s, e) => this.QueueRender();
             AutoCenter();
-            this.QueueDraw();
+            this.QueueRender();
         }
 
         public void SetGizmoMode(GizmoMode mode)
         {
             _gizmoMode = mode;
-            this.QueueDraw();
+            this.QueueRender();
         }
 
         public GizmoMode GetGizmoMode() => _gizmoMode;
@@ -178,7 +189,7 @@ namespace Deep3DStudio.Viewport
         public void ToggleCropBox(bool show)
         {
             _showCropBox = show;
-            this.QueueDraw();
+            this.QueueRender();
         }
 
         /// <summary>
@@ -188,7 +199,7 @@ namespace Deep3DStudio.Viewport
         {
             _meshes = meshes;
             AutoCenter();
-            this.QueueDraw();
+            this.QueueRender();
         }
 
         /// <summary>
@@ -226,7 +237,7 @@ namespace Deep3DStudio.Viewport
                 Console.WriteLine("FocusOnSelection: Invalid bounds, using defaults");
                 _cameraTarget = Vector3.Zero;
                 _zoom = -5.0f;
-                this.QueueDraw();
+                this.QueueRender();
                 return;
             }
 
@@ -241,7 +252,7 @@ namespace Deep3DStudio.Viewport
 
             Console.WriteLine($"FocusOnSelection: center({center.X:F2},{center.Y:F2},{center.Z:F2}), zoom={_zoom:F2}");
 
-            this.QueueDraw();
+            this.QueueRender();
         }
 
         public void ApplyCrop()
@@ -255,7 +266,7 @@ namespace Deep3DStudio.Viewport
             {
                 GeometryUtils.CropMesh(mesh, min, max);
             }
-            this.QueueDraw();
+            this.QueueRender();
         }
 
         #endregion
@@ -386,7 +397,7 @@ namespace Deep3DStudio.Viewport
                 }
 
                 // Ensure initial frame is drawn immediately
-                this.QueueDraw();
+                this.QueueRender();
             }
         }
 
@@ -2231,7 +2242,7 @@ namespace Deep3DStudio.Viewport
             if (_selectedHandle != bestIdx)
             {
                 _selectedHandle = bestIdx;
-                this.QueueDraw();
+                this.QueueRender();
             }
         }
 
@@ -2339,7 +2350,7 @@ namespace Deep3DStudio.Viewport
                     foreach (var obj in _sceneGraph.SelectedObjects)
                         _gizmoStartPos = obj.Position;
 
-                    this.QueueDraw();
+                    this.QueueRender();
                     return;
                 }
 
@@ -2401,7 +2412,7 @@ namespace Deep3DStudio.Viewport
                 _isPanning = false;
                 _isDraggingGizmo = false;
                 _activeGizmoAxis = -1;
-                this.QueueDraw();
+                this.QueueRender();
             }
             else if (args.Event.Button == 2)
             {
@@ -2421,7 +2432,7 @@ namespace Deep3DStudio.Viewport
                 if (_activeGizmoAxis != gizmoAxis)
                 {
                     _activeGizmoAxis = gizmoAxis;
-                    this.QueueDraw();
+                    this.QueueRender();
                 }
             }
 
@@ -2456,7 +2467,7 @@ namespace Deep3DStudio.Viewport
                     }
                 }
 
-                this.QueueDraw();
+                this.QueueRender();
             }
             else if (_isDragging && !_isPanning)
             {
@@ -2471,7 +2482,7 @@ namespace Deep3DStudio.Viewport
                     _cropSize += deltaX * 0.01f;
                     if (_cropSize < 0.1f) _cropSize = 0.1f;
                     UpdateCropCorners();
-                    this.QueueDraw();
+                    this.QueueRender();
                 }
                 else
                 {
@@ -2479,7 +2490,7 @@ namespace Deep3DStudio.Viewport
                     _rotationX += deltaY * 0.5f;
                 }
                 _lastMousePos = new Point(x, y);
-                this.QueueDraw();
+                this.QueueRender();
             }
             else if (_isPanning)
             {
@@ -2502,7 +2513,7 @@ namespace Deep3DStudio.Viewport
                 _cameraTarget += up * deltaY * panSpeed;
 
                 _lastMousePos = new Point(x, y);
-                this.QueueDraw();
+                this.QueueRender();
             }
         }
 
@@ -2516,7 +2527,7 @@ namespace Deep3DStudio.Viewport
             {
                 _zoom -= 0.5f;
             }
-            this.QueueDraw();
+            this.QueueRender();
         }
 
         private void OnKeyPress(object o, KeyPressEventArgs args)
@@ -2575,7 +2586,7 @@ namespace Deep3DStudio.Viewport
                     }
                     break;
             }
-            this.QueueDraw();
+            this.QueueRender();
         }
 
         /// <summary>
@@ -2617,7 +2628,7 @@ namespace Deep3DStudio.Viewport
             }
 
             TriangleSelectionChanged?.Invoke(this, EventArgs.Empty);
-            this.QueueDraw();
+            this.QueueRender();
         }
 
         /// <summary>
