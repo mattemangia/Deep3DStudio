@@ -1,0 +1,34 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{0098835A-B9BF-4955-9D0D-D4769293F586}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Deep3DStudio", "src\Deep3DStudio\Deep3DStudio.csproj", "{DEF09A4E-E2E1-4D2F-A2ED-7A0195B01399}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Deep3DStudio.Cross", "src\Deep3DStudio.Cross\Deep3DStudio.Cross.csproj", "{5322099A-E128-4B7F-8636-8F435321E107}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{DEF09A4E-E2E1-4D2F-A2ED-7A0195B01399}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DEF09A4E-E2E1-4D2F-A2ED-7A0195B01399}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DEF09A4E-E2E1-4D2F-A2ED-7A0195B01399}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DEF09A4E-E2E1-4D2F-A2ED-7A0195B01399}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5322099A-E128-4B7F-8636-8F435321E107}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5322099A-E128-4B7F-8636-8F435321E107}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5322099A-E128-4B7F-8636-8F435321E107}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5322099A-E128-4B7F-8636-8F435321E107}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{DEF09A4E-E2E1-4D2F-A2ED-7A0195B01399} = {0098835A-B9BF-4955-9D0D-D4769293F586}
+		{5322099A-E128-4B7F-8636-8F435321E107} = {0098835A-B9BF-4955-9D0D-D4769293F586}
+	EndGlobalSection
+EndGlobal
