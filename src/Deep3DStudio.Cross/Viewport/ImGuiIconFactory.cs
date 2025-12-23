@@ -21,7 +21,10 @@ namespace Deep3DStudio.Viewport
         Save,
         Open,
         Bake,
-        Clean
+        Clean,
+        Texture,
+        Grid,
+        Wireframe
     }
 
     public class ImGuiIconFactory : IDisposable
@@ -140,6 +143,45 @@ namespace Deep3DStudio.Viewport
                  canvas.DrawPath(path, p);
                  // Internal lines
                  canvas.DrawLine(w*0.5f, h*0.2f, w*0.5f, h*0.8f, p);
+            });
+
+            _icons[IconType.Camera] = CreateIcon(SKColors.Yellow, (canvas, w, h) => {
+                 // Camera Icon
+                 var p = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Stroke, StrokeWidth = 2 };
+                 var box = new SKRect(w*0.2f, h*0.3f, w*0.8f, h*0.7f);
+                 canvas.DrawRect(box, p);
+                 // Lens
+                 canvas.DrawCircle(w*0.5f, h*0.5f, w*0.15f, p);
+                 // Flash/Viewfinder
+                 canvas.DrawRect(w*0.6f, h*0.2f, w*0.15f, h*0.1f, new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill });
+            });
+
+            _icons[IconType.Texture] = CreateIcon(SKColors.Pink, (canvas, w, h) => {
+                 // Checkerboard
+                 var pFill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
+                 float s = w * 0.5f;
+                 canvas.DrawRect(0, 0, s, s, pFill);
+                 canvas.DrawRect(s, s, s, s, pFill);
+            });
+
+            _icons[IconType.Grid] = CreateIcon(SKColors.Gray, (canvas, w, h) => {
+                 // Grid lines
+                 var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2 };
+                 for(float i=0; i<=w; i+=w/3f) {
+                     canvas.DrawLine(i, 0, i, h, p);
+                     canvas.DrawLine(0, i, w, i, p);
+                 }
+            });
+
+            _icons[IconType.Wireframe] = CreateIcon(SKColors.LightBlue, (canvas, w, h) => {
+                 // Wireframe cube
+                 var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                 var r = new SKRect(w*0.3f, h*0.3f, w*0.7f, h*0.7f);
+                 canvas.DrawRect(r, p);
+                 canvas.DrawLine(0,0, w*0.3f, h*0.3f, p);
+                 canvas.DrawLine(w,0, w*0.7f, h*0.3f, p);
+                 canvas.DrawLine(0,h, w*0.3f, h*0.7f, p);
+                 canvas.DrawLine(w,h, w*0.7f, h*0.7f, p);
             });
         }
 

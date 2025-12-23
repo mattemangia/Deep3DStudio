@@ -253,6 +253,16 @@ namespace Deep3DStudio
                 }
                 if (ImGui.BeginMenu("View"))
                 {
+                    var s = IniSettings.Instance;
+                    bool sm = s.ShowMesh; if (ImGui.MenuItem("Show Mesh", "", sm)) s.ShowMesh = !sm;
+                    bool sp = s.ShowPointCloud; if (ImGui.MenuItem("Show Point Cloud", "", sp)) s.ShowPointCloud = !sp;
+                    bool st = s.ShowTexture; if (ImGui.MenuItem("Show Texture", "", st)) s.ShowTexture = !st;
+                    bool sw = s.ShowWireframe; if (ImGui.MenuItem("Show Wireframe", "", sw)) s.ShowWireframe = !sw;
+                    bool sc = s.ShowCameras; if (ImGui.MenuItem("Show Cameras", "", sc)) s.ShowCameras = !sc;
+                    bool sg = s.ShowGrid; if (ImGui.MenuItem("Show Grid", "", sg)) s.ShowGrid = !sg;
+                    bool sa = s.ShowAxes; if (ImGui.MenuItem("Show Axes", "", sa)) s.ShowAxes = !sa;
+
+                    ImGui.Separator();
                     if (ImGui.MenuItem("Reset Camera")) { /* TODO Reset Cam */ }
                     ImGui.EndMenu();
                 }
@@ -315,6 +325,24 @@ namespace Deep3DStudio
                     RunReconstruction(true, false);
                 }
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Generate Mesh from Points");
+
+                ImGui.SameLine();
+                ImGui.Separator();
+                ImGui.SameLine();
+
+                // Visibility Toggles
+                var s = IniSettings.Instance;
+                DrawToggleBtn("##TglMesh", IconType.Mesh, s.ShowMesh, v => s.ShowMesh = v, "Show/Hide Mesh", size);
+                ImGui.SameLine();
+                DrawToggleBtn("##TglCloud", IconType.Cloud, s.ShowPointCloud, v => s.ShowPointCloud = v, "Show/Hide Point Cloud", size);
+                ImGui.SameLine();
+                DrawToggleBtn("##TglTex", IconType.Texture, s.ShowTexture, v => s.ShowTexture = v, "Show/Hide Texture", size);
+                ImGui.SameLine();
+                DrawToggleBtn("##TglWire", IconType.Wireframe, s.ShowWireframe, v => s.ShowWireframe = v, "Show/Hide Wireframe", size);
+                ImGui.SameLine();
+                DrawToggleBtn("##TglCam", IconType.Camera, s.ShowCameras, v => s.ShowCameras = v, "Show/Hide Cameras", size);
+                ImGui.SameLine();
+                DrawToggleBtn("##TglGrid", IconType.Grid, s.ShowGrid, v => s.ShowGrid = v, "Show/Hide Grid", size);
             }
             ImGui.End();
 
@@ -536,6 +564,17 @@ namespace Deep3DStudio
                      _logBuffer += $"Failed to save project: {ex.Message}\n";
                  }
              }
+        }
+
+        private void DrawToggleBtn(string id, IconType icon, bool active, Action<bool> setter, string tooltip, System.Numerics.Vector2 size)
+        {
+            if (active) ImGui.PushStyleColor(ImGuiCol.Button, new System.Numerics.Vector4(0.3f, 0.6f, 0.3f, 1f));
+            if (ImGui.ImageButton(id, _iconFactory.GetIcon(icon), size))
+            {
+                setter(!active);
+            }
+            if (active) ImGui.PopStyleColor();
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip(tooltip);
         }
 
         private async void RunReconstruction(bool generateMesh = true, bool generateCloud = true)
