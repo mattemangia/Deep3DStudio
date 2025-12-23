@@ -6,6 +6,7 @@ using ImGuiNET;
 using Deep3DStudio.Configuration;
 using Deep3DStudio.Python;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace Deep3DStudio
 {
@@ -21,11 +22,22 @@ namespace Deep3DStudio
             {
                 Size = new Vector2i(1280, 720),
                 Title = "Deep3DStudio (Cross-Platform / ImGui)",
-                // We need 3.3 Compatibility Profile for legacy GL calls
-                APIVersion = new Version(3, 3),
-                Profile = ContextProfile.Compatability,
                 Flags = ContextFlags.Default
             };
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            {
+                // macOS only supports legacy OpenGL up to 2.1.
+                // Requesting 3.3 Compat causes a crash.
+                nativeWindowSettings.APIVersion = new Version(2, 1);
+                nativeWindowSettings.Profile = ContextProfile.Any;
+            }
+            else
+            {
+                // Windows/Linux support 3.3 Compatibility Profile
+                nativeWindowSettings.APIVersion = new Version(3, 3);
+                nativeWindowSettings.Profile = ContextProfile.Compatability;
+            }
 
             using (var window = new MainWindow(GameWindowSettings.Default, nativeWindowSettings))
             {
