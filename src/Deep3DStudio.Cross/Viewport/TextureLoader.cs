@@ -39,27 +39,38 @@ namespace Deep3DStudio.Viewport
                 stream.CopyTo(memoryStream);
                 memoryStream.Position = 0;
 
-                using (var bitmap = SKBitmap.Decode(memoryStream))
+                using (var codec = SKCodec.Create(memoryStream))
                 {
-                    if (bitmap == null) return -1;
+                    if (codec == null) return -1;
 
-                    int tex;
-                    GL.GenTextures(1, out tex);
-                    GL.BindTexture(TextureTarget.Texture2D, tex);
+                    // Decode directly to Rgba8888 to ensure consistent format for OpenGL
+                    var info = new SKImageInfo(codec.Info.Width, codec.Info.Height, SKColorType.Rgba8888, SKAlphaType.Premul);
+                    using (var bitmap = new SKBitmap(info))
+                    {
+                         var result = codec.GetPixels(info, bitmap.GetPixels());
+                         if (result != SKCodecResult.Success) return -1;
 
-                    GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
-                    GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
-                    GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-                    GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+                         int tex;
+                         GL.GenTextures(1, out tex);
+                         GL.BindTexture(TextureTarget.Texture2D, tex);
 
-                    var data = bitmap.Pixels;
-                    // Convert SKColor array to byte array if needed or use GetPixels
-                    // SKBitmap.GetPixels() returns IntPtr
+                         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+                         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+                         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+                         GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
 
-                    GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, bitmap.Width, bitmap.Height, 0,
-                        PixelFormat.Bgra, PixelType.UnsignedByte, bitmap.GetPixels());
+                         // Ensure 1-byte packing alignment for arbitrary widths
+                         GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
 
-                    return tex;
+                         // Now we know it's Rgba8888, so we use PixelFormat.Rgba
+                         GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, bitmap.Width, bitmap.Height, 0,
+                             PixelFormat.Rgba, PixelType.UnsignedByte, bitmap.GetPixels());
+
+                         // Restore default alignment
+                         GL.PixelStore(PixelStoreParameter.UnpackAlignment, 4);
+
+                         return tex;
+                    }
                 }
             }
         }
