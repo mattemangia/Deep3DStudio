@@ -377,8 +377,13 @@ namespace Deep3DStudio.Viewport
                 GL.Enable(EnableCap.DepthTest);
                 GL.Enable(EnableCap.Blend);
                 GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-                GL.PointSize(5.0f);
-                GL.LineWidth(1.0f);
+
+                // GL.PointSize and GL.LineWidth are legacy functions - only call if legacy is supported
+                if (_legacySupported)
+                {
+                    GL.PointSize(5.0f);
+                    GL.LineWidth(1.0f);
+                }
 
                 // Ensure initial frame is drawn immediately
                 this.QueueDraw();
@@ -587,10 +592,10 @@ namespace Deep3DStudio.Viewport
                 }
                 if (ShowAxes && _axesVao != 0)
                 {
-                    GL.LineWidth(2.5f);
+                    // Note: GL.LineWidth > 1.0 is deprecated in Core profile and may not work
+                    // On macOS Metal, only 1.0 line width is supported
                     GL.BindVertexArray(_axesVao);
                     GL.DrawArrays(PrimitiveType.Lines, 0, 6);
-                    GL.LineWidth(1.0f);
                 }
 
                 // Draw point clouds using modern GL
