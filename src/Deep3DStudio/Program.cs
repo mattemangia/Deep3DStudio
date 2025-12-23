@@ -16,15 +16,15 @@ namespace Deep3DStudio
             // This is critical for GL.Begin/GL.End calls in the viewport.
             Environment.SetEnvironmentVariable("MESA_GL_VERSION_OVERRIDE", "3.3COMPAT");
 
-            // macOS-specific: Ensure proper GTK backend and rendering
-            // This fixes the grey screen issue on macOS after installing gtk3+
+            // macOS-specific: Ensure proper GTK rendering
             if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
                 System.Runtime.InteropServices.OSPlatform.OSX))
             {
-                // Force GTK to use Quartz backend on macOS for proper window rendering
-                Environment.SetEnvironmentVariable("GDK_BACKEND", "quartz");
+                // Use X11 backend on macOS (requires XQuartz)
+                // Quartz backend is often incomplete in gtk+3 builds
+                Environment.SetEnvironmentVariable("GDK_BACKEND", "x11");
 
-                // Disable client-side decorations which can cause rendering issues on macOS
+                // Disable client-side decorations
                 Environment.SetEnvironmentVariable("GTK_CSD", "0");
             }
 
@@ -91,43 +91,16 @@ namespace Deep3DStudio
             var win = new MainWindow();
             app.AddWindow(win);
 
-            // Process any pending events before destroying splash
+            // Process pending events
             while (Application.EventsPending())
                 Application.RunIteration();
 
             splash.Destroy();
-
-            // ShowAll is critical for proper rendering, especially on macOS
-            // This ensures all widgets are properly initialized and visible
             win.ShowAll();
 
-            // macOS-specific: Ensure the window is brought to front and activated
-            if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
-                System.Runtime.InteropServices.OSPlatform.OSX))
-            {
-                // Present the window to bring it to front
-                win.Present();
-
-                // Activate to ensure it receives focus
-                win.Activate();
-
-                // Process events to ensure rendering
-                while (Application.EventsPending())
-                    Application.RunIteration();
-
-                // Small delay for window manager
-                System.Threading.Thread.Sleep(100);
-
-                // Process events one more time
-                while (Application.EventsPending())
-                    Application.RunIteration();
-            }
-            else
-            {
-                // Non-macOS: Just process events
-                while (Application.EventsPending())
-                    Application.RunIteration();
-            }
+            // Process events after showing
+            while (Application.EventsPending())
+                Application.RunIteration();
 
             Application.Run();
 
