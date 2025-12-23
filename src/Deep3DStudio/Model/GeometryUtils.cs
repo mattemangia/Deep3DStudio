@@ -19,6 +19,8 @@ namespace Deep3DStudio.Model
         public SKBitmap? Texture { get; set; }
         public int TextureId { get; set; } = -1; // OpenGL Texture ID
 
+        public bool HasTexture => Texture != null || TextureId != -1;
+
         // Maps original pixel index (y * width + x) to vertex index in Vertices list.
         // Value is -1 if no vertex was generated for that pixel (filtered out).
         public int[]? PixelToVertexIndex { get; set; }

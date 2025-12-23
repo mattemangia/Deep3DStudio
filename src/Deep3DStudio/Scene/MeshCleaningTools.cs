@@ -1196,5 +1196,17 @@ namespace Deep3DStudio.Scene
             RemoveStatisticalOutliers = true,
             FillHoles = true
         };
+
+        public static MeshCleanupOptions All => new MeshCleanupOptions
+        {
+            RemoveDegenerateTris = true,
+            RemoveSlivers = true,
+            RemoveSmallComponents = true,
+            RemoveStatisticalOutliers = true,
+            FixNonManifold = true,
+            FillHoles = true,
+            FixNormals = true,
+            RemoveIsolatedVertices = true
+        };
     }
 }
