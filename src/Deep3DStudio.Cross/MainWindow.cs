@@ -24,6 +24,7 @@ namespace Deep3DStudio
         private ImGuiController _controller;
         private ThreeDView _viewport;
         private SceneGraph _sceneGraph;
+        private ImGuiIconFactory _iconFactory;
 
         // State
         private int _selectedWorkflow = 0;
@@ -73,6 +74,9 @@ namespace Deep3DStudio
 
             // Init Viewport GL state
             _viewport.InitGL();
+
+            // Init Icons
+            _iconFactory = new ImGuiIconFactory();
 
             // Load Logo
             _logoTexture = TextureLoader.LoadTextureFromResource("logo.png");
@@ -177,6 +181,12 @@ namespace Deep3DStudio
             SwapBuffers();
         }
 
+        protected override void OnUnload()
+        {
+            base.OnUnload();
+            _iconFactory?.Dispose();
+        }
+
         private void RenderSplash()
         {
             ImGui.SetNextWindowPos(System.Numerics.Vector2.Zero);
@@ -259,14 +269,20 @@ namespace Deep3DStudio
             ImGui.SetNextWindowSize(new System.Numerics.Vector2(ClientSize.X, 40));
             ImGui.Begin("Toolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar);
             {
+                var size = new System.Numerics.Vector2(32, 32);
                 // Gizmo Modes
-                if (ImGui.Button("Select (Q)")) _viewport.CurrentGizmoMode = GizmoMode.Select;
+                // ImageButton(string str_id, IntPtr user_texture_id, Vector2 size)
+                if (ImGui.ImageButton("##Select", _iconFactory.GetIcon(IconType.Select), size)) _viewport.CurrentGizmoMode = GizmoMode.Select;
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Select (Q)");
                 ImGui.SameLine();
-                if (ImGui.Button("Move (W)")) _viewport.CurrentGizmoMode = GizmoMode.Translate;
+                if (ImGui.ImageButton("##Move", _iconFactory.GetIcon(IconType.Move), size)) _viewport.CurrentGizmoMode = GizmoMode.Translate;
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Move (W)");
                 ImGui.SameLine();
-                if (ImGui.Button("Rotate (E)")) _viewport.CurrentGizmoMode = GizmoMode.Rotate;
+                if (ImGui.ImageButton("##Rotate", _iconFactory.GetIcon(IconType.Rotate), size)) _viewport.CurrentGizmoMode = GizmoMode.Rotate;
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Rotate (E)");
                 ImGui.SameLine();
-                if (ImGui.Button("Scale (R)")) _viewport.CurrentGizmoMode = GizmoMode.Scale;
+                if (ImGui.ImageButton("##Scale", _iconFactory.GetIcon(IconType.Scale), size)) _viewport.CurrentGizmoMode = GizmoMode.Scale;
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Scale (R)");
 
                 ImGui.SameLine();
                 ImGui.Separator();
@@ -280,7 +296,43 @@ namespace Deep3DStudio
                 ImGui.SetNextItemWidth(100);
                 ImGui.Combo("##Quality", ref _selectedQuality, _qualities, _qualities.Length);
                 ImGui.SameLine();
-                if (ImGui.Button("Run Reconstruction")) RunReconstruction();
+
+                if (ImGui.ImageButton("##Run", _iconFactory.GetIcon(IconType.Run), size)) RunReconstruction();
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Run Reconstruction");
+            }
+            ImGui.End();
+
+            // Vertical Toolbar (Mesh Ops)
+            ImGui.SetNextWindowPos(new System.Numerics.Vector2(_leftPanelWidth, 60));
+            ImGui.SetNextWindowSize(new System.Numerics.Vector2(48, ClientSize.Y - 60 - _logPanelHeight));
+            ImGui.Begin("Tools", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse);
+            {
+                 var size = new System.Numerics.Vector2(32, 32);
+                 if (ImGui.ImageButton("##Clean", _iconFactory.GetIcon(IconType.Clean), size))
+                 {
+                     if (_sceneGraph.SelectedObjects.Count > 0 && _sceneGraph.SelectedObjects[0] is MeshObject mo)
+                     {
+                         // Basic cleanup
+                         mo.MeshData = MeshCleaningTools.CleanupMesh(mo.MeshData, MeshCleanupOptions.Default);
+                         mo.MeshData.RecalculateNormals();
+                         _logBuffer += $"Cleaned mesh: {mo.Name}\n";
+                     }
+                 }
+                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Clean Mesh");
+
+                 if (ImGui.ImageButton("##Bake", _iconFactory.GetIcon(IconType.Bake), size))
+                 {
+                     // Placeholder for bake
+                     _logBuffer += "Texture Baking not yet implemented in Cross version.\n";
+                 }
+                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Bake Texture");
+
+                 if (ImGui.ImageButton("##Delete", _iconFactory.GetIcon(IconType.Delete), size))
+                 {
+                     var sel = _sceneGraph.SelectedObjects.ToList();
+                     foreach(var obj in sel) _sceneGraph.RemoveObject(obj);
+                 }
+                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Delete Selected");
             }
             ImGui.End();
 
