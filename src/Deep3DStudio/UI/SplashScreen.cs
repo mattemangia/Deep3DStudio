@@ -72,48 +72,58 @@ namespace Deep3DStudio.UI
             _statusLabel.ModifyFg(StateType.Normal, new Gdk.Color(180, 180, 180));
             vbox.PackStart(_statusLabel, false, false, 5);
 
-            // Apply CSS styling for dark theme and white spinner
-            // Use CSS for better cross-platform compatibility, especially on macOS
-            var cssProvider = new CssProvider();
-            try
+            // Apply dark theme background
+            // On macOS, skip CSS and use direct color modification for better compatibility
+            bool isMacOS = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+                System.Runtime.InteropServices.OSPlatform.OSX);
+
+            if (isMacOS)
             {
-                cssProvider.LoadFromData(@"
-                    window {
-                        background-color: #1a1a1a;
-                    }
-                    frame {
-                        background-color: #1a1a1a;
-                    }
-                    box {
-                        background-color: #1a1a1a;
-                    }
-                    spinner {
-                        color: #FFFFFF;
-                    }
-                ");
-                this.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
-                frame.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
-                vbox.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
-                _spinner.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
-            }
-            catch
-            {
-                // Fallback to ModifyBg if CSS fails
+                // macOS: Use ModifyBg directly, skip CSS
+                Console.WriteLine("SplashScreen: Using ModifyBg for macOS");
                 var black = new Gdk.Color(26, 26, 26);
                 this.ModifyBg(StateType.Normal, black);
                 frame.ModifyBg(StateType.Normal, black);
                 vbox.ModifyBg(StateType.Normal, black);
             }
-
-            this.ShowAll();
-
-            // macOS: Process events to ensure proper rendering
-            if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
-                System.Runtime.InteropServices.OSPlatform.OSX))
+            else
             {
-                while (Application.EventsPending())
-                    Application.RunIteration();
+                // Other platforms: Try CSS first
+                var cssProvider = new CssProvider();
+                try
+                {
+                    cssProvider.LoadFromData(@"
+                        window {
+                            background-color: #1a1a1a;
+                        }
+                        frame {
+                            background-color: #1a1a1a;
+                        }
+                        box {
+                            background-color: #1a1a1a;
+                        }
+                        spinner {
+                            color: #FFFFFF;
+                        }
+                    ");
+                    this.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
+                    frame.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
+                    vbox.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
+                    _spinner.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
+                }
+                catch
+                {
+                    // Fallback to ModifyBg if CSS fails
+                    var black = new Gdk.Color(26, 26, 26);
+                    this.ModifyBg(StateType.Normal, black);
+                    frame.ModifyBg(StateType.Normal, black);
+                    vbox.ModifyBg(StateType.Normal, black);
+                }
             }
+
+            Console.WriteLine("SplashScreen: Calling ShowAll()");
+            this.ShowAll();
+            Console.WriteLine("SplashScreen: ShowAll() completed");
         }
 
         public void UpdateStatus(string message)

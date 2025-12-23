@@ -16,23 +16,59 @@ namespace Deep3DStudio
             // This is critical for GL.Begin/GL.End calls in the viewport.
             Environment.SetEnvironmentVariable("MESA_GL_VERSION_OVERRIDE", "3.3COMPAT");
 
-            // macOS-specific: Ensure proper GTK rendering
+            // macOS-specific GTK configuration
             if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
                 System.Runtime.InteropServices.OSPlatform.OSX))
             {
-                // Use X11 backend on macOS (requires XQuartz)
-                // Quartz backend is often incomplete in gtk+3 builds
-                Environment.SetEnvironmentVariable("GDK_BACKEND", "x11");
+                // Don't force a backend - let GTK auto-detect (Quartz or X11)
+                // Forcing a backend can cause grey screens if that backend isn't working
 
                 // Disable client-side decorations
                 Environment.SetEnvironmentVariable("GTK_CSD", "0");
+
+                // Ensure proper theme rendering
+                Environment.SetEnvironmentVariable("GTK_THEME", "Default");
             }
 
-            Application.Init();
+            try
+            {
+                Application.Init();
+                Console.WriteLine("GTK Application initialized successfully");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"FATAL: GTK init failed: {ex.Message}");
+                Console.WriteLine($"Stack: {ex.StackTrace}");
+                return;
+            }
+
+            // Check GTK display
+            var display = Gdk.Display.Default;
+            if (display == null)
+            {
+                Console.WriteLine("FATAL: No GDK display available");
+                Console.WriteLine("On macOS, you may need to:");
+                Console.WriteLine("  1. Install XQuartz: brew install --cask xquartz");
+                Console.WriteLine("  2. Log out and log back in");
+                Console.WriteLine("  3. Set DISPLAY environment variable");
+                return;
+            }
+            Console.WriteLine($"GDK Display: {display.Name}");
 
             // Show Splash Screen
+            Console.WriteLine("Creating splash screen...");
             var splash = new SplashScreen();
+            Console.WriteLine("Showing splash screen...");
             splash.Show();
+            Console.WriteLine("Splash screen shown");
+
+            // Force realize the splash window
+            while (!splash.IsRealized)
+            {
+                Application.RunIteration();
+            }
+            Console.WriteLine("Splash screen realized");
+
             splash.UpdateStatus("Loading Settings...");
 
             // Initialize settings from INI file (platform-specific location)
