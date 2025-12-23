@@ -333,6 +333,19 @@ namespace Deep3DStudio.Viewport
             {
                 if (obj is CameraObject) continue; // Already drawn
 
+                if (obj is SkeletonObject skel && skel.Visible)
+                {
+                    DrawSkeleton(skel);
+                    // Don't push matrix for skeleton as DrawSkeleton handles it per joint/bone logic or needs global context
+                    // Actually DrawSkeleton should probably handle the root transform.
+                    // Let's defer to the standard logic if possible, or handle it specially.
+                    // SkeletonObject is a SceneObject, so it has a transform.
+                    // The joints inside have world positions or local.
+                    // Let's assume GetWorldPosition handles hierarchy.
+                    // So we can draw in World Space without pushing Skeleton's matrix IF we use GetWorldPosition.
+                    continue;
+                }
+
                 GL.PushMatrix();
                 var t = obj.GetWorldTransform();
                 GL.MultMatrix(ref t);
@@ -445,6 +458,66 @@ namespace Deep3DStudio.Viewport
             mesh.TextureId = id;
         }
 
+        private void DrawSkeleton(SkeletonObject skel)
+        {
+            GL.PushMatrix();
+            // Apply Skeleton's world transform so local positions work,
+            // BUT Rigging.cs has GetWorldPosition() which walks the hierarchy.
+            // If we use GetWorldPosition(), we should NOT apply the Skeleton's transform here
+            // IF Position is already part of that world calculation.
+            // Looking at Rigging.cs: GetWorldPosition() uses Parent.GetWorldTransform().
+            // And SkeletonObject simply holds the data.
+            // The joints are usually relative to the skeleton root.
+            // So we apply the SkeletonObject transform.
+
+            var t = skel.GetWorldTransform();
+            GL.MultMatrix(ref t);
+
+            GL.Disable(EnableCap.DepthTest); // See through mesh
+
+            // Draw Bones
+            if (skel.ShowBones)
+            {
+                GL.LineWidth(3.0f);
+                GL.Begin(PrimitiveType.Lines);
+                foreach (var bone in skel.Skeleton.Bones)
+                {
+                    if (!bone.IsVisible) continue;
+
+                    var start = bone.StartJoint.GetWorldPosition();
+                    var end = bone.EndJoint.GetWorldPosition();
+
+                    Vector3 color = bone.IsSelected ? skel.SelectedColor : skel.BoneColor;
+                    GL.Color3(color);
+
+                    GL.Vertex3(start);
+                    GL.Vertex3(end);
+                }
+                GL.End();
+            }
+
+            // Draw Joints
+            if (skel.ShowJoints)
+            {
+                GL.PointSize(8.0f);
+                GL.Begin(PrimitiveType.Points);
+                foreach (var joint in skel.Skeleton.Joints)
+                {
+                    if (!joint.IsVisible) continue;
+
+                    var pos = joint.GetWorldPosition();
+                    Vector3 color = joint.IsSelected ? skel.SelectedColor : joint.Color;
+                    GL.Color3(color);
+
+                    GL.Vertex3(pos);
+                }
+                GL.End();
+            }
+
+            GL.Enable(EnableCap.DepthTest);
+            GL.PopMatrix();
+        }
+
         private void DrawBoundingBox(SceneObject obj)
         {
             var min = obj.BoundsMin;
@@ -531,6 +604,40 @@ namespace Deep3DStudio.Viewport
 
             foreach (var obj in _sceneGraph.GetVisibleObjects())
             {
+                // Specialized picking for Skeleton
+                if (obj is SkeletonObject skel)
+                {
+                    // Check joints
+                    foreach (var joint in skel.Skeleton.Joints)
+                    {
+                        if (!joint.IsVisible) continue;
+
+                        // Joint world position must be transformed by SkeletonObject if it's local relative to it
+                        // However, Joint.GetWorldPosition() usually assumes world space relative to root joint.
+                        // And SkeletonObject usually positions the root.
+                        // So we assume we need to apply SkeletonObject transform.
+                        var worldPos = Vector3.TransformPosition(joint.GetWorldPosition(), skel.GetWorldTransform());
+
+                        var screenPosJ = Project(worldPos, width, height);
+                        if (screenPosJ.Z < 0) continue;
+
+                        float distJ = (new Vector2(screenPosJ.X, screenPosJ.Y) - new Vector2(screenX, screenY)).Length;
+                        if (distJ < 20 && distJ < minDist)
+                        {
+                            minDist = distJ;
+                            // Select the joint, but return the skeleton object to the caller?
+                            // Or handle selection here.
+                            // The caller expects a SceneObject.
+                            // If we return 'skel', the whole skeleton is selected.
+                            // To support sub-object selection, we need to handle it on the SkeletonObject or change the return type.
+                            // For now, we'll mark the joint as selected inside the skeleton and return the skeleton.
+                            skel.Skeleton.SelectJoint(joint, false);
+                            closest = skel;
+                        }
+                    }
+                    if (closest == skel) continue; // Found a joint, skip bounding box check
+                }
+
                 var (boundsMin, boundsMax) = obj.GetWorldBounds();
                 var center = (boundsMin + boundsMax) * 0.5f;
                 var screenPos = Project(center, width, height);

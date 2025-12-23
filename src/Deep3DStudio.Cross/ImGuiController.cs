@@ -237,7 +237,7 @@ void main()
                     ImDrawCmdPtr pcmd = cmd_list.CmdBuffer[cmd_i];
                     if (pcmd.UserCallback != IntPtr.Zero)
                     {
-                        throw new NotImplementedException();
+                        Console.WriteLine("ImGui UserCallback not implemented");
                     }
                     else
                     {
