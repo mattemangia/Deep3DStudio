@@ -436,15 +436,15 @@ namespace Deep3DStudio
 
         private void OnOpenProject()
         {
-             var result = Nfd.OpenDialog("d3d", null);
-             if (result.Path != null)
+             var result = Nfd.OpenDialog(out string path, new Dictionary<string, string> { { "Deep3D Project", "d3d" } });
+             if (result == NfdStatus.Ok)
              {
                  try
                  {
-                     var state = CrossProjectManager.LoadProject(result.Path);
+                     var state = CrossProjectManager.LoadProject(path);
                      CrossProjectManager.RestoreSceneFromState(state, _sceneGraph);
                      _loadedImages = state.ImagePaths ?? new List<string>();
-                     _logBuffer += $"Project loaded: {result.Path}\n";
+                     _logBuffer += $"Project loaded: {path}\n";
                  }
                  catch (Exception ex)
                  {
@@ -455,13 +455,13 @@ namespace Deep3DStudio
 
         private void OnSaveProject()
         {
-             var result = Nfd.SaveDialog("d3d", null);
-             if (result.Path != null)
+             var result = Nfd.SaveDialog(out string path, new Dictionary<string, string> { { "Deep3D Project", "d3d" } });
+             if (result == NfdStatus.Ok)
              {
                  try
                  {
-                     CrossProjectManager.SaveProject(result.Path, _sceneGraph, _loadedImages);
-                     _logBuffer += $"Project saved: {result.Path}\n";
+                     CrossProjectManager.SaveProject(path, _sceneGraph, _loadedImages);
+                     _logBuffer += $"Project saved: {path}\n";
                  }
                  catch (Exception ex)
                  {

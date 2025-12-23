@@ -151,6 +151,7 @@ namespace Deep3DStudio.Configuration
         public bool ShowGrid { get; set; } = true;
         public bool ShowAxes { get; set; } = true;
         public bool ShowCameras { get; set; } = true;
+        public bool ShowGizmo { get; set; } = true;
         public bool ShowInfoOverlay { get; set; } = true;
         public bool ShowPointCloudBounds { get; set; } = true; // Show bounding box for point clouds
         public int LastWindowWidth { get; set; } = 1400;
@@ -322,6 +323,7 @@ namespace Deep3DStudio.Configuration
                     writer.WriteLine($"GridColorB={GridColorB.ToString("F3", CultureInfo.InvariantCulture)}");
                     writer.WriteLine($"ShowGrid={ShowGrid}");
                     writer.WriteLine($"ShowAxes={ShowAxes}");
+                    writer.WriteLine($"ShowGizmo={ShowGizmo}");
                     writer.WriteLine($"ShowCameras={ShowCameras}");
                     writer.WriteLine($"ShowInfoOverlay={ShowInfoOverlay}");
                     writer.WriteLine($"ShowPointCloudBounds={ShowPointCloudBounds}");
@@ -467,6 +469,8 @@ namespace Deep3DStudio.Configuration
                 ShowAxes = sa;
             if (TryGetValue("Viewport", "ShowCameras", out string? scStr) && bool.TryParse(scStr, out var sc))
                 ShowCameras = sc;
+            if (TryGetValue("Viewport", "ShowGizmo", out string? gizStr) && bool.TryParse(gizStr, out var giz))
+                ShowGizmo = giz;
             if (TryGetValue("Viewport", "ShowInfoOverlay", out string? sioStr) && bool.TryParse(sioStr, out var sio))
                 ShowInfoOverlay = sio;
             if (TryGetValue("Viewport", "ShowPointCloudBounds", out string? spcbStr) && bool.TryParse(spcbStr, out var spcb))
@@ -628,6 +632,7 @@ namespace Deep3DStudio.Configuration
             GridColorB = 0.35f;
             ShowGrid = true;
             ShowAxes = true;
+            ShowGizmo = true;
             ShowCameras = true;
             ShowInfoOverlay = true;
             ShowPointCloudBounds = true;
