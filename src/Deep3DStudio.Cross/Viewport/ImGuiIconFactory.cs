@@ -118,6 +118,29 @@ namespace Deep3DStudio.Viewport
                  canvas.DrawLine(w*0.2f, h*0.2f, w*0.8f, h*0.8f, p);
                  canvas.DrawLine(w*0.8f, h*0.2f, w*0.2f, h*0.8f, p);
             });
+
+            _icons[IconType.Cloud] = CreateIcon(SKColors.Cyan, (canvas, w, h) => {
+                 // Point Cloud Icon
+                 var p = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
+                 canvas.DrawCircle(w*0.3f, h*0.5f, 4, p);
+                 canvas.DrawCircle(w*0.5f, h*0.3f, 4, p);
+                 canvas.DrawCircle(w*0.7f, h*0.5f, 4, p);
+                 canvas.DrawCircle(w*0.5f, h*0.7f, 4, p);
+                 canvas.DrawCircle(w*0.5f, h*0.5f, 4, p);
+            });
+
+            _icons[IconType.Mesh] = CreateIcon(SKColors.Magenta, (canvas, w, h) => {
+                 // Mesh Icon (Wireframe triangle)
+                 var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                 var path = new SKPath();
+                 path.MoveTo(w*0.5f, h*0.2f);
+                 path.LineTo(w*0.2f, h*0.8f);
+                 path.LineTo(w*0.8f, h*0.8f);
+                 path.Close();
+                 canvas.DrawPath(path, p);
+                 // Internal lines
+                 canvas.DrawLine(w*0.5f, h*0.2f, w*0.5f, h*0.8f, p);
+            });
         }
 
         private int CreateIcon(SKColor bg, Action<SKCanvas, int, int> drawAction)
