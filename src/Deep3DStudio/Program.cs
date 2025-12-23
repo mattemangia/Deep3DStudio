@@ -16,54 +16,11 @@ namespace Deep3DStudio
             // This is critical for GL.Begin/GL.End calls in the viewport.
             Environment.SetEnvironmentVariable("MESA_GL_VERSION_OVERRIDE", "3.3COMPAT");
 
-            // macOS-specific GTK configuration
-            if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
-                System.Runtime.InteropServices.OSPlatform.OSX))
-            {
-                // Don't force a backend - let GTK auto-detect (Quartz or X11)
-                // Note: Removed GTK_CSD and GTK_THEME settings as they can cause
-                // rendering issues on macOS with certain GTK versions
-            }
-
-            try
-            {
-                Application.Init();
-                Console.WriteLine("GTK Application initialized successfully");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"FATAL: GTK init failed: {ex.Message}");
-                Console.WriteLine($"Stack: {ex.StackTrace}");
-                return;
-            }
-
-            // Check GTK display
-            var display = Gdk.Display.Default;
-            if (display == null)
-            {
-                Console.WriteLine("FATAL: No GDK display available");
-                Console.WriteLine("On macOS, you may need to:");
-                Console.WriteLine("  1. Install XQuartz: brew install --cask xquartz");
-                Console.WriteLine("  2. Log out and log back in");
-                Console.WriteLine("  3. Set DISPLAY environment variable");
-                return;
-            }
-            Console.WriteLine($"GDK Display: {display.Name}");
+            Application.Init();
 
             // Show Splash Screen
-            Console.WriteLine("Creating splash screen...");
             var splash = new SplashScreen();
-            Console.WriteLine("Presenting splash screen...");
-            splash.Present();
-
-            // Ensure the splash window is fully realized and visible
-            int maxWait = 100; // Max iterations to wait
-            while (!splash.IsRealized && maxWait-- > 0)
-            {
-                Application.RunIteration(false);
-            }
-            Console.WriteLine($"Splash screen realized: {splash.IsRealized}");
-
+            splash.Show();
             splash.UpdateStatus("Loading Settings...");
 
             // Initialize settings from INI file (platform-specific location)
@@ -115,30 +72,19 @@ namespace Deep3DStudio
                 PythonService.Instance.OnLogOutput -= logHandler;
             }
 
+            var app = new Application("org.Deep3DStudio.Deep3DStudio", GLib.ApplicationFlags.None);
+            app.Register(GLib.Cancellable.Current);
+
             splash.UpdateStatus("Loading User Interface...");
             var win = new MainWindow();
+            app.AddWindow(win);
 
-            // Process pending events
-            while (Application.EventsPending())
-                Application.RunIteration(false);
-
-            // Destroy splash and show main window
             splash.Destroy();
-
-            // Process the splash destruction
-            while (Application.EventsPending())
-                Application.RunIteration(false);
-
-            // Show the main window
-            win.ShowAll();
-            win.Present();
-
-            // Process events after showing
-            while (Application.EventsPending())
-                Application.RunIteration(false);
-
-            Console.WriteLine("Starting GTK main loop...");
+            win.Show();
             Application.Run();
+
+            // Prevent premature garbage collection of the Gtk.Application instance
+            GC.KeepAlive(app);
         }
     }
 }

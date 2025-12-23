@@ -8,40 +8,23 @@ namespace Deep3DStudio.UI
     {
         private Label _statusLabel;
         private Spinner _spinner;
-        private static bool _isMacOS = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
-            System.Runtime.InteropServices.OSPlatform.OSX);
 
         public SplashScreen() : base(Gtk.WindowType.Toplevel)
         {
-            // Set window properties - use Normal hint for better macOS compatibility
-            this.TypeHint = _isMacOS ? WindowTypeHint.Normal : WindowTypeHint.Splashscreen;
+            this.TypeHint = WindowTypeHint.Splashscreen;
             this.WindowPosition = WindowPosition.Center;
             this.Decorated = false;
-            this.BorderWidth = 0;
-            this.SetDefaultSize(350, 400);
-            this.Resizable = false;
-            this.KeepAbove = true;
-            this.AppPaintable = true;
-
-            // Apply dark background immediately
-            var darkColor = new Gdk.Color(26, 26, 26);
-            this.ModifyBg(StateType.Normal, darkColor);
+            this.BorderWidth = 0; // Use Frame for border
 
             // Frame for border
             var frame = new Frame();
             frame.ShadowType = ShadowType.Out;
-            frame.ModifyBg(StateType.Normal, darkColor);
             this.Add(frame);
 
-            // Main container with EventBox for background color
-            var eventBox = new EventBox();
-            eventBox.ModifyBg(StateType.Normal, darkColor);
-            frame.Add(eventBox);
-
+            // Main container
             var vbox = new Box(Orientation.Vertical, 10);
             vbox.Margin = 20;
-            vbox.ModifyBg(StateType.Normal, darkColor);
-            eventBox.Add(vbox);
+            frame.Add(vbox);
 
             // Logo
             try
@@ -79,6 +62,11 @@ namespace Deep3DStudio.UI
             _spinner.Active = true;
             _spinner.Start();
 
+            // Style spinner white using CSS
+            var cssProvider = new CssProvider();
+            cssProvider.LoadFromData("spinner { color: #FFFFFF; }");
+            _spinner.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
+
             spinnerBox.PackStart(new Label(""), true, true, 0); // Spacer
             spinnerBox.PackStart(_spinner, false, false, 0);
             spinnerBox.PackStart(new Label(""), true, true, 0); // Spacer
@@ -89,49 +77,13 @@ namespace Deep3DStudio.UI
             _statusLabel.ModifyFg(StateType.Normal, new Gdk.Color(180, 180, 180));
             vbox.PackStart(_statusLabel, false, false, 5);
 
-            Console.WriteLine("SplashScreen: Constructor completed");
-        }
+            // Background color (Black)
+            var black = new Gdk.Color(0, 0, 0);
+            this.ModifyBg(StateType.Normal, black);
+            frame.ModifyBg(StateType.Normal, black);
+            vbox.ModifyBg(StateType.Normal, black);
 
-        /// <summary>
-        /// Shows the splash screen and ensures it is properly displayed on all platforms
-        /// </summary>
-        public void Present()
-        {
-            Console.WriteLine("SplashScreen: Presenting window...");
-
-            // Show all widgets first
             this.ShowAll();
-
-            // Ensure the window is mapped
-            if (!this.IsMapped)
-            {
-                this.Map();
-            }
-
-            // Force window to front on macOS
-            if (_isMacOS)
-            {
-                this.KeepAbove = true;
-                this.GrabFocus();
-            }
-
-            // Process pending events to ensure window is displayed
-            ProcessPendingEvents();
-
-            // Force a redraw
-            this.QueueDraw();
-            ProcessPendingEvents();
-
-            Console.WriteLine($"SplashScreen: Window visible={this.IsVisible}, mapped={this.IsMapped}");
-        }
-
-        private void ProcessPendingEvents()
-        {
-            // Process all pending GTK events
-            while (Application.EventsPending())
-            {
-                Application.RunIteration(false);
-            }
         }
 
         public void UpdateStatus(string message)
