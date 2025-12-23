@@ -21,13 +21,8 @@ namespace Deep3DStudio
                 System.Runtime.InteropServices.OSPlatform.OSX))
             {
                 // Don't force a backend - let GTK auto-detect (Quartz or X11)
-                // Forcing a backend can cause grey screens if that backend isn't working
-
-                // Disable client-side decorations
-                Environment.SetEnvironmentVariable("GTK_CSD", "0");
-
-                // Ensure proper theme rendering
-                Environment.SetEnvironmentVariable("GTK_THEME", "Default");
+                // Note: Removed GTK_CSD and GTK_THEME settings as they can cause
+                // rendering issues on macOS with certain GTK versions
             }
 
             try
@@ -120,12 +115,8 @@ namespace Deep3DStudio
                 PythonService.Instance.OnLogOutput -= logHandler;
             }
 
-            var app = new Application("org.Deep3DStudio.Deep3DStudio", GLib.ApplicationFlags.None);
-            app.Register(GLib.Cancellable.Current);
-
             splash.UpdateStatus("Loading User Interface...");
             var win = new MainWindow();
-            app.AddWindow(win);
 
             // Process pending events
             while (Application.EventsPending())
@@ -140,31 +131,14 @@ namespace Deep3DStudio
 
             // Show the main window
             win.ShowAll();
-
-            // Activate the window on macOS to ensure it comes to front
-            if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
-                System.Runtime.InteropServices.OSPlatform.OSX))
-            {
-                win.Present();
-                win.KeepAbove = true;
-                // Process events to ensure window appears
-                while (Application.EventsPending())
-                    Application.RunIteration(false);
-                win.KeepAbove = false;
-            }
+            win.Present();
 
             // Process events after showing
             while (Application.EventsPending())
                 Application.RunIteration(false);
 
-            // Queue an initial draw for the viewport
-            win.QueueDraw();
-
+            Console.WriteLine("Starting GTK main loop...");
             Application.Run();
-
-            // Prevent premature garbage collection of the Gtk.Application instance
-            // while the native main loop is running.
-            GC.KeepAlive(app);
         }
     }
 }
