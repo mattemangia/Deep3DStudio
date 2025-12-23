@@ -19,6 +19,7 @@ namespace Deep3DStudio
 
         private int _fontTexture;
         private int _shader;
+        private bool _shaderValid = false;
         private int _shaderFontTextureLocation;
         private int _shaderProjectionMatrixLocation;
 
@@ -96,8 +97,12 @@ void main()
     gl_FragColor = Frag_Color * texture2D(Texture, Frag_UV.st);
 }";
             _shader = CreateProgram("ImGui", vertexSource, fragmentSource);
-            _shaderFontTextureLocation = GL.GetUniformLocation(_shader, "Texture");
-            _shaderProjectionMatrixLocation = GL.GetUniformLocation(_shader, "ProjMtx");
+            if (_shader != 0)
+            {
+                _shaderValid = true;
+                _shaderFontTextureLocation = GL.GetUniformLocation(_shader, "Texture");
+                _shaderProjectionMatrixLocation = GL.GetUniformLocation(_shader, "ProjMtx");
+            }
 
             int attribLocationPosition = GL.GetAttribLocation(_shader, "Position");
             int attribLocationUV = GL.GetAttribLocation(_shader, "UV");
@@ -197,6 +202,7 @@ void main()
         private void RenderImDrawData(ImDrawDataPtr draw_data)
         {
             if (draw_data.CmdListsCount == 0) return;
+            if (!_shaderValid) return;
 
             GL.Viewport(0, 0, _windowWidth, _windowHeight);
 
@@ -271,6 +277,9 @@ void main()
             {
                 string info = GL.GetProgramInfoLog(program);
                 Console.WriteLine($"GL.LinkProgram had info log [{name}]:\n{info}");
+                // Clean up if link failed
+                GL.DeleteProgram(program);
+                program = 0;
             }
 
             GL.DetachShader(program, vertex);
