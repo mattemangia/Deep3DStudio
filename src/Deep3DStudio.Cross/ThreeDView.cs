@@ -213,6 +213,81 @@ namespace Deep3DStudio.Viewport
         public void OnMouseWheel(float offset)
         {
             _zoom += offset;
+            // Clamp zoom
+            _zoom = Math.Clamp(_zoom, -100.0f, -0.5f);
+        }
+
+        /// <summary>
+        /// Render with specified viewport region
+        /// </summary>
+        public void Render(int vpX, int vpY, int vpW, int vpH, int windowWidth, int windowHeight)
+        {
+            // Set viewport for the 3D view area
+            GL.Viewport(vpX, windowHeight - vpY - vpH, vpW, vpH);
+            GL.Scissor(vpX, windowHeight - vpY - vpH, vpW, vpH);
+            GL.Enable(EnableCap.ScissorTest);
+
+            // Clear just this region
+            GL.ClearColor(0.2f, 0.2f, 0.25f, 1.0f);
+            GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+
+            Render(vpW, vpH);
+
+            GL.Disable(EnableCap.ScissorTest);
+
+            // Reset viewport to full window for ImGui
+            GL.Viewport(0, 0, windowWidth, windowHeight);
+        }
+
+        /// <summary>
+        /// Focus camera on the currently selected objects
+        /// </summary>
+        public void FocusOnSelection()
+        {
+            if (_sceneGraph == null || _sceneGraph.SelectedObjects.Count == 0) return;
+
+            Vector3 center = Vector3.Zero;
+            Vector3 boundsMin = new Vector3(float.MaxValue);
+            Vector3 boundsMax = new Vector3(float.MinValue);
+
+            foreach (var obj in _sceneGraph.SelectedObjects)
+            {
+                var (min, max) = obj.GetWorldBounds();
+                boundsMin = Vector3.ComponentMin(boundsMin, min);
+                boundsMax = Vector3.ComponentMax(boundsMax, max);
+            }
+
+            center = (boundsMin + boundsMax) * 0.5f;
+            float size = (boundsMax - boundsMin).Length;
+
+            _cameraTarget = center;
+            _zoom = Math.Max(-size * 2.5f, -50f);
+        }
+
+        /// <summary>
+        /// Focus camera on a specific object
+        /// </summary>
+        public void FocusOnObject(SceneObject obj)
+        {
+            if (obj == null) return;
+
+            var (boundsMin, boundsMax) = obj.GetWorldBounds();
+            var center = (boundsMin + boundsMax) * 0.5f;
+            float size = (boundsMax - boundsMin).Length;
+
+            _cameraTarget = center;
+            _zoom = Math.Max(-size * 2.5f, -50f);
+        }
+
+        /// <summary>
+        /// Reset camera to default view
+        /// </summary>
+        public void ResetCamera()
+        {
+            _zoom = -5.0f;
+            _rotationX = 25f;
+            _rotationY = -45f;
+            _cameraTarget = Vector3.Zero;
         }
 
         private void DrawGrid()
