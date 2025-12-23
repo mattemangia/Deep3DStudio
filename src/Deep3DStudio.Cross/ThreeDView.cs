@@ -241,8 +241,19 @@ namespace Deep3DStudio.Viewport
             if (_sceneGraph == null) return;
             var s = IniSettings.Instance;
 
+            // Draw Cameras
+            if (s.ShowCameras)
+            {
+                foreach(var cam in _sceneGraph.GetObjectsOfType<CameraObject>())
+                {
+                    if (cam.Visible) DrawCameraFrustum(cam);
+                }
+            }
+
             foreach(var obj in _sceneGraph.GetVisibleObjects())
             {
+                if (obj is CameraObject) continue; // Already drawn
+
                 GL.PushMatrix();
                 var t = obj.GetWorldTransform();
                 GL.MultMatrix(ref t);
@@ -270,14 +281,34 @@ namespace Deep3DStudio.Viewport
 
                     if (s.ShowMesh && mesh.MeshData != null)
                     {
+                         bool useTexture = s.ShowTexture && mesh.MeshData.Texture != null;
+                         if (useTexture)
+                         {
+                             if (mesh.MeshData.TextureId == -1) UploadTexture(mesh.MeshData);
+                             if (mesh.MeshData.TextureId != -1)
+                             {
+                                 GL.Enable(EnableCap.Texture2D);
+                                 GL.BindTexture(TextureTarget.Texture2D, mesh.MeshData.TextureId);
+                                 GL.Color3(1.0f, 1.0f, 1.0f);
+                             }
+                             else useTexture = false;
+                         }
+
                          GL.Begin(PrimitiveType.Triangles);
                          bool hasColors = mesh.MeshData.Colors.Count >= mesh.MeshData.Vertices.Count;
+                         bool hasUVs = useTexture && mesh.MeshData.UVs.Count >= mesh.MeshData.Vertices.Count;
+
                          for(int i=0; i < mesh.MeshData.Indices.Count; i++)
                          {
                              int idx = mesh.MeshData.Indices[i];
                              if (idx < mesh.MeshData.Vertices.Count)
                              {
-                                 if (hasColors)
+                                 if (useTexture && hasUVs)
+                                 {
+                                     var uv = mesh.MeshData.UVs[idx];
+                                     GL.TexCoord2(uv.X, uv.Y);
+                                 }
+                                 else if (hasColors)
                                  {
                                      var c = mesh.MeshData.Colors[idx];
                                      if(isSelected) GL.Color3(Math.Min(1, c.X + 0.2f), Math.Min(1, c.Y+0.2f), c.Z);
@@ -291,39 +322,123 @@ namespace Deep3DStudio.Viewport
                              }
                          }
                          GL.End();
+
+                         if (useTexture)
+                         {
+                             GL.BindTexture(TextureTarget.Texture2D, 0);
+                             GL.Disable(EnableCap.Texture2D);
+                         }
                     }
                     GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
 
                     if (isSelected)
                     {
-                        // Draw box
-                        var min = obj.BoundsMin;
-                        var max = obj.BoundsMax;
-                        GL.Color3(1, 1, 0);
-                        GL.LineWidth(2.0f);
-                        GL.Begin(PrimitiveType.Lines);
-                        // Bottom
-                        GL.Vertex3(min.X, min.Y, min.Z); GL.Vertex3(max.X, min.Y, min.Z);
-                        GL.Vertex3(max.X, min.Y, min.Z); GL.Vertex3(max.X, min.Y, max.Z);
-                        GL.Vertex3(max.X, min.Y, max.Z); GL.Vertex3(min.X, min.Y, max.Z);
-                        GL.Vertex3(min.X, min.Y, max.Z); GL.Vertex3(min.X, min.Y, min.Z);
-                        // Top
-                        GL.Vertex3(min.X, max.Y, min.Z); GL.Vertex3(max.X, max.Y, min.Z);
-                        GL.Vertex3(max.X, max.Y, min.Z); GL.Vertex3(max.X, max.Y, max.Z);
-                        GL.Vertex3(max.X, max.Y, max.Z); GL.Vertex3(min.X, max.Y, max.Z);
-                        GL.Vertex3(min.X, max.Y, max.Z); GL.Vertex3(min.X, max.Y, min.Z);
-                        // Sides
-                        GL.Vertex3(min.X, min.Y, min.Z); GL.Vertex3(min.X, max.Y, min.Z);
-                        GL.Vertex3(max.X, min.Y, min.Z); GL.Vertex3(max.X, max.Y, min.Z);
-                        GL.Vertex3(max.X, min.Y, max.Z); GL.Vertex3(max.X, max.Y, max.Z);
-                        GL.Vertex3(min.X, min.Y, max.Z); GL.Vertex3(min.X, max.Y, max.Z);
-                        GL.End();
-                        GL.LineWidth(1.0f);
+                        DrawBoundingBox(obj);
                     }
                 }
 
                 GL.PopMatrix();
             }
+        }
+
+        private void UploadTexture(MeshData mesh)
+        {
+            if (mesh.Texture == null) return;
+
+            int id = GL.GenTexture();
+            GL.BindTexture(TextureTarget.Texture2D, id);
+
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
+
+            // Access pixels
+            var info = mesh.Texture.Info;
+            // Depending on Skia setup, might be BGRA or RGBA.
+            // On cross platform, ColorType matters.
+            PixelFormat format = PixelFormat.Bgra;
+            if (info.ColorType == SkiaSharp.SKColorType.Rgba8888) format = PixelFormat.Rgba;
+
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba, info.Width, info.Height, 0,
+                format, PixelType.UnsignedByte, mesh.Texture.GetPixels());
+
+            mesh.TextureId = id;
+        }
+
+        private void DrawBoundingBox(SceneObject obj)
+        {
+            var min = obj.BoundsMin;
+            var max = obj.BoundsMax;
+            GL.Color3(1, 1, 0);
+            GL.LineWidth(2.0f);
+            GL.Begin(PrimitiveType.Lines);
+            // Bottom
+            GL.Vertex3(min.X, min.Y, min.Z); GL.Vertex3(max.X, min.Y, min.Z);
+            GL.Vertex3(max.X, min.Y, min.Z); GL.Vertex3(max.X, min.Y, max.Z);
+            GL.Vertex3(max.X, min.Y, max.Z); GL.Vertex3(min.X, min.Y, max.Z);
+            GL.Vertex3(min.X, min.Y, max.Z); GL.Vertex3(min.X, min.Y, min.Z);
+            // Top
+            GL.Vertex3(min.X, max.Y, min.Z); GL.Vertex3(max.X, max.Y, min.Z);
+            GL.Vertex3(max.X, max.Y, min.Z); GL.Vertex3(max.X, max.Y, max.Z);
+            GL.Vertex3(max.X, max.Y, max.Z); GL.Vertex3(min.X, max.Y, max.Z);
+            GL.Vertex3(min.X, max.Y, max.Z); GL.Vertex3(min.X, max.Y, min.Z);
+            // Sides
+            GL.Vertex3(min.X, min.Y, min.Z); GL.Vertex3(min.X, max.Y, min.Z);
+            GL.Vertex3(max.X, min.Y, min.Z); GL.Vertex3(max.X, max.Y, min.Z);
+            GL.Vertex3(max.X, min.Y, max.Z); GL.Vertex3(max.X, max.Y, max.Z);
+            GL.Vertex3(min.X, min.Y, max.Z); GL.Vertex3(min.X, max.Y, max.Z);
+            GL.End();
+            GL.LineWidth(1.0f);
+        }
+
+        private void DrawCameraFrustum(CameraObject cam)
+        {
+            GL.PushMatrix();
+            // Cameras usually don't have SceneObject parents in this simple graph, but just in case
+            // If the camera pose is set, use it.
+            if (cam.Pose != null)
+            {
+                // Pose is CameraToWorld
+                var m = cam.Pose.CameraToWorld;
+                // Convert OpenTK Matrix4
+                var mat = new Matrix4(
+                    m.M11, m.M12, m.M13, m.M14,
+                    m.M21, m.M22, m.M23, m.M24,
+                    m.M31, m.M32, m.M33, m.M34,
+                    m.M41, m.M42, m.M43, m.M44
+                );
+                GL.MultMatrix(ref mat);
+            }
+            else
+            {
+                var t = cam.GetWorldTransform();
+                GL.MultMatrix(ref t);
+            }
+
+            float scale = 0.3f;
+            var corners = cam.GetFrustumCorners(scale);
+            var color = cam.Selected ? new Vector3(1f, 1f, 0f) : cam.FrustumColor;
+
+            GL.Color3(color.X, color.Y, color.Z);
+            GL.LineWidth(2.0f);
+
+            GL.Begin(PrimitiveType.Lines);
+            // 0 (Cam Center) to 4 corners
+            GL.Vertex3(0,0,0); GL.Vertex3(corners[0]);
+            GL.Vertex3(0,0,0); GL.Vertex3(corners[1]);
+            GL.Vertex3(0,0,0); GL.Vertex3(corners[2]);
+            GL.Vertex3(0,0,0); GL.Vertex3(corners[3]);
+
+            // Image plane rect
+            GL.Vertex3(corners[0]); GL.Vertex3(corners[1]);
+            GL.Vertex3(corners[1]); GL.Vertex3(corners[2]);
+            GL.Vertex3(corners[2]); GL.Vertex3(corners[3]);
+            GL.Vertex3(corners[3]); GL.Vertex3(corners[0]);
+            GL.End();
+
+            GL.LineWidth(1.0f);
+            GL.PopMatrix();
         }
 
         // --- Interaction Logic ---
