@@ -13,6 +13,7 @@ using System.Drawing;
 using Deep3DStudio.IO;
 using NativeFileDialogs.Net;
 using Deep3DStudio.Model;
+using Deep3DStudio.Model.AIModels;
 using System.Threading.Tasks;
 using System.IO;
 using System.Linq;
@@ -34,10 +35,12 @@ namespace Deep3DStudio
         private string _logBuffer = "";
         private bool _isBusy = false;
         private string _busyStatus = "";
+        private float _busyProgress = 0.0f;
 
         // UI Windows
         private bool _showSettings = false;
         private bool _showAbout = false;
+        private DrawDiagnosticsWindow _diagnosticsWindow = new DrawDiagnosticsWindow();
         private int _logoTexture = -1;
 
         // Image List
@@ -70,6 +73,12 @@ namespace Deep3DStudio
             // Init Python service hook
             PythonService.Instance.OnLogOutput += (msg) => {
                 _logBuffer += msg + "\n";
+            };
+
+            // Init AI Manager hooks
+            AIModelManager.Instance.ProgressUpdated += (status, progress) => {
+                _busyStatus = status;
+                _busyProgress = progress;
             };
 
             // Init Viewport GL state
@@ -268,6 +277,7 @@ namespace Deep3DStudio
                 }
                 if (ImGui.BeginMenu("Help"))
                 {
+                    if (ImGui.MenuItem("AI Diagnostics")) _diagnosticsWindow.Visible = true;
                     if (ImGui.MenuItem("About")) _showAbout = true;
                     ImGui.EndMenu();
                 }
@@ -430,6 +440,7 @@ namespace Deep3DStudio
             // Dialogs
             if (_showSettings) DrawSettingsWindow();
             if (_showAbout) DrawAboutWindow();
+            _diagnosticsWindow.Draw();
         }
 
         private void RenderSceneGraph()
@@ -587,28 +598,28 @@ namespace Deep3DStudio
 
             _isBusy = true;
             _busyStatus = $"Running {_workflows[_selectedWorkflow]}...";
+            _busyProgress = 0.0f;
 
             try
             {
                 SceneResult? result = null;
-                // Map UI selection to implementation
-                await Task.Run(() =>
+
+                await Task.Run(async () =>
                 {
-                    if (_workflows[_selectedWorkflow].Contains("Dust3r"))
+                    // Use AIModelManager to get progress updates
+                    // Map selection to a pipeline
+                    WorkflowPipeline pipeline = WorkflowPipeline.ImageToDust3rToMesh;
+
+                    // Simple logic for now, expanding based on selection
+                    if (_workflows[_selectedWorkflow].Contains("TripoSR")) pipeline = WorkflowPipeline.ImageToTripoSR;
+                    else if (_workflows[_selectedWorkflow].Contains("LGM")) pipeline = WorkflowPipeline.ImageToLGM;
+                    else if (_workflows[_selectedWorkflow].Contains("Wonder3D")) pipeline = WorkflowPipeline.ImageToWonder3D;
+
+                    result = await AIModelManager.Instance.ExecuteWorkflowAsync(pipeline, _loadedImages, null, (s, p) =>
                     {
-                        using var dust3r = new Dust3rInference();
-                        // Assuming ReconstructScene handles full pipeline, we can control steps via flags if supported
-                        // or simulate partial execution. For now, we invoke the full pipeline but could split it.
-                        // Ideally Dust3rInference would accept flags.
-                        result = dust3r.ReconstructScene(_loadedImages);
-                    }
-                    else
-                    {
-                        // Support for other models would follow similar pattern
-                        // For this task, we focus on the primary Dust3r path as "Working"
-                        // but ensure no empty blocks exist.
-                        _logBuffer += "Selected workflow implementation pending backend support.\n";
-                    }
+                        _busyStatus = s;
+                        _busyProgress = p;
+                    });
                 });
 
                 if (result != null)
