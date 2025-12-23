@@ -58,16 +58,16 @@ namespace Deep3DStudio
             // Show Splash Screen
             Console.WriteLine("Creating splash screen...");
             var splash = new SplashScreen();
-            Console.WriteLine("Showing splash screen...");
-            splash.Show();
-            Console.WriteLine("Splash screen shown");
+            Console.WriteLine("Presenting splash screen...");
+            splash.Present();
 
-            // Force realize the splash window
-            while (!splash.IsRealized)
+            // Ensure the splash window is fully realized and visible
+            int maxWait = 100; // Max iterations to wait
+            while (!splash.IsRealized && maxWait-- > 0)
             {
-                Application.RunIteration();
+                Application.RunIteration(false);
             }
-            Console.WriteLine("Splash screen realized");
+            Console.WriteLine($"Splash screen realized: {splash.IsRealized}");
 
             splash.UpdateStatus("Loading Settings...");
 
@@ -129,14 +129,36 @@ namespace Deep3DStudio
 
             // Process pending events
             while (Application.EventsPending())
-                Application.RunIteration();
+                Application.RunIteration(false);
 
+            // Destroy splash and show main window
             splash.Destroy();
+
+            // Process the splash destruction
+            while (Application.EventsPending())
+                Application.RunIteration(false);
+
+            // Show the main window
             win.ShowAll();
+
+            // Activate the window on macOS to ensure it comes to front
+            if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+                System.Runtime.InteropServices.OSPlatform.OSX))
+            {
+                win.Present();
+                win.KeepAbove = true;
+                // Process events to ensure window appears
+                while (Application.EventsPending())
+                    Application.RunIteration(false);
+                win.KeepAbove = false;
+            }
 
             // Process events after showing
             while (Application.EventsPending())
-                Application.RunIteration();
+                Application.RunIteration(false);
+
+            // Queue an initial draw for the viewport
+            win.QueueDraw();
 
             Application.Run();
 

@@ -8,23 +8,40 @@ namespace Deep3DStudio.UI
     {
         private Label _statusLabel;
         private Spinner _spinner;
+        private static bool _isMacOS = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+            System.Runtime.InteropServices.OSPlatform.OSX);
 
         public SplashScreen() : base(Gtk.WindowType.Toplevel)
         {
-            this.TypeHint = WindowTypeHint.Splashscreen;
+            // Set window properties - use Normal hint for better macOS compatibility
+            this.TypeHint = _isMacOS ? WindowTypeHint.Normal : WindowTypeHint.Splashscreen;
             this.WindowPosition = WindowPosition.Center;
             this.Decorated = false;
-            this.BorderWidth = 0; // Use Frame for border
+            this.BorderWidth = 0;
+            this.SetDefaultSize(350, 400);
+            this.Resizable = false;
+            this.KeepAbove = true;
+            this.AppPaintable = true;
+
+            // Apply dark background immediately
+            var darkColor = new Gdk.Color(26, 26, 26);
+            this.ModifyBg(StateType.Normal, darkColor);
 
             // Frame for border
             var frame = new Frame();
             frame.ShadowType = ShadowType.Out;
+            frame.ModifyBg(StateType.Normal, darkColor);
             this.Add(frame);
 
-            // Main container
+            // Main container with EventBox for background color
+            var eventBox = new EventBox();
+            eventBox.ModifyBg(StateType.Normal, darkColor);
+            frame.Add(eventBox);
+
             var vbox = new Box(Orientation.Vertical, 10);
             vbox.Margin = 20;
-            frame.Add(vbox);
+            vbox.ModifyBg(StateType.Normal, darkColor);
+            eventBox.Add(vbox);
 
             // Logo
             try
@@ -72,58 +89,49 @@ namespace Deep3DStudio.UI
             _statusLabel.ModifyFg(StateType.Normal, new Gdk.Color(180, 180, 180));
             vbox.PackStart(_statusLabel, false, false, 5);
 
-            // Apply dark theme background
-            // On macOS, skip CSS and use direct color modification for better compatibility
-            bool isMacOS = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
-                System.Runtime.InteropServices.OSPlatform.OSX);
+            Console.WriteLine("SplashScreen: Constructor completed");
+        }
 
-            if (isMacOS)
-            {
-                // macOS: Use ModifyBg directly, skip CSS
-                Console.WriteLine("SplashScreen: Using ModifyBg for macOS");
-                var black = new Gdk.Color(26, 26, 26);
-                this.ModifyBg(StateType.Normal, black);
-                frame.ModifyBg(StateType.Normal, black);
-                vbox.ModifyBg(StateType.Normal, black);
-            }
-            else
-            {
-                // Other platforms: Try CSS first
-                var cssProvider = new CssProvider();
-                try
-                {
-                    cssProvider.LoadFromData(@"
-                        window {
-                            background-color: #1a1a1a;
-                        }
-                        frame {
-                            background-color: #1a1a1a;
-                        }
-                        box {
-                            background-color: #1a1a1a;
-                        }
-                        spinner {
-                            color: #FFFFFF;
-                        }
-                    ");
-                    this.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
-                    frame.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
-                    vbox.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
-                    _spinner.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
-                }
-                catch
-                {
-                    // Fallback to ModifyBg if CSS fails
-                    var black = new Gdk.Color(26, 26, 26);
-                    this.ModifyBg(StateType.Normal, black);
-                    frame.ModifyBg(StateType.Normal, black);
-                    vbox.ModifyBg(StateType.Normal, black);
-                }
-            }
+        /// <summary>
+        /// Shows the splash screen and ensures it is properly displayed on all platforms
+        /// </summary>
+        public void Present()
+        {
+            Console.WriteLine("SplashScreen: Presenting window...");
 
-            Console.WriteLine("SplashScreen: Calling ShowAll()");
+            // Show all widgets first
             this.ShowAll();
-            Console.WriteLine("SplashScreen: ShowAll() completed");
+
+            // Ensure the window is mapped
+            if (!this.IsMapped)
+            {
+                this.Map();
+            }
+
+            // Force window to front on macOS
+            if (_isMacOS)
+            {
+                this.KeepAbove = true;
+                this.SetUrgencyHint(true);
+            }
+
+            // Process pending events to ensure window is displayed
+            ProcessPendingEvents();
+
+            // Force a redraw
+            this.QueueDraw();
+            ProcessPendingEvents();
+
+            Console.WriteLine($"SplashScreen: Window visible={this.IsVisible}, mapped={this.IsMapped}");
+        }
+
+        private void ProcessPendingEvents()
+        {
+            // Process all pending GTK events
+            while (Application.EventsPending())
+            {
+                Application.RunIteration(false);
+            }
         }
 
         public void UpdateStatus(string message)

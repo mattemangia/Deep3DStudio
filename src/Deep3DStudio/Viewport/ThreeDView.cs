@@ -437,6 +437,8 @@ namespace Deep3DStudio.Viewport
                     gridVerts.Add(s.GridColorR); gridVerts.Add(s.GridColorG); gridVerts.Add(s.GridColorB);
                 }
 
+                _gridVertexCount = gridVerts.Count / 6; // 6 floats per vertex (pos + color)
+
                 _gridVao = GL.GenVertexArray();
                 _gridVbo = GL.GenBuffer();
 
@@ -506,13 +508,19 @@ namespace Deep3DStudio.Viewport
             _pointCloudBuffers.Clear();
         }
 
+        // Track grid vertex count for modern GL
+        private int _gridVertexCount = 0;
+
         private void OnRender(object? sender, RenderArgs args)
         {
             if (!_loaded) return;
 
+            // If neither modern GL nor legacy is supported, we can't render
             if (!_useModernGL && !_legacySupported)
             {
-                if (EnsureLegacySupport("render")) return;
+                // At least clear to show we're running
+                GL.ClearColor(0.2f, 0.2f, 0.2f, 1.0f);
+                GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
                 return;
             }
 
@@ -532,8 +540,6 @@ namespace Deep3DStudio.Viewport
             // Setup matrices
             _projectionMatrix = Matrix4.CreatePerspectiveFieldOfView(
                 MathHelper.DegreesToRadians(45f), (float)w / h, 0.1f, 1000f);
-            GL.MatrixMode(MatrixMode.Projection);
-            GL.LoadMatrix(ref _projectionMatrix);
 
             // Apply Coordinate System Transformation
             Matrix4 coordTransform = Matrix4.Identity;
@@ -556,10 +562,17 @@ namespace Deep3DStudio.Viewport
                           Matrix4.CreateTranslation(0, 0, _zoom);
 
             _finalViewMatrix = coordTransform * _viewMatrix;
-            GL.MatrixMode(MatrixMode.Modelview);
-            GL.LoadMatrix(ref _finalViewMatrix);
 
-            // Draw scene elements
+            // Only use legacy matrix stack if legacy is supported
+            if (_legacySupported)
+            {
+                GL.MatrixMode(MatrixMode.Projection);
+                GL.LoadMatrix(ref _projectionMatrix);
+                GL.MatrixMode(MatrixMode.Modelview);
+                GL.LoadMatrix(ref _finalViewMatrix);
+            }
+
+            // Draw scene elements using modern GL when available
             if (_useModernGL && _shader != null)
             {
                 _shader.Use();
@@ -567,12 +580,12 @@ namespace Deep3DStudio.Viewport
                 _shader.SetMatrix4("view", _finalViewMatrix);
                 _shader.SetMatrix4("model", Matrix4.Identity);
 
-                if (ShowGrid)
+                if (ShowGrid && _gridVao != 0)
                 {
                     GL.BindVertexArray(_gridVao);
-                    GL.DrawArrays(PrimitiveType.Lines, 0, 84); // Approx count
+                    GL.DrawArrays(PrimitiveType.Lines, 0, _gridVertexCount);
                 }
-                if (ShowAxes)
+                if (ShowAxes && _axesVao != 0)
                 {
                     GL.LineWidth(2.5f);
                     GL.BindVertexArray(_axesVao);
@@ -580,60 +593,97 @@ namespace Deep3DStudio.Viewport
                     GL.LineWidth(1.0f);
                 }
 
-                // Note: For now, meshes and other objects still use legacy GL.
-                // If the context is strictly Core, they won't render.
-                // But Grid/Axes verify the context is working.
+                // Draw point clouds using modern GL
+                if (_sceneGraph != null)
+                {
+                    DrawPointCloudsModernGL();
+                }
+
                 GL.BindVertexArray(0);
                 GL.UseProgram(0);
             }
-            else
+            else if (_legacySupported)
             {
+                // Legacy rendering path
                 if (ShowGrid) DrawGrid();
                 if (ShowAxes) DrawAxesEnhanced();
             }
 
-            // Draw scene graph objects
-            if (_sceneGraph != null)
+            // Draw scene graph objects (only if legacy is supported - these use GL.Begin/End)
+            if (_legacySupported)
             {
-                DrawSceneGraph();
+                if (_sceneGraph != null)
+                {
+                    DrawSceneGraph();
+                }
+                else if (_meshes != null)
+                {
+                    // Legacy mesh rendering
+                    DrawLegacyMeshes();
+                }
+
+                // Draw cameras
+                if (ShowCameras && _sceneGraph != null)
+                {
+                    DrawCameras();
+                }
+
+                // Draw gizmo for selected objects
+                // Hide transform gizmos when in Select or Pen Mode
+                if (ShowGizmo && _sceneGraph != null && _sceneGraph.SelectedObjects.Count > 0 &&
+                    _gizmoMode != GizmoMode.Select && _gizmoMode != GizmoMode.Pen)
+                {
+                    DrawGizmo();
+                }
+
+                // Draw selected triangles highlight (Pen mode)
+                if (_gizmoMode == GizmoMode.Pen && _meshEditingTool.SelectedTriangles.Count > 0)
+                {
+                    DrawSelectedTriangles();
+                }
+
+                // Draw crop box
+                if (_showCropBox)
+                {
+                    DrawCropBox();
+                }
+
+                // Draw info overlay (2D)
+                if (ShowInfoText)
+                {
+                    DrawInfoOverlay(w, h);
+                }
             }
-            else if (_meshes != null)
+        }
+
+        /// <summary>
+        /// Draws point clouds using modern OpenGL (for Core profile compatibility)
+        /// </summary>
+        private void DrawPointCloudsModernGL()
+        {
+            if (_sceneGraph == null || _shader == null) return;
+
+            var settings = IniSettings.Instance;
+            if (!settings.ShowPointCloud) return;
+
+            foreach (var obj in _sceneGraph.GetVisibleObjects())
             {
-                // Legacy mesh rendering
-                DrawLegacyMeshes();
+                if (obj is PointCloudObject pcObj)
+                {
+                    // Apply object transform
+                    var transform = obj.GetWorldTransform();
+                    _shader.SetMatrix4("model", transform);
+                    _shader.SetFloat("pointSize", pcObj.PointSize);
+
+                    // Enable point size control from shader
+                    GL.Enable(EnableCap.ProgramPointSize);
+
+                    DrawPointCloudModern(pcObj);
+                }
             }
 
-            // Draw cameras
-            if (ShowCameras && _sceneGraph != null)
-            {
-                DrawCameras();
-            }
-
-            // Draw gizmo for selected objects
-            // Hide transform gizmos when in Select or Pen Mode
-            if (ShowGizmo && _sceneGraph != null && _sceneGraph.SelectedObjects.Count > 0 &&
-                _gizmoMode != GizmoMode.Select && _gizmoMode != GizmoMode.Pen)
-            {
-                DrawGizmo();
-            }
-
-            // Draw selected triangles highlight (Pen mode)
-            if (_gizmoMode == GizmoMode.Pen && _meshEditingTool.SelectedTriangles.Count > 0)
-            {
-                DrawSelectedTriangles();
-            }
-
-            // Draw crop box
-            if (_showCropBox)
-            {
-                DrawCropBox();
-            }
-
-            // Draw info overlay (2D)
-            if (ShowInfoText)
-            {
-                DrawInfoOverlay(w, h);
-            }
+            // Reset model matrix
+            _shader.SetMatrix4("model", Matrix4.Identity);
         }
 
         #endregion
