@@ -69,7 +69,11 @@ namespace Deep3DStudio.Viewport
         {
             // Ensure fixed-function pipeline is active (disable any active shaders from ImGui)
             GL.UseProgram(0);
+            // In Compatibility Profile, 0 is the default VAO.
+            // On some drivers/contexts, explicit binding might be needed or problematic if not strictly supported.
+            // We swallow any potential error here to prevent infinite error loops if the platform dislikes this redundancy.
             GL.BindVertexArray(0);
+            GL.GetError(); // Consume potential InvalidOperation from BindVertexArray(0) on legacy contexts
 
             if (height == 0) height = 1;
 

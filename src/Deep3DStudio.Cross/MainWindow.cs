@@ -835,7 +835,7 @@ namespace Deep3DStudio
                 var size = new System.Numerics.Vector2(28, 28);
 
                 // Focus
-                if (ImGui.ImageButton("##Focus", _iconFactory.GetIcon(IconType.Select), size))
+                if (ImGui.ImageButton("##Focus", _iconFactory.GetIcon(IconType.Focus), size))
                     _viewport.FocusOnSelection();
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Focus on Selection (F)");
 

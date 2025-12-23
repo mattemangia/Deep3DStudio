@@ -24,7 +24,8 @@ namespace Deep3DStudio.Viewport
         Clean,
         Texture,
         Grid,
-        Wireframe
+        Wireframe,
+        Focus
     }
 
     public class ImGuiIconFactory : IDisposable
@@ -182,6 +183,18 @@ namespace Deep3DStudio.Viewport
                  canvas.DrawLine(w,0, w*0.7f, h*0.3f, p);
                  canvas.DrawLine(0,h, w*0.3f, h*0.7f, p);
                  canvas.DrawLine(w,h, w*0.7f, h*0.7f, p);
+            });
+
+            _icons[IconType.Focus] = CreateIcon(SKColors.LightBlue, (canvas, w, h) => {
+                // Target / Focus icon
+                float cx = w * 0.5f;
+                float cy = h * 0.5f;
+                float r = w * 0.3f;
+                var p = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Stroke, StrokeWidth = 3 };
+                canvas.DrawCircle(cx, cy, r, p);
+                canvas.DrawLine(cx - r - 5, cy, cx + r + 5, cy, p);
+                canvas.DrawLine(cx, cy - r - 5, cx, cy + r + 5, p);
+                canvas.DrawCircle(cx, cy, 3, new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill });
             });
         }
 
