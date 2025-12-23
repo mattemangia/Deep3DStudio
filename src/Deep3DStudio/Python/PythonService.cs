@@ -52,8 +52,10 @@ namespace Deep3DStudio.Python
 
                 if (!File.Exists(pythonDll))
                 {
-                    Log($"Error: Python DLL not found at {pythonDll}");
-                    throw new FileNotFoundException($"Python DLL not found at {pythonDll}");
+                    Log($"Warning: Python DLL not found at {pythonDll}");
+                    Log($"Python features will be disabled. Please run setup_deployment.py to install Python environment.");
+                    // Don't throw - allow app to continue without Python
+                    return;
                 }
 
                 // CRITICAL: Clear any existing Python environment variables FIRST
@@ -176,8 +178,9 @@ namespace Deep3DStudio.Python
             }
             catch (Exception ex)
             {
-                Log($"Failed to initialize Python: {ex.Message}");
-                throw;
+                Log($"Warning: Failed to initialize Python: {ex.Message}");
+                Log($"Python features will be disabled. The application will continue without AI functionality.");
+                // Don't re-throw - allow app to start without Python
             }
         }
 

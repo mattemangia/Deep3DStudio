@@ -53,12 +53,16 @@ namespace Deep3DStudio
             }
 
             // Initialize Python Environment (Heavy Task)
+            // This is now non-blocking - app will start even if Python fails
             splash.UpdateStatus("Initializing Python Environment (this may take a moment)...");
 
             // Hook up logging to splash screen
             Action<string> logHandler = (msg) => {
                 if (msg != null && msg.Length > 0 && msg != "\n")
+                {
+                    Console.WriteLine($"[Python] {msg.Trim()}");
                     splash.UpdateStatus(msg.Trim());
+                }
             };
             PythonService.Instance.OnLogOutput += logHandler;
 
@@ -66,13 +70,14 @@ namespace Deep3DStudio
             {
                 // Force initialization now to show progress on splash
                 // This will extract the zip if needed
+                // Note: Initialize() will not throw even if Python is missing - it will log warnings
                 PythonService.Instance.Initialize();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Python init warning: {ex.Message}");
-                splash.UpdateStatus("Python init warning (check console)");
-                // Continue, as some features might work or user can fix in settings
+                Console.WriteLine($"Python initialization error: {ex.Message}");
+                Console.WriteLine($"Application will continue without Python/AI features.");
+                splash.UpdateStatus("Continuing without Python (AI features disabled)");
             }
             finally
             {
@@ -96,10 +101,33 @@ namespace Deep3DStudio
             // This ensures all widgets are properly initialized and visible
             win.ShowAll();
 
-            // Process events again to ensure window is fully rendered on macOS
-            // This fixes the grey screen issue by ensuring the UI is drawn before entering the main loop
-            while (Application.EventsPending())
-                Application.RunIteration();
+            // macOS-specific: Ensure the window is brought to front and activated
+            if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+                System.Runtime.InteropServices.OSPlatform.OSX))
+            {
+                // Present the window to bring it to front
+                win.Present();
+
+                // Activate to ensure it receives focus
+                win.Activate();
+
+                // Process events to ensure rendering
+                while (Application.EventsPending())
+                    Application.RunIteration();
+
+                // Small delay for window manager
+                System.Threading.Thread.Sleep(100);
+
+                // Process events one more time
+                while (Application.EventsPending())
+                    Application.RunIteration();
+            }
+            else
+            {
+                // Non-macOS: Just process events
+                while (Application.EventsPending())
+                    Application.RunIteration();
+            }
 
             Application.Run();
 
