@@ -16,6 +16,13 @@ namespace Deep3DStudio.Scene
             XYZ
         }
 
+        public static void Save(string filepath, PointCloudObject pointCloud)
+        {
+            string ext = Path.GetExtension(filepath).ToLower();
+            ExportFormat format = ext == ".xyz" ? ExportFormat.XYZ : ExportFormat.PLY;
+            Export(filepath, pointCloud, format, true);
+        }
+
         public static void Export(string filepath, PointCloudObject pointCloud, ExportFormat format, bool includeColors)
         {
             switch (format)

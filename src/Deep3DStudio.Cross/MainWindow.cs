@@ -348,7 +348,7 @@ namespace Deep3DStudio
 
             // Check for OpenGL errors
             var err = GL.GetError();
-            if (err != ErrorCode.NoError && err != ErrorCode.InvalidFramebufferOperation)
+            if (err != OpenTK.Graphics.OpenGL.ErrorCode.NoError && err != OpenTK.Graphics.OpenGL.ErrorCode.InvalidFramebufferOperation)
             {
                 Console.WriteLine($"OpenGL Error: {err}");
             }
@@ -415,7 +415,7 @@ namespace Deep3DStudio
 
                     if (ImGui.CollapsingHeader("Stack Trace (click to expand)", ref _errorExpanded))
                     {
-                        ImGui.BeginChild("StackTrace", new System.Numerics.Vector2(0, 150), ImGuiChildFlags.Border);
+                        ImGui.BeginChild("StackTrace", new System.Numerics.Vector2(0, 150), ImGuiChildFlags.Borders);
                         ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(0.7f, 0.7f, 0.7f, 1.0f));
                         ImGui.TextUnformatted(_errorStackTrace);
                         ImGui.PopStyleColor();
@@ -754,7 +754,7 @@ namespace Deep3DStudio
                     () => _viewport.CurrentGizmoMode = GizmoMode.Scale, "Scale (R)", size);
 
                 ImGui.SameLine();
-                ImGui.SeparatorEx(ImGuiSeparatorFlags.Vertical);
+                ImGui.Text("|");
                 ImGui.SameLine();
 
                 // Workflow Selection
@@ -776,7 +776,7 @@ namespace Deep3DStudio
                 DrawToolbarButton("##Mesh", IconType.Mesh, false, () => RunReconstruction(true, false), "Generate Mesh from Points", size);
 
                 ImGui.SameLine();
-                ImGui.SeparatorEx(ImGuiSeparatorFlags.Vertical);
+                ImGui.Text("|");
                 ImGui.SameLine();
 
                 // Visibility Toggles
@@ -1574,7 +1574,7 @@ namespace Deep3DStudio
             {
                 try
                 {
-                    mo.MeshData = MeshDecimator.Decimate(mo.MeshData, 0.5f);
+                    mo.MeshData = MeshOperations.Decimate(mo.MeshData, 0.5f);
                     _logBuffer += $"Decimated: {mo.Name}\n";
                 }
                 catch (Exception ex)
@@ -1590,7 +1590,7 @@ namespace Deep3DStudio
             {
                 try
                 {
-                    mo.MeshData = MeshSmoothing.Smooth(mo.MeshData, 1);
+                    mo.MeshData = MeshOperations.Smooth(mo.MeshData, 1);
                     _logBuffer += $"Smoothed: {mo.Name}\n";
                 }
                 catch (Exception ex)
@@ -1696,7 +1696,7 @@ namespace Deep3DStudio
             try
             {
                 // Use ICP to align second mesh to first
-                var transform = ICP.Align(meshes[1].MeshData.Vertices, meshes[0].MeshData.Vertices);
+                var transform = MeshOperations.AlignICP(meshes[1].MeshData.Vertices, meshes[0].MeshData.Vertices);
                 meshes[1].MeshData.ApplyTransform(transform);
                 _logBuffer += $"Aligned {meshes[1].Name} to {meshes[0].Name}.\n";
             }
