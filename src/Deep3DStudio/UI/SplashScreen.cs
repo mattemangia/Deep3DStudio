@@ -62,11 +62,6 @@ namespace Deep3DStudio.UI
             _spinner.Active = true;
             _spinner.Start();
 
-            // Style spinner white using CSS
-            var cssProvider = new CssProvider();
-            cssProvider.LoadFromData("spinner { color: #FFFFFF; }");
-            _spinner.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
-
             spinnerBox.PackStart(new Label(""), true, true, 0); // Spacer
             spinnerBox.PackStart(_spinner, false, false, 0);
             spinnerBox.PackStart(new Label(""), true, true, 0); // Spacer
@@ -77,7 +72,7 @@ namespace Deep3DStudio.UI
             _statusLabel.ModifyFg(StateType.Normal, new Gdk.Color(180, 180, 180));
             vbox.PackStart(_statusLabel, false, false, 5);
 
-            // Background color (Dark theme)
+            // Apply CSS styling for dark theme and white spinner
             // Use CSS for better cross-platform compatibility, especially on macOS
             var cssProvider = new CssProvider();
             try
@@ -92,10 +87,14 @@ namespace Deep3DStudio.UI
                     box {
                         background-color: #1a1a1a;
                     }
+                    spinner {
+                        color: #FFFFFF;
+                    }
                 ");
                 this.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
                 frame.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
                 vbox.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
+                _spinner.StyleContext.AddProvider(cssProvider, StyleProviderPriority.Application);
             }
             catch
             {
