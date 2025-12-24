@@ -2727,14 +2727,37 @@ namespace Deep3DStudio
                 return;
             }
 
-            foreach (var meshObj in selectedMeshes)
+            var dlg = new DecimateDialog(this);
+            if (dlg.Run() == (int)ResponseType.Ok)
             {
-                meshObj.MeshData = MeshOperations.Decimate(meshObj.MeshData, 0.5f);
-                meshObj.UpdateBounds();
-            }
+                float ratio = dlg.Ratio;
+                float voxelSize = dlg.VoxelSize;
+                bool isUniform = dlg.IsUniform;
 
-            _viewport.QueueDraw();
-            _statusLabel.Text = $"Decimated {selectedMeshes.Count} mesh(es)";
+                _statusLabel.Text = "Decimating...";
+                while (Application.EventsPending()) Application.RunIteration();
+
+                Task.Run(() => {
+                    foreach (var meshObj in selectedMeshes)
+                    {
+                        if (isUniform)
+                        {
+                            meshObj.MeshData = MeshOperations.DecimateUniform(meshObj.MeshData, voxelSize);
+                        }
+                        else
+                        {
+                            meshObj.MeshData = MeshOperations.Decimate(meshObj.MeshData, ratio);
+                        }
+                        meshObj.UpdateBounds();
+                    }
+
+                    Application.Invoke((s, args) => {
+                        _viewport.QueueDraw();
+                        _statusLabel.Text = $"Decimated {selectedMeshes.Count} mesh(es)";
+                    });
+                });
+            }
+            dlg.Destroy();
         }
 
         private void OnSmoothClicked(object? sender, EventArgs e)
@@ -2746,14 +2769,35 @@ namespace Deep3DStudio
                 return;
             }
 
-            foreach (var meshObj in selectedMeshes)
+            var dlg = new SmoothDialog(this);
+            if (dlg.Run() == (int)ResponseType.Ok)
             {
-                meshObj.MeshData = MeshOperations.SmoothTaubin(meshObj.MeshData, 2);
-                meshObj.UpdateBounds();
-            }
+                bool isTaubin = dlg.IsTaubin;
+                int iterations = dlg.Iterations;
+                float lambda = dlg.Lambda;
+                float mu = dlg.Mu;
 
-            _viewport.QueueDraw();
-            _statusLabel.Text = $"Smoothed {selectedMeshes.Count} mesh(es)";
+                _statusLabel.Text = "Smoothing...";
+                while (Application.EventsPending()) Application.RunIteration();
+
+                Task.Run(() => {
+                    foreach (var meshObj in selectedMeshes)
+                    {
+                        if (isTaubin)
+                            meshObj.MeshData = MeshOperations.SmoothTaubin(meshObj.MeshData, iterations, lambda, mu);
+                        else
+                            meshObj.MeshData = MeshOperations.Smooth(meshObj.MeshData, iterations, lambda);
+
+                        meshObj.UpdateBounds();
+                    }
+
+                    Application.Invoke((s, args) => {
+                        _viewport.QueueDraw();
+                        _statusLabel.Text = $"Smoothed {selectedMeshes.Count} mesh(es)";
+                    });
+                });
+            }
+            dlg.Destroy();
         }
 
         private void OnOptimizeClicked(object? sender, EventArgs e)
@@ -2765,17 +2809,30 @@ namespace Deep3DStudio
                 return;
             }
 
-            int totalRemoved = 0;
-            foreach (var meshObj in selectedMeshes)
+            var dlg = new NumericInputDialog(this, "Optimize Mesh", "Weld Distance / Epsilon:", 0.0001f, 0.000001f, 1.0f, 0.0001f, 6);
+            if (dlg.Run() == (int)ResponseType.Ok)
             {
-                int before = meshObj.VertexCount;
-                meshObj.MeshData = MeshOperations.Optimize(meshObj.MeshData);
-                meshObj.UpdateBounds();
-                totalRemoved += before - meshObj.VertexCount;
-            }
+                float epsilon = dlg.Value;
+                _statusLabel.Text = "Optimizing...";
+                while (Application.EventsPending()) Application.RunIteration();
 
-            _viewport.QueueDraw();
-            _statusLabel.Text = $"Optimized: removed {totalRemoved} duplicate vertices";
+                Task.Run(() => {
+                    int totalRemoved = 0;
+                    foreach (var meshObj in selectedMeshes)
+                    {
+                        int before = meshObj.VertexCount;
+                        meshObj.MeshData = MeshOperations.Optimize(meshObj.MeshData, epsilon);
+                        meshObj.UpdateBounds();
+                        totalRemoved += before - meshObj.VertexCount;
+                    }
+
+                    Application.Invoke((s, args) => {
+                        _viewport.QueueDraw();
+                        _statusLabel.Text = $"Optimized: removed {totalRemoved} duplicate vertices";
+                    });
+                });
+            }
+            dlg.Destroy();
         }
 
         private void OnSplitClicked(object? sender, EventArgs e)
@@ -2816,17 +2873,31 @@ namespace Deep3DStudio
 
             if (selectedMeshes.Count >= 2)
             {
-                var meshDataList = selectedMeshes.Select(m => m.MeshData).ToList();
-                var merged = MeshOperations.MergeWithWelding(meshDataList);
+                var dlg = new NumericInputDialog(this, "Merge Meshes", "Weld Distance:", 0.001f, 0.0f, 1.0f, 0.001f, 6);
+                if (dlg.Run() == (int)ResponseType.Ok)
+                {
+                    float weldDist = dlg.Value;
+                    _statusLabel.Text = "Merging...";
+                    while (Application.EventsPending()) Application.RunIteration();
 
-                foreach (var m in selectedMeshes)
-                    _sceneGraph.RemoveObject(m);
+                    Task.Run(() => {
+                        var meshDataList = selectedMeshes.Select(m => m.MeshData).ToList();
+                        var merged = MeshOperations.MergeWithWelding(meshDataList, weldDist);
 
-                var mergedObj = new MeshObject("Merged Mesh", merged);
-                _sceneGraph.AddObject(mergedObj);
-                _sceneGraph.Select(mergedObj);
+                        Application.Invoke((s, args) => {
+                            foreach (var m in selectedMeshes)
+                                _sceneGraph.RemoveObject(m);
 
-                _statusLabel.Text = $"Merged {selectedMeshes.Count} meshes";
+                            var mergedObj = new MeshObject("Merged Mesh", merged);
+                            _sceneGraph.AddObject(mergedObj);
+                            _sceneGraph.Select(mergedObj);
+                            _sceneTreeView.RefreshTree();
+                            _viewport.QueueDraw();
+                            _statusLabel.Text = $"Merged {selectedMeshes.Count} meshes";
+                        });
+                    });
+                }
+                dlg.Destroy();
             }
             else if (selectedPointClouds.Count >= 2)
             {
@@ -2839,15 +2910,14 @@ namespace Deep3DStudio
                 _sceneGraph.Select(merged);
 
                 _statusLabel.Text = $"Merged {selectedPointClouds.Count} point clouds";
+                _sceneTreeView.RefreshTree();
+                _viewport.QueueDraw();
             }
             else
             {
                 ShowMessage("Please select at least 2 meshes or 2 point clouds to merge.");
                 return;
             }
-
-            _sceneTreeView.RefreshTree();
-            _viewport.QueueDraw();
         }
 
         private void OnAlignClicked(object? sender, EventArgs e)
@@ -2857,48 +2927,71 @@ namespace Deep3DStudio
 
             if (selectedMeshes.Count >= 2)
             {
-                var target = selectedMeshes[0];
-                for (int i = 1; i < selectedMeshes.Count; i++)
+                var dlg = new AlignDialog(this);
+                if (dlg.Run() == (int)ResponseType.Ok)
                 {
-                    var source = selectedMeshes[i];
-                    var transform = MeshOperations.AlignICP(source.MeshData, target.MeshData);
-                    source.MeshData.ApplyTransform(transform);
-                    source.UpdateBounds();
+                    int iter = dlg.Iterations;
+                    float threshold = dlg.Threshold;
+
+                    _statusLabel.Text = "Aligning...";
+                    while (Application.EventsPending()) Application.RunIteration();
+
+                    Task.Run(() => {
+                        var target = selectedMeshes[0];
+                        for (int i = 1; i < selectedMeshes.Count; i++)
+                        {
+                            var source = selectedMeshes[i];
+                            var transform = MeshOperations.AlignICP(source.MeshData, target.MeshData, iter, threshold);
+                            source.MeshData.ApplyTransform(transform);
+                            source.UpdateBounds();
+                        }
+
+                        Application.Invoke((s, args) => {
+                            _viewport.QueueDraw();
+                            _statusLabel.Text = $"Aligned {selectedMeshes.Count - 1} mesh(es) to target";
+                        });
+                    });
                 }
-                _statusLabel.Text = $"Aligned {selectedMeshes.Count - 1} mesh(es) to target";
+                dlg.Destroy();
             }
             else if (selectedPointClouds.Count >= 2)
             {
-                var target = selectedPointClouds[0];
-                var targetPoints = target.Points.Select(p => OpenTK.Mathematics.Vector3.TransformPosition(p, target.GetWorldTransform())).ToList();
-
-                for (int i = 1; i < selectedPointClouds.Count; i++)
+                var dlg = new AlignDialog(this);
+                if (dlg.Run() == (int)ResponseType.Ok)
                 {
-                    var source = selectedPointClouds[i];
-                    var sourcePoints = source.Points.Select(p => OpenTK.Mathematics.Vector3.TransformPosition(p, source.GetWorldTransform())).ToList();
+                    int iter = dlg.Iterations;
+                    float threshold = dlg.Threshold;
 
-                    var transform = MeshOperations.AlignICP(sourcePoints, targetPoints);
+                    _statusLabel.Text = "Aligning...";
+                    while (Application.EventsPending()) Application.RunIteration();
 
-                    // Apply transform to the object's existing transform
-                    // Note: This applies it in local space, assuming the alignment was computed in world space
-                    // We need to be careful with coordinate spaces.
-                    // AlignICP returns a transform that maps Source -> Target in the space they were passed in (World Space)
-                    // NewWorld = OldWorld * Transform
-                    // Parent * NewLocal = Parent * OldLocal * Transform
-                    // NewLocal = OldLocal * Transform
+                    Task.Run(() => {
+                        var target = selectedPointClouds[0];
+                        var targetPoints = target.Points.Select(p => OpenTK.Mathematics.Vector3.TransformPosition(p, target.GetWorldTransform())).ToList();
 
-                    source.ApplyTransform(transform);
-                    source.UpdateBounds();
+                        for (int i = 1; i < selectedPointClouds.Count; i++)
+                        {
+                            var source = selectedPointClouds[i];
+                            var sourcePoints = source.Points.Select(p => OpenTK.Mathematics.Vector3.TransformPosition(p, source.GetWorldTransform())).ToList();
+
+                            var transform = MeshOperations.AlignICP(sourcePoints, targetPoints, iter, threshold);
+                            source.ApplyTransform(transform);
+                            source.UpdateBounds();
+                        }
+
+                        Application.Invoke((s, args) => {
+                             _viewport.QueueDraw();
+                            _statusLabel.Text = $"Aligned {selectedPointClouds.Count - 1} point cloud(s) to target";
+                        });
+                    });
                 }
-                _statusLabel.Text = $"Aligned {selectedPointClouds.Count - 1} point cloud(s) to target";
+                dlg.Destroy();
             }
             else
             {
                 ShowMessage("Please select at least 2 meshes or 2 point clouds to align.");
                 return;
             }
-
-            _viewport.QueueDraw();
         }
 
         private void OnSetRealSizeClicked(object? sender, EventArgs e)
