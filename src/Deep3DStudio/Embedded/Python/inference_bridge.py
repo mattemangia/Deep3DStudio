@@ -22,11 +22,19 @@ def get_torch_device(device_str):
         else:
             print("Warning: DirectML requested but torch-directml not installed. Falling back to CPU.")
             return torch.device("cpu")
+    elif device_str == "mps":
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+        else:
+            print("Warning: MPS requested but not available. Falling back to CPU.")
+            return torch.device("cpu")
     elif device_str == "cuda" and not torch.cuda.is_available():
         print("Warning: CUDA requested but not available. Falling back to CPU.")
         return torch.device("cpu")
     elif device_str is None:
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if torch.cuda.is_available(): return torch.device("cuda")
+        if torch.backends.mps.is_available(): return torch.device("mps")
+        return torch.device("cpu")
 
     return torch.device(device_str)
 

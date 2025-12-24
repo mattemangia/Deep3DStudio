@@ -28,6 +28,7 @@ namespace Deep3DStudio.Model
             {
                 AIComputeDevice.CUDA => "cuda",
                 AIComputeDevice.DirectML => "directml",
+                AIComputeDevice.MPS => "mps",
                 _ => "cpu"
             };
         }
