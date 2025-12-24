@@ -233,5 +233,155 @@ namespace Deep3DStudio.Viewport
                 GL.DeleteTexture(textureId);
             }
         }
+
+        /// <summary>
+        /// Creates a runtime-generated logo texture using SkiaSharp.
+        /// This is used as a fallback when the logo.png resource is not available,
+        /// which can happen especially on macOS where embedded resources may not work correctly.
+        /// </summary>
+        public static int CreateRuntimeLogo(int size = 256)
+        {
+            var info = new SKImageInfo(size, size, SKColorType.Bgra8888, SKAlphaType.Premul);
+            using (var bitmap = new SKBitmap(info))
+            using (var canvas = new SKCanvas(bitmap))
+            {
+                // Clear with transparent background
+                canvas.Clear(SKColors.Transparent);
+
+                float cx = size / 2f;
+                float cy = size / 2f;
+                float radius = size * 0.42f;
+
+                // Draw gradient background circle
+                using (var bgPaint = new SKPaint())
+                {
+                    bgPaint.IsAntialias = true;
+                    bgPaint.Shader = SKShader.CreateRadialGradient(
+                        new SKPoint(cx, cy * 0.7f),
+                        radius * 1.2f,
+                        new SKColor[] {
+                            new SKColor(60, 120, 200),    // Light blue
+                            new SKColor(30, 60, 120)      // Dark blue
+                        },
+                        SKShaderTileMode.Clamp);
+                    canvas.DrawCircle(cx, cy, radius, bgPaint);
+                }
+
+                // Draw 3D cube wireframe (representing 3D reconstruction)
+                using (var linePaint = new SKPaint())
+                {
+                    linePaint.IsAntialias = true;
+                    linePaint.Style = SKPaintStyle.Stroke;
+                    linePaint.StrokeWidth = size * 0.02f;
+                    linePaint.Color = SKColors.White;
+
+                    float cubeSize = size * 0.25f;
+                    float offset = size * 0.08f;
+
+                    // Front face (lower-left)
+                    float fx = cx - cubeSize / 2 - offset / 2;
+                    float fy = cy + offset / 2;
+                    canvas.DrawRect(fx, fy, cubeSize, cubeSize, linePaint);
+
+                    // Back face (upper-right)
+                    float bx = fx + offset;
+                    float by = fy - offset;
+                    canvas.DrawRect(bx, by, cubeSize, cubeSize, linePaint);
+
+                    // Connect corners
+                    canvas.DrawLine(fx, fy, bx, by, linePaint);
+                    canvas.DrawLine(fx + cubeSize, fy, bx + cubeSize, by, linePaint);
+                    canvas.DrawLine(fx, fy + cubeSize, bx, by + cubeSize, linePaint);
+                    canvas.DrawLine(fx + cubeSize, fy + cubeSize, bx + cubeSize, by + cubeSize, linePaint);
+                }
+
+                // Draw neural network nodes (representing AI/Neural)
+                using (var nodePaint = new SKPaint())
+                {
+                    nodePaint.IsAntialias = true;
+                    nodePaint.Style = SKPaintStyle.Fill;
+
+                    using (var connectionPaint = new SKPaint())
+                    {
+                        connectionPaint.IsAntialias = true;
+                        connectionPaint.Style = SKPaintStyle.Stroke;
+                        connectionPaint.StrokeWidth = size * 0.008f;
+                        connectionPaint.Color = new SKColor(200, 200, 255, 150);
+
+                        float nodeRadius = size * 0.025f;
+
+                        // Left column nodes
+                        SKPoint[] leftNodes = {
+                            new SKPoint(cx - radius * 0.6f, cy - radius * 0.3f),
+                            new SKPoint(cx - radius * 0.6f, cy),
+                            new SKPoint(cx - radius * 0.6f, cy + radius * 0.3f)
+                        };
+
+                        // Right column nodes
+                        SKPoint[] rightNodes = {
+                            new SKPoint(cx + radius * 0.6f, cy - radius * 0.3f),
+                            new SKPoint(cx + radius * 0.6f, cy),
+                            new SKPoint(cx + radius * 0.6f, cy + radius * 0.3f)
+                        };
+
+                        // Draw connections
+                        foreach (var left in leftNodes)
+                        {
+                            foreach (var right in rightNodes)
+                            {
+                                canvas.DrawLine(left, right, connectionPaint);
+                            }
+                        }
+
+                        // Draw nodes with gradient
+                        nodePaint.Shader = SKShader.CreateRadialGradient(
+                            new SKPoint(0, 0), nodeRadius * 2,
+                            new SKColor[] { SKColors.White, new SKColor(100, 180, 255) },
+                            SKShaderTileMode.Clamp);
+
+                        foreach (var node in leftNodes)
+                        {
+                            nodePaint.Shader = SKShader.CreateRadialGradient(
+                                node, nodeRadius,
+                                new SKColor[] { SKColors.White, new SKColor(100, 180, 255) },
+                                SKShaderTileMode.Clamp);
+                            canvas.DrawCircle(node, nodeRadius, nodePaint);
+                        }
+                        foreach (var node in rightNodes)
+                        {
+                            nodePaint.Shader = SKShader.CreateRadialGradient(
+                                node, nodeRadius,
+                                new SKColor[] { SKColors.White, new SKColor(100, 180, 255) },
+                                SKShaderTileMode.Clamp);
+                            canvas.DrawCircle(node, nodeRadius, nodePaint);
+                        }
+                    }
+                }
+
+                // Draw "D3D" text
+                using (var textPaint = new SKPaint())
+                {
+                    textPaint.IsAntialias = true;
+                    textPaint.Color = SKColors.White;
+                    textPaint.TextSize = size * 0.12f;
+                    textPaint.TextAlign = SKTextAlign.Center;
+                    textPaint.FakeBoldText = true;
+
+                    canvas.DrawText("D3D", cx, cy + radius * 0.8f, textPaint);
+                }
+
+                // Draw outer ring glow
+                using (var ringPaint = new SKPaint())
+                {
+                    ringPaint.IsAntialias = true;
+                    ringPaint.Style = SKPaintStyle.Stroke;
+                    ringPaint.StrokeWidth = size * 0.015f;
+                    ringPaint.Color = new SKColor(100, 180, 255, 200);
+                    canvas.DrawCircle(cx, cy, radius * 0.95f, ringPaint);
+                }
+
+                return CreateTextureFromBitmap(bitmap);
+            }
+        }
     }
 }

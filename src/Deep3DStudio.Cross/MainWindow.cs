@@ -127,8 +127,13 @@ namespace Deep3DStudio
             // Init Icons
             _iconFactory = new ImGuiIconFactory();
 
-            // Load Logo
+            // Load Logo - try embedded resource first, fallback to runtime-generated logo
             _logoTexture = TextureLoader.LoadTextureFromResource("logo.png");
+            if (_logoTexture == -1)
+            {
+                // Fallback to runtime-generated logo (especially needed on macOS)
+                _logoTexture = TextureLoader.CreateRuntimeLogo(256);
+            }
 
             // Force Python Init if not started
             Task.Run(() => {
@@ -1825,6 +1830,9 @@ namespace Deep3DStudio
                             float sigma = s.GaussianSDFSigma;
                             if (ImGui.SliderFloat("Sigma", ref sigma, 0.1f, 5.0f)) s.GaussianSDFSigma = sigma;
 
+                            int iterations = s.GaussianSDFIterations;
+                            if (ImGui.SliderInt("Iterations", ref iterations, 1, 10)) s.GaussianSDFIterations = iterations;
+
                             float iso = s.GaussianSDFIsoLevel;
                             if (ImGui.SliderFloat("Iso Level", ref iso, -1.0f, 1.0f)) s.GaussianSDFIsoLevel = iso;
                         }
@@ -2314,15 +2322,8 @@ namespace Deep3DStudio
 
         private void OnDecimate()
         {
-            if (_sceneGraph.SelectedObjects.OfType<MeshObject>().Any())
-            {
-                _showDecimateDialog = true;
-                _popupToOpen = "Decimate Mesh";
-            }
-            else
-            {
-                _logBuffer += "Select a mesh first.\n";
-            }
+            _showDecimateDialog = true;
+            _popupToOpen = "Decimate Mesh";
         }
 
         private void DrawDecimateDialog()
@@ -2331,6 +2332,8 @@ namespace Deep3DStudio
 
              if (ImGui.BeginPopupModal("Decimate Mesh", ref _showDecimateDialog, ImGuiWindowFlags.AlwaysAutoResize))
              {
+                 bool hasMesh = _sceneGraph.SelectedObjects.OfType<MeshObject>().Any();
+
                  ImGui.Text("Choose Decimation Method:");
                  ImGui.RadioButton("Target Ratio (Adaptive)", ref _decimateMethod, 0);
                  ImGui.RadioButton("Voxel Grid (Uniform)", ref _decimateMethod, 1);
@@ -2346,11 +2349,24 @@ namespace Deep3DStudio
                  }
 
                  ImGui.Separator();
+
+                 if (!hasMesh)
+                 {
+                     ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1), "No mesh selected");
+                     ImGui.BeginDisabled();
+                 }
+
                  if (ImGui.Button("Decimate", new System.Numerics.Vector2(120, 0)))
                  {
                      _showDecimateDialog = false;
                      PerformDecimation();
                  }
+
+                 if (!hasMesh)
+                 {
+                     ImGui.EndDisabled();
+                 }
+
                  ImGui.SameLine();
                  if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0))) _showDecimateDialog = false;
                  ImGui.EndPopup();
@@ -2392,12 +2408,8 @@ namespace Deep3DStudio
 
         private void OnSmooth()
         {
-            if (_sceneGraph.SelectedObjects.OfType<MeshObject>().Any())
-            {
-                _showSmoothDialog = true;
-                _popupToOpen = "Smooth Mesh";
-            }
-            else _logBuffer += "Select a mesh first.\n";
+            _showSmoothDialog = true;
+            _popupToOpen = "Smooth Mesh";
         }
 
         private void DrawSmoothDialog()
@@ -2405,6 +2417,8 @@ namespace Deep3DStudio
             if (!_showSmoothDialog) return;
             if (ImGui.BeginPopupModal("Smooth Mesh", ref _showSmoothDialog, ImGuiWindowFlags.AlwaysAutoResize))
             {
+                bool hasMesh = _sceneGraph.SelectedObjects.OfType<MeshObject>().Any();
+
                 ImGui.RadioButton("Laplacian", ref _smoothMethod, 0); ImGui.SameLine();
                 ImGui.RadioButton("Taubin", ref _smoothMethod, 1);
                 ImGui.InputInt("Iterations", ref _smoothIter);
@@ -2412,11 +2426,24 @@ namespace Deep3DStudio
                 if (_smoothMethod == 1) ImGui.SliderFloat("Mu", ref _smoothMu, -1.0f, -0.01f);
 
                 ImGui.Separator();
+
+                if (!hasMesh)
+                {
+                    ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1), "No mesh selected");
+                    ImGui.BeginDisabled();
+                }
+
                 if (ImGui.Button("Smooth", new System.Numerics.Vector2(120, 0)))
                 {
                     _showSmoothDialog = false;
                     PerformSmooth();
                 }
+
+                if (!hasMesh)
+                {
+                    ImGui.EndDisabled();
+                }
+
                 ImGui.SameLine();
                 if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0))) _showSmoothDialog = false;
                 ImGui.EndPopup();
@@ -2455,12 +2482,8 @@ namespace Deep3DStudio
 
         private void OnOptimize()
         {
-            if (_sceneGraph.SelectedObjects.OfType<MeshObject>().Any())
-            {
-                _showOptimizeDialog = true;
-                _popupToOpen = "Optimize Mesh";
-            }
-            else _logBuffer += "Select a mesh first.\n";
+            _showOptimizeDialog = true;
+            _popupToOpen = "Optimize Mesh";
         }
 
         private void DrawOptimizeDialog()
@@ -2468,13 +2491,28 @@ namespace Deep3DStudio
             if (!_showOptimizeDialog) return;
             if (ImGui.BeginPopupModal("Optimize Mesh", ref _showOptimizeDialog, ImGuiWindowFlags.AlwaysAutoResize))
             {
+                bool hasMesh = _sceneGraph.SelectedObjects.OfType<MeshObject>().Any();
+
                 ImGui.InputFloat("Weld Distance", ref _optimizeEpsilon, 0.00001f, 0.0001f, "%.6f");
                 ImGui.Separator();
+
+                if (!hasMesh)
+                {
+                    ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1), "No mesh selected");
+                    ImGui.BeginDisabled();
+                }
+
                 if (ImGui.Button("Optimize", new System.Numerics.Vector2(120, 0)))
                 {
                     _showOptimizeDialog = false;
                     PerformOptimize();
                 }
+
+                if (!hasMesh)
+                {
+                    ImGui.EndDisabled();
+                }
+
                 ImGui.SameLine();
                 if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0))) _showOptimizeDialog = false;
                 ImGui.EndPopup();
@@ -2562,12 +2600,8 @@ namespace Deep3DStudio
 
         private void OnMerge()
         {
-            if (_sceneGraph.SelectedObjects.Count >= 2)
-            {
-                _showMergeDialog = true;
-                _popupToOpen = "Merge Objects";
-            }
-            else _logBuffer += "Select at least 2 objects to merge.\n";
+            _showMergeDialog = true;
+            _popupToOpen = "Merge Objects";
         }
 
         private void DrawMergeDialog()
@@ -2575,13 +2609,28 @@ namespace Deep3DStudio
             if (!_showMergeDialog) return;
             if (ImGui.BeginPopupModal("Merge Objects", ref _showMergeDialog, ImGuiWindowFlags.AlwaysAutoResize))
             {
+                bool canMerge = _sceneGraph.SelectedObjects.Count >= 2;
+
                 ImGui.InputFloat("Weld Distance", ref _mergeDist, 0.0001f, 0.001f, "%.5f");
                 ImGui.Separator();
+
+                if (!canMerge)
+                {
+                    ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1), "Select at least 2 objects");
+                    ImGui.BeginDisabled();
+                }
+
                 if (ImGui.Button("Merge", new System.Numerics.Vector2(120, 0)))
                 {
                     _showMergeDialog = false;
                     PerformMerge();
                 }
+
+                if (!canMerge)
+                {
+                    ImGui.EndDisabled();
+                }
+
                 ImGui.SameLine();
                 if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0))) _showMergeDialog = false;
                 ImGui.EndPopup();
@@ -2628,12 +2677,8 @@ namespace Deep3DStudio
 
         private void OnAlign()
         {
-            if (_sceneGraph.SelectedObjects.Count >= 2)
-            {
-                _showAlignDialog = true;
-                _popupToOpen = "Align Objects";
-            }
-            else _logBuffer += "Select at least 2 objects to align.\n";
+            _showAlignDialog = true;
+            _popupToOpen = "Align Objects";
         }
 
         private void DrawAlignDialog()
@@ -2641,14 +2686,29 @@ namespace Deep3DStudio
             if (!_showAlignDialog) return;
             if (ImGui.BeginPopupModal("Align Objects", ref _showAlignDialog, ImGuiWindowFlags.AlwaysAutoResize))
             {
+                bool canAlign = _sceneGraph.SelectedObjects.Count >= 2;
+
                 ImGui.InputInt("Max Iterations", ref _alignIter);
                 ImGui.InputFloat("Convergence Threshold", ref _alignThreshold, 0.00001f, 0.0001f, "%.6f");
                 ImGui.Separator();
+
+                if (!canAlign)
+                {
+                    ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1), "Select at least 2 objects");
+                    ImGui.BeginDisabled();
+                }
+
                 if (ImGui.Button("Align", new System.Numerics.Vector2(120, 0)))
                 {
                     _showAlignDialog = false;
                     PerformAlign();
                 }
+
+                if (!canAlign)
+                {
+                    ImGui.EndDisabled();
+                }
+
                 ImGui.SameLine();
                 if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0))) _showAlignDialog = false;
                 ImGui.EndPopup();
@@ -2706,12 +2766,8 @@ namespace Deep3DStudio
 
         private void OnCleanup()
         {
-             if (_sceneGraph.SelectedObjects.OfType<MeshObject>().Any())
-             {
-                 _showCleanupDialog = true;
-                 _popupToOpen = "Cleanup Mesh";
-             }
-             else _logBuffer += "Select a mesh first.\n";
+            _showCleanupDialog = true;
+            _popupToOpen = "Cleanup Mesh";
         }
 
         private void DrawCleanupDialog()
@@ -2719,16 +2775,31 @@ namespace Deep3DStudio
             if (!_showCleanupDialog) return;
             if (ImGui.BeginPopupModal("Cleanup Mesh", ref _showCleanupDialog, ImGuiWindowFlags.AlwaysAutoResize))
             {
+                bool hasMesh = _sceneGraph.SelectedObjects.OfType<MeshObject>().Any();
+
                 ImGui.Checkbox("Remove Isolated Vertices", ref _cleanIsolated);
                 ImGui.Checkbox("Recalculate Normals", ref _cleanNormals);
                 ImGui.Checkbox("Fill Holes", ref _cleanHoles);
 
                 ImGui.Separator();
+
+                if (!hasMesh)
+                {
+                    ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1), "No mesh selected");
+                    ImGui.BeginDisabled();
+                }
+
                 if (ImGui.Button("Cleanup", new System.Numerics.Vector2(120, 0)))
                 {
                     _showCleanupDialog = false;
                     PerformCleanup();
                 }
+
+                if (!hasMesh)
+                {
+                    ImGui.EndDisabled();
+                }
+
                 ImGui.SameLine();
                 if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0))) _showCleanupDialog = false;
                 ImGui.EndPopup();
@@ -2770,12 +2841,8 @@ namespace Deep3DStudio
 
         private void OnBakeTextures()
         {
-            if (_sceneGraph.SelectedObjects.OfType<MeshObject>().Any() && _sceneGraph.GetObjectsOfType<CameraObject>().Any())
-            {
-                _showBakeDialog = true;
-                _popupToOpen = "Bake Textures";
-            }
-            else _logBuffer += "Select a mesh and ensure cameras are present.\n";
+            _showBakeDialog = true;
+            _popupToOpen = "Bake Textures";
         }
 
         private void DrawBakeDialog()
@@ -2783,13 +2850,33 @@ namespace Deep3DStudio
             if (!_showBakeDialog) return;
             if (ImGui.BeginPopupModal("Bake Textures", ref _showBakeDialog, ImGuiWindowFlags.AlwaysAutoResize))
             {
+                bool hasMesh = _sceneGraph.SelectedObjects.OfType<MeshObject>().Any();
+                bool hasCameras = _sceneGraph.GetObjectsOfType<CameraObject>().Any();
+                bool canBake = hasMesh && hasCameras;
+
                 ImGui.InputInt("Texture Size", ref _bakeSize);
                 ImGui.Separator();
+
+                if (!canBake)
+                {
+                    if (!hasMesh)
+                        ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1), "No mesh selected");
+                    if (!hasCameras)
+                        ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1), "No cameras in scene");
+                    ImGui.BeginDisabled();
+                }
+
                 if (ImGui.Button("Bake", new System.Numerics.Vector2(120, 0)))
                 {
                     _showBakeDialog = false;
                     PerformBake();
                 }
+
+                if (!canBake)
+                {
+                    ImGui.EndDisabled();
+                }
+
                 ImGui.SameLine();
                 if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0))) _showBakeDialog = false;
                 ImGui.EndPopup();
@@ -2860,10 +2947,134 @@ namespace Deep3DStudio
                     _selectedWorkflow = 3;
                     RunReconstruction();
                     break;
+                case "DeepMeshPrior":
+                    RunDeepMeshPriorRefinement();
+                    break;
+                case "GaussianSDF":
+                    RunGaussianSDFRefinement();
+                    break;
+                case "TripoSF":
+                    RunTripoSFRefinement();
+                    break;
+                case "UniRig":
+                    OnAutoRig();
+                    break;
                 default:
                     _logBuffer += $"Model {modelName} not yet implemented.\n";
                     break;
             }
+        }
+
+        private void RunDeepMeshPriorRefinement()
+        {
+            var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (meshes.Count == 0)
+            {
+                _logBuffer += "Error: No mesh selected for DeepMeshPrior refinement.\n";
+                return;
+            }
+
+            ProgressDialog.Instance.Start("DeepMeshPrior Optimization...", OperationType.Processing);
+            Task.Run(async () => {
+                try
+                {
+                    var refiner = new Deep3DStudio.Meshing.DeepMeshPriorMesher();
+                    foreach (var mesh in meshes)
+                    {
+                        var refined = await refiner.RefineMeshAsync(mesh.MeshData, (status, progress) => {
+                            ProgressDialog.Instance.Update(progress, status);
+                        });
+                        if (refined != null)
+                        {
+                            EnqueueAction(() => {
+                                mesh.MeshData = refined;
+                                ProgressDialog.Instance.Log($"Refined: {mesh.Name}");
+                            });
+                        }
+                    }
+                    EnqueueAction(() => ProgressDialog.Instance.Complete());
+                }
+                catch (Exception ex)
+                {
+                    EnqueueAction(() => ProgressDialog.Instance.Fail(ex));
+                }
+            });
+        }
+
+        private void RunGaussianSDFRefinement()
+        {
+            var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (meshes.Count == 0)
+            {
+                _logBuffer += "Error: No mesh selected for GaussianSDF refinement.\n";
+                return;
+            }
+
+            ProgressDialog.Instance.Start("GaussianSDF Refinement...", OperationType.Processing);
+            Task.Run(async () => {
+                try
+                {
+                    var refiner = new Deep3DStudio.Meshing.GaussianSDFRefiner();
+                    foreach (var mesh in meshes)
+                    {
+                        var refined = await refiner.RefineMeshAsync(mesh.MeshData, (status, progress) => {
+                            ProgressDialog.Instance.Update(progress, status);
+                        });
+                        if (refined != null)
+                        {
+                            EnqueueAction(() => {
+                                mesh.MeshData = refined;
+                                ProgressDialog.Instance.Log($"Refined: {mesh.Name}");
+                            });
+                        }
+                    }
+                    EnqueueAction(() => ProgressDialog.Instance.Complete());
+                }
+                catch (Exception ex)
+                {
+                    EnqueueAction(() => ProgressDialog.Instance.Fail(ex));
+                }
+            });
+        }
+
+        private void RunTripoSFRefinement()
+        {
+            var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (meshes.Count == 0)
+            {
+                _logBuffer += "Error: No mesh selected for TripoSF refinement.\n";
+                return;
+            }
+
+            ProgressDialog.Instance.Start("TripoSF Refinement...", OperationType.Processing);
+            Task.Run(async () => {
+                try
+                {
+                    // TripoSF uses the AI workflow manager
+                    foreach (var mesh in meshes)
+                    {
+                        var result = await AIModelManager.Instance.ExecuteWorkflowAsync(
+                            WorkflowPipeline.MeshToTripoSF,
+                            null, // No images needed
+                            mesh.MeshData,
+                            (status, progress) => ProgressDialog.Instance.Update(progress, status)
+                        );
+
+                        if (result != null && result.Meshes.Count > 0)
+                        {
+                            EnqueueAction(() => {
+                                mesh.MeshData = result.Meshes[0];
+                                ProgressDialog.Instance.Log($"Refined: {mesh.Name}");
+                            });
+                        }
+                    }
+                    EnqueueAction(() => ProgressDialog.Instance.Complete());
+                }
+                catch (Exception ex)
+                {
+                    EnqueueAction(() => ProgressDialog.Instance.Fail(ex));
+                }
+            });
         }
 
         private async void RunReconstruction(bool generateMesh = true, bool generateCloud = true)

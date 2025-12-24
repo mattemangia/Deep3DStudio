@@ -469,8 +469,9 @@ namespace Deep3DStudio.Viewport
             GL.Scissor(vpX, windowHeight - vpY - vpH, vpW, vpH);
             GL.Enable(EnableCap.ScissorTest);
 
-            // Clear just this region
-            GL.ClearColor(0.2f, 0.2f, 0.25f, 1.0f);
+            // Clear just this region using background color from settings
+            var settings = IniSettings.Instance;
+            GL.ClearColor(settings.ViewportBgR, settings.ViewportBgG, settings.ViewportBgB, 1.0f);
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
             Render(vpW, vpH);
