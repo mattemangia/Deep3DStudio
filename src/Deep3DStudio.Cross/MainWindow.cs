@@ -131,8 +131,24 @@ namespace Deep3DStudio
             Task.Run(() => {
                 try {
                     PythonService.Instance.Initialize();
+                    if (!PythonService.Instance.IsInitialized)
+                    {
+                        string error = PythonService.Instance.InitializationError;
+                        if (string.IsNullOrEmpty(error)) error = "Python environment not found.";
+
+                        EnqueueAction(() => {
+                            ShowError("Python Environment Missing",
+                                "The Python environment required for AI features could not be loaded.\n\n" +
+                                error + "\n\n" +
+                                "Please run 'setup_deployment.py' to install the required dependencies.\n" +
+                                "AI features will be disabled.");
+                        });
+                    }
                 } catch(Exception ex) {
                     _logBuffer += $"Python Init Error: {ex.Message}\n";
+                    EnqueueAction(() => {
+                        ShowError("Python Initialization Error", "An error occurred while initializing Python:\n" + ex.Message, ex);
+                    });
                 }
                 _pythonReady = true;
                 // Auto-close splash after a minimum time or when ready

@@ -15,6 +15,9 @@ namespace Deep3DStudio.Python
         private IntPtr _threadState;
         private bool _isInitialized = false;
 
+        public bool IsInitialized => _isInitialized;
+        public string InitializationError { get; private set; } = "";
+
         // Event to capture Python stdout/stderr
         public event Action<string>? OnLogOutput;
 
@@ -52,7 +55,9 @@ namespace Deep3DStudio.Python
 
                 if (!File.Exists(pythonDll))
                 {
-                    Log($"Warning: Python DLL not found at {pythonDll}");
+                    string msg = $"Python DLL not found at {pythonDll}";
+                    InitializationError = msg;
+                    Log($"Warning: {msg}");
                     Log($"Python features will be disabled. Please run setup_deployment.py to install Python environment.");
                     // Don't throw - allow app to continue without Python
                     return;
@@ -178,7 +183,8 @@ namespace Deep3DStudio.Python
             }
             catch (Exception ex)
             {
-                Log($"Warning: Failed to initialize Python: {ex.Message}");
+                InitializationError = $"Failed to initialize Python: {ex.Message}";
+                Log($"Warning: {InitializationError}");
                 Log($"Python features will be disabled. The application will continue without AI functionality.");
                 // Don't re-throw - allow app to start without Python
             }
@@ -493,6 +499,8 @@ class LoggerWriter:
         public void RunScript(string script)
         {
             EnsureInitialized();
+            if (!_isInitialized) throw new InvalidOperationException($"Python not initialized: {InitializationError}");
+
             using (Py.GIL())
             {
                 PythonEngine.Exec(script);
@@ -502,6 +510,8 @@ class LoggerWriter:
         public void ExecuteWithGIL(Action<PyModule> action)
         {
             EnsureInitialized();
+            if (!_isInitialized) throw new InvalidOperationException($"Python not initialized: {InitializationError}");
+
             using (Py.GIL())
             using (var scope = Py.CreateScope())
             {
@@ -513,6 +523,8 @@ class LoggerWriter:
         public dynamic Import(string moduleName)
         {
             EnsureInitialized();
+            if (!_isInitialized) throw new InvalidOperationException($"Python not initialized: {InitializationError}");
+
             using (Py.GIL())
             {
                 return Py.Import(moduleName);

@@ -35,6 +35,12 @@
       <PythonPlatform Condition="'$(RuntimeIdentifier)' == 'linux-arm64'">linux_aarch64</PythonPlatform>
       <PythonPlatform Condition="'$(RuntimeIdentifier)' == 'osx-x64'">osx_x86_64</PythonPlatform>
       <PythonPlatform Condition="'$(RuntimeIdentifier)' == 'osx-arm64'">osx_arm64</PythonPlatform>
+
+      <!-- Auto-detect platform if RuntimeIdentifier is not set (e.g. IDE Debug builds) -->
+      <PythonPlatform Condition="'$(PythonPlatform)' == '' And $([MSBuild]::IsOsPlatform('Windows'))">win_amd64</PythonPlatform>
+      <PythonPlatform Condition="'$(PythonPlatform)' == '' And $([MSBuild]::IsOsPlatform('Linux'))">linux_x86_64</PythonPlatform>
+      <PythonPlatform Condition="'$(PythonPlatform)' == '' And $([MSBuild]::IsOsPlatform('OSX'))">osx_arm64</PythonPlatform>
+
       <!-- Default to windows if not specified (e.g. dev build) or fallback -->
       <PythonPlatform Condition="'$(PythonPlatform)' == ''">win_amd64</PythonPlatform>
     </PropertyGroup>
