@@ -126,18 +126,26 @@ namespace Deep3DStudio
                 try
                 {
                     PythonService.Instance.Initialize();
-                    Log("[OK] Python Engine Initialized.");
 
-                    using (global::Python.Runtime.Py.GIL())
+                    if (!PythonService.Instance.IsInitialized)
                     {
-                        string[] libs = { "numpy", "torch", "cv2", "PIL" };
-                        foreach(var lib in libs)
+                        Log($"[FAIL] Python not initialized: {PythonService.Instance.InitializationError}");
+                    }
+                    else
+                    {
+                        Log("[OK] Python Engine Initialized.");
+
+                        using (global::Python.Runtime.Py.GIL())
                         {
-                            try {
-                                global::Python.Runtime.Py.Import(lib);
-                                Log($"[OK] Import {lib} success.");
-                            } catch (Exception ex) {
-                                Log($"[FAIL] Import {lib} failed: {ex.Message}");
+                            string[] libs = { "numpy", "torch", "cv2", "PIL" };
+                            foreach(var lib in libs)
+                            {
+                                try {
+                                    global::Python.Runtime.Py.Import(lib);
+                                    Log($"[OK] Import {lib} success.");
+                                } catch (Exception ex) {
+                                    Log($"[FAIL] Import {lib} failed: {ex.Message}");
+                                }
                             }
                         }
                     }

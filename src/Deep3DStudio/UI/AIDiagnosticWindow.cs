@@ -190,66 +190,73 @@ namespace Deep3DStudio.UI
                     var service = PythonService.Instance;
                     service.Initialize(); // Ensure init
 
-                    Log("[OK] Python Engine Initialized.");
-
-                    // Log sys.path for debugging
-                    using (global::Python.Runtime.Py.GIL())
+                    if (!service.IsInitialized)
                     {
-                        try
-                        {
-                            dynamic sys = global::Python.Runtime.Py.Import("sys");
-                            Log("[INFO] Current sys.path:");
-                            foreach (var path in sys.path)
-                            {
-                                string pathStr = path.ToString();
-                                bool exists = System.IO.Directory.Exists(pathStr) || System.IO.File.Exists(pathStr);
-                                Log($"  {(exists ? "[EXISTS]" : "[MISSING]")} {pathStr}");
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Log($"[WARN] Could not retrieve sys.path: {ex.Message}");
-                        }
+                        Log($"[FAIL] Python not initialized: {service.InitializationError}");
                     }
-
-                    // Try importing key libraries
-                    string[] libs = new string[] { "numpy", "torch", "cv2", "PIL" };
-
-                    using (global::Python.Runtime.Py.GIL())
+                    else
                     {
-                        foreach(var lib in libs)
+                        Log("[OK] Python Engine Initialized.");
+
+                        // Log sys.path for debugging
+                        using (global::Python.Runtime.Py.GIL())
                         {
-                            try {
-                                global::Python.Runtime.Py.Import(lib);
-                                Log($"[OK] Import {lib} successful.");
-                            } catch (Exception ex) {
-                                Log($"[FAIL] Import {lib} failed: {ex.Message}");
+                            try
+                            {
+                                dynamic sys = global::Python.Runtime.Py.Import("sys");
+                                Log("[INFO] Current sys.path:");
+                                foreach (var path in sys.path)
+                                {
+                                    string pathStr = path.ToString();
+                                    bool exists = System.IO.Directory.Exists(pathStr) || System.IO.File.Exists(pathStr);
+                                    Log($"  {(exists ? "[EXISTS]" : "[MISSING]")} {pathStr}");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Log($"[WARN] Could not retrieve sys.path: {ex.Message}");
                             }
                         }
 
-                        // Check if inference_bridge can be imported (requires appending path?)
-                        try {
-                            dynamic sys = global::Python.Runtime.Py.Import("sys");
-                            // Add Embedded/Python to path if needed?
-                            // Usually the bridge is just a file we execute or import if in path.
-                            // The project embeds it, but where is it on disk?
-                            // MainWindow.cs doesn't show extraction of bridge.
-                            // It might be assumed to be in the python path or same dir.
-                            // Let's try to import it if it exists as file.
+                        // Try importing key libraries
+                        string[] libs = new string[] { "numpy", "torch", "cv2", "PIL" };
 
-                            // Check if `inference_bridge.py` exists
-                            string bridgePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "inference_bridge.py");
-                            // Or in Embedded/Python?
-
-                            // If it's an embedded resource, we can't import it directly as a file unless extracted.
-                            // However, let's assume the user wants to check the dependencies required by the models.
-
-                            Log("[INFO] Checking specific model dependencies...");
-                            // Example checks based on requirements
-                        }
-                        catch(Exception ex)
+                        using (global::Python.Runtime.Py.GIL())
                         {
-                             Log($"[WARN] Bridge check issue: {ex.Message}");
+                            foreach(var lib in libs)
+                            {
+                                try {
+                                    global::Python.Runtime.Py.Import(lib);
+                                    Log($"[OK] Import {lib} successful.");
+                                } catch (Exception ex) {
+                                    Log($"[FAIL] Import {lib} failed: {ex.Message}");
+                                }
+                            }
+
+                            // Check if inference_bridge can be imported (requires appending path?)
+                            try {
+                                dynamic sys = global::Python.Runtime.Py.Import("sys");
+                                // Add Embedded/Python to path if needed?
+                                // Usually the bridge is just a file we execute or import if in path.
+                                // The project embeds it, but where is it on disk?
+                                // MainWindow.cs doesn't show extraction of bridge.
+                                // It might be assumed to be in the python path or same dir.
+                                // Let's try to import it if it exists as file.
+
+                                // Check if `inference_bridge.py` exists
+                                string bridgePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "inference_bridge.py");
+                                // Or in Embedded/Python?
+
+                                // If it's an embedded resource, we can't import it directly as a file unless extracted.
+                                // However, let's assume the user wants to check the dependencies required by the models.
+
+                                Log("[INFO] Checking specific model dependencies...");
+                                // Example checks based on requirements
+                            }
+                            catch(Exception ex)
+                            {
+                                 Log($"[WARN] Bridge check issue: {ex.Message}");
+                            }
                         }
                     }
                 }
@@ -306,7 +313,7 @@ namespace Deep3DStudio.UI
                     GC.WaitForPendingFinalizers();
 
                     // Force GC in Python
-                    if (PythonService.Instance != null)
+                    if (PythonService.Instance != null && PythonService.Instance.IsInitialized)
                     {
                         using (global::Python.Runtime.Py.GIL())
                         {
