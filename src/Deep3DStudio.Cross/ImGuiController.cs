@@ -271,12 +271,29 @@ void main()
             GL.Disable(EnableCap.ScissorTest);
         }
 
+        // Error tracking to avoid spamming console
+        private static DateTime _lastErrorLog = DateTime.MinValue;
+        private static int _errorCount = 0;
+
         private void CheckError(string stage)
         {
-            var err = GL.GetError();
-            if (err != OpenTK.Graphics.OpenGL.ErrorCode.NoError && err != OpenTK.Graphics.OpenGL.ErrorCode.InvalidFramebufferOperation)
+            // Drain all errors from the queue
+            OpenTK.Graphics.OpenGL.ErrorCode err;
+            while ((err = GL.GetError()) != OpenTK.Graphics.OpenGL.ErrorCode.NoError)
             {
-                Console.WriteLine($"OpenGL Error at ImGui {stage}: {err}");
+                // Skip InvalidFramebufferOperation and InvalidOperation caused by legacy/modern GL switching
+                if (err == OpenTK.Graphics.OpenGL.ErrorCode.InvalidFramebufferOperation ||
+                    err == OpenTK.Graphics.OpenGL.ErrorCode.InvalidOperation)
+                    continue;
+
+                // Rate limit error logging
+                _errorCount++;
+                if ((DateTime.Now - _lastErrorLog).TotalSeconds > 5)
+                {
+                    Console.WriteLine($"OpenGL Error at ImGui {stage}: {err} (count: {_errorCount})");
+                    _lastErrorLog = DateTime.Now;
+                    _errorCount = 0;
+                }
             }
         }
 

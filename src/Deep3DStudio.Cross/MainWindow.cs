@@ -283,9 +283,32 @@ namespace Deep3DStudio
                     case Keys.W: _viewport.CurrentGizmoMode = GizmoMode.Translate; break;
                     case Keys.E: _viewport.CurrentGizmoMode = GizmoMode.Rotate; break;
                     case Keys.R: _viewport.CurrentGizmoMode = GizmoMode.Scale; break;
+                    case Keys.P: _viewport.CurrentGizmoMode = GizmoMode.Pen; break;
+                    case Keys.T: _viewport.CurrentGizmoMode = GizmoMode.Rigging; break;
                     case Keys.F: _viewport.FocusOnSelection(); break;
-                    case Keys.Delete: OnDeleteSelected(); break;
-                    case Keys.Escape: _sceneGraph.ClearSelection(); break;
+                    case Keys.Delete:
+                        // In Pen mode, delete selected triangles
+                        if (_viewport.CurrentGizmoMode == GizmoMode.Pen && _viewport.MeshEditingTool.SelectedTriangles.Count > 0)
+                        {
+                            _viewport.MeshEditingTool.DeleteSelectedTriangles();
+                            _logBuffer += "Deleted selected triangles.\n";
+                        }
+                        else
+                        {
+                            OnDeleteSelected();
+                        }
+                        break;
+                    case Keys.Escape:
+                        // In Pen mode, clear triangle selection first
+                        if (_viewport.CurrentGizmoMode == GizmoMode.Pen && _viewport.MeshEditingTool.SelectedTriangles.Count > 0)
+                        {
+                            _viewport.MeshEditingTool.ClearSelection();
+                        }
+                        else
+                        {
+                            _sceneGraph.ClearSelection();
+                        }
+                        break;
                 }
 
                 // Ctrl shortcuts
@@ -349,22 +372,35 @@ namespace Deep3DStudio
             _controller.Render();
             CheckError("After ImGui");
 
-            // Check for OpenGL errors
-            var err = GL.GetError();
-            if (err != OpenTK.Graphics.OpenGL.ErrorCode.NoError && err != OpenTK.Graphics.OpenGL.ErrorCode.InvalidFramebufferOperation)
-            {
-                Console.WriteLine($"OpenGL Error: {err}");
-            }
+            // Drain any remaining OpenGL errors silently before buffer swap
+            while (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError) { }
 
             SwapBuffers();
         }
 
+        // Error tracking to avoid spamming console
+        private static DateTime _lastErrorLog = DateTime.MinValue;
+        private static int _errorCount = 0;
+
         private void CheckError(string stage)
         {
-            var err = GL.GetError();
-            if (err != OpenTK.Graphics.OpenGL.ErrorCode.NoError && err != OpenTK.Graphics.OpenGL.ErrorCode.InvalidFramebufferOperation)
+            // Drain all errors from the queue
+            OpenTK.Graphics.OpenGL.ErrorCode err;
+            while ((err = GL.GetError()) != OpenTK.Graphics.OpenGL.ErrorCode.NoError)
             {
-                Console.WriteLine($"OpenGL Error at MainWindow {stage}: {err}");
+                // Skip InvalidFramebufferOperation and InvalidOperation caused by legacy/modern GL switching
+                if (err == OpenTK.Graphics.OpenGL.ErrorCode.InvalidFramebufferOperation ||
+                    err == OpenTK.Graphics.OpenGL.ErrorCode.InvalidOperation)
+                    continue;
+
+                // Rate limit error logging
+                _errorCount++;
+                if ((DateTime.Now - _lastErrorLog).TotalSeconds > 5)
+                {
+                    Console.WriteLine($"OpenGL Error at MainWindow {stage}: {err} (count: {_errorCount})");
+                    _lastErrorLog = DateTime.Now;
+                    _errorCount = 0;
+                }
             }
         }
 
@@ -764,6 +800,12 @@ namespace Deep3DStudio
                 ImGui.SameLine();
                 DrawToolbarButton("##Scale", IconType.Scale, _viewport.CurrentGizmoMode == GizmoMode.Scale,
                     () => _viewport.CurrentGizmoMode = GizmoMode.Scale, "Scale (R)", size);
+                ImGui.SameLine();
+                DrawToolbarButton("##Pen", IconType.Pen, _viewport.CurrentGizmoMode == GizmoMode.Pen,
+                    () => _viewport.CurrentGizmoMode = GizmoMode.Pen, "Pen / Triangle Edit (P)", size);
+                ImGui.SameLine();
+                DrawToolbarButton("##Rigging", IconType.Skeleton, _viewport.CurrentGizmoMode == GizmoMode.Rigging,
+                    () => _viewport.CurrentGizmoMode = GizmoMode.Rigging, "Rigging (T)", size);
 
                 ImGui.SameLine();
                 ImGui.Text("|");
@@ -832,6 +874,32 @@ namespace Deep3DStudio
             }
         }
 
+        /// <summary>
+        /// Helper to draw a button with an icon and text label
+        /// </summary>
+        private bool DrawIconTextButton(string id, IconType icon, string text, System.Numerics.Vector2 iconSize)
+        {
+            bool clicked = false;
+            float availWidth = ImGui.GetContentRegionAvail().X;
+
+            ImGui.PushID(id);
+
+            // Draw icon
+            ImGui.Image(_iconFactory.GetIcon(icon), iconSize);
+            ImGui.SameLine();
+
+            // Draw button with remaining width
+            float buttonWidth = availWidth - iconSize.X - ImGui.GetStyle().ItemSpacing.X;
+            if (ImGui.Button(text, new System.Numerics.Vector2(buttonWidth, iconSize.Y)))
+            {
+                clicked = true;
+            }
+
+            ImGui.PopID();
+
+            return clicked;
+        }
+
         private void RenderVerticalToolbar()
         {
             float menuBarHeight = 20;
@@ -855,7 +923,36 @@ namespace Deep3DStudio
                 ImGui.Separator();
                 ImGui.Spacing();
 
-                // Mesh Operations
+                // Processing Operations Section
+                ImGui.TextDisabled("AI");
+
+                if (ImGui.ImageButton("##GenCloud", _iconFactory.GetIcon(IconType.PointCloudGen), size))
+                    RunReconstruction(false, true);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Generate Point Cloud");
+
+                if (ImGui.ImageButton("##GenMesh", _iconFactory.GetIcon(IconType.MeshGen), size))
+                    RunReconstruction(true, false);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Generate Mesh");
+
+                if (ImGui.ImageButton("##AutoRig", _iconFactory.GetIcon(IconType.Rig), size))
+                    OnAutoRig();
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Auto Rig (UniRig)");
+
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+
+                // Mesh Operations Section
+                ImGui.TextDisabled("Mesh");
+
+                if (ImGui.ImageButton("##Decimate", _iconFactory.GetIcon(IconType.Decimate), size))
+                    OnDecimate();
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Decimate Mesh (50%)");
+
+                if (ImGui.ImageButton("##Optimize", _iconFactory.GetIcon(IconType.Optimize), size))
+                    OnOptimize();
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Optimize Mesh");
+
                 if (ImGui.ImageButton("##Clean", _iconFactory.GetIcon(IconType.Clean), size))
                     OnCleanup();
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Cleanup Mesh");
@@ -869,7 +966,18 @@ namespace Deep3DStudio
                 ImGui.Spacing();
 
                 if (ImGui.ImageButton("##Delete", _iconFactory.GetIcon(IconType.Delete), size))
-                    OnDeleteSelected();
+                {
+                    // In Pen mode, delete selected triangles
+                    if (_viewport.CurrentGizmoMode == GizmoMode.Pen && _viewport.MeshEditingTool.SelectedTriangles.Count > 0)
+                    {
+                        _viewport.MeshEditingTool.DeleteSelectedTriangles();
+                        _logBuffer += "Deleted selected triangles.\n";
+                    }
+                    else
+                    {
+                        OnDeleteSelected();
+                    }
+                }
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Delete Selected");
             }
             ImGui.End();
@@ -1084,9 +1192,183 @@ namespace Deep3DStudio
 
             ImGui.Begin("Properties", ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoResize);
             {
-                RenderProperties();
+                // Show different panels based on mode
+                if (_viewport.CurrentGizmoMode == GizmoMode.Pen)
+                {
+                    RenderPenModePanel();
+                }
+                else if (_viewport.CurrentGizmoMode == GizmoMode.Rigging)
+                {
+                    RenderRiggingPanel();
+                }
+                else
+                {
+                    RenderProperties();
+                }
             }
             ImGui.End();
+        }
+
+        private void RenderPenModePanel()
+        {
+            ImGui.TextColored(new System.Numerics.Vector4(1f, 0.6f, 0.2f, 1f), "Triangle Editing Mode");
+            ImGui.Separator();
+
+            var tool = _viewport.MeshEditingTool;
+            var (triCount, vertCount, meshCount) = tool.GetSelectionStats();
+
+            ImGui.Text($"Selected: {triCount} triangles");
+            ImGui.Text($"Vertices: {vertCount}");
+            ImGui.Text($"Meshes: {meshCount}");
+
+            ImGui.Separator();
+
+            // Edit Mode
+            ImGui.Text("Edit Mode:");
+            int mode = (int)tool.Mode;
+            string[] modes = { "Select", "Delete", "Paint", "Weld", "Extrude" };
+            if (ImGui.Combo("##EditMode", ref mode, modes, modes.Length))
+            {
+                tool.Mode = (MeshEditMode)mode;
+            }
+
+            ImGui.Separator();
+
+            // Paint Color (if in Paint mode)
+            if (tool.Mode == MeshEditMode.Paint)
+            {
+                var color = new System.Numerics.Vector3(tool.PaintColor.X, tool.PaintColor.Y, tool.PaintColor.Z);
+                if (ImGui.ColorEdit3("Paint Color", ref color))
+                {
+                    tool.PaintColor = new Vector3(color.X, color.Y, color.Z);
+                }
+            }
+
+            ImGui.Separator();
+            ImGui.Text("Actions:");
+
+            var iconSize = new System.Numerics.Vector2(20, 20);
+
+            // Delete Selected button with icon
+            if (DrawIconTextButton("##PenDel", IconType.Delete, "Delete Selected", iconSize))
+            {
+                if (triCount > 0)
+                {
+                    tool.DeleteSelectedTriangles();
+                    _logBuffer += $"Deleted {triCount} triangles.\n";
+                }
+            }
+
+            // Flip Normals button with icon
+            if (DrawIconTextButton("##PenFlip", IconType.FlipNormals, "Flip Normals", iconSize))
+            {
+                if (triCount > 0)
+                {
+                    tool.FlipSelectedTriangles();
+                    _logBuffer += $"Flipped {triCount} triangle normals.\n";
+                }
+            }
+
+            // Subdivide button with icon
+            if (DrawIconTextButton("##PenSub", IconType.Subdivide, "Subdivide", iconSize))
+            {
+                if (triCount > 0)
+                {
+                    tool.SubdivideSelectedTriangles();
+                    _logBuffer += $"Subdivided {triCount} triangles.\n";
+                }
+            }
+
+            // Weld Vertices button with icon
+            if (DrawIconTextButton("##PenWeld", IconType.Weld, "Weld Vertices", iconSize))
+            {
+                if (triCount > 0)
+                {
+                    tool.WeldSelectedVertices();
+                    _logBuffer += "Welded duplicate vertices.\n";
+                }
+            }
+
+            // Paint Selected button with icon
+            if (DrawIconTextButton("##PenPaint", IconType.Paint, "Paint Selected", iconSize))
+            {
+                if (triCount > 0)
+                {
+                    tool.PaintSelectedTriangles();
+                    _logBuffer += $"Painted {triCount} triangles.\n";
+                }
+            }
+
+            ImGui.Separator();
+            ImGui.Text("Selection:");
+
+            // Select All on selected mesh
+            var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (meshes.Count > 0)
+            {
+                if (DrawIconTextButton("##PenSelAll", IconType.SelectAll, "Select All Tris", iconSize))
+                {
+                    foreach (var m in meshes)
+                        tool.SelectAll(m);
+                }
+
+                if (DrawIconTextButton("##PenInvert", IconType.InvertSelection, "Invert Selection", iconSize))
+                {
+                    foreach (var m in meshes)
+                        tool.InvertSelection(m);
+                }
+            }
+
+            if (DrawIconTextButton("##PenGrow", IconType.GrowSelection, "Grow Selection", iconSize))
+            {
+                tool.GrowSelection();
+            }
+
+            if (DrawIconTextButton("##PenClear", IconType.ClearSelection, "Clear Selection", iconSize))
+            {
+                tool.ClearSelection();
+            }
+
+            ImGui.Separator();
+            ImGui.TextDisabled("Tip: Shift+Click to multi-select");
+            ImGui.TextDisabled("Press Escape to clear selection");
+            ImGui.TextDisabled("Press Delete to remove triangles");
+        }
+
+        private void RenderRiggingPanel()
+        {
+            ImGui.TextColored(new System.Numerics.Vector4(0.4f, 1f, 0.4f, 1f), "Rigging Mode");
+            ImGui.Separator();
+
+            ImGui.Text("Skeleton Operations:");
+
+            var iconSize = new System.Numerics.Vector2(20, 20);
+
+            if (DrawIconTextButton("##RigAuto", IconType.Rig, "Auto Rig (UniRig)", iconSize))
+            {
+                OnAutoRig();
+            }
+
+            if (DrawIconTextButton("##RigSkel", IconType.Skeleton, "View Skeleton", iconSize))
+            {
+                // Show skeleton visualization
+                var s = _viewport.RenderSettings;
+                s.ShowCameras = !s.ShowCameras; // TODO: Add ShowSkeleton option
+                _logBuffer += "Skeleton view toggled.\n";
+            }
+
+            ImGui.Separator();
+            ImGui.TextDisabled("Select a mesh and click");
+            ImGui.TextDisabled("'Auto Rig' to generate skeleton");
+
+            // Show selected skeleton info if any
+            var skeletons = _sceneGraph.SelectedObjects.OfType<SkeletonObject>().ToList();
+            if (skeletons.Count > 0)
+            {
+                ImGui.Separator();
+                ImGui.Text($"Selected: {skeletons[0].Name}");
+                ImGui.Text($"Joints: {skeletons[0].Skeleton?.Joints.Count ?? 0}");
+            }
         }
 
         private void RenderProperties()
@@ -1876,6 +2158,59 @@ namespace Deep3DStudio
             catch (Exception ex)
             {
                 ShowError("Reconstruction Error", "AI reconstruction failed", ex);
+            }
+            finally
+            {
+                _isBusy = false;
+            }
+        }
+
+        private async void OnAutoRig()
+        {
+            var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (meshes.Count == 0)
+            {
+                _logBuffer += "Error: No mesh selected for rigging.\n";
+                return;
+            }
+
+            _isBusy = true;
+            _busyStatus = "Running UniRig Auto-Rigging...";
+            _busyProgress = 0.0f;
+
+            try
+            {
+                await Task.Run(async () =>
+                {
+                    // Execute UniRig AI model
+                    var result = await AIModelManager.Instance.ExecuteWorkflowAsync(
+                        WorkflowPipeline.MeshToUniRig,
+                        new List<string>(), // No images needed
+                        meshes.Select(m => m.MeshData).ToList(),
+                        (s, p) =>
+                        {
+                            _busyStatus = s;
+                            _busyProgress = p;
+                        });
+
+                    if (result != null && result.Skeletons != null && result.Skeletons.Count > 0)
+                    {
+                        foreach (var skeleton in result.Skeletons)
+                        {
+                            var skelObj = new SkeletonObject("Auto Rig", skeleton);
+                            _sceneGraph.AddObject(skelObj);
+                        }
+                        _logBuffer += $"Auto-rigging complete. Added {result.Skeletons.Count} skeleton(s).\n";
+                    }
+                    else
+                    {
+                        _logBuffer += "Auto-rigging completed but no skeleton was generated.\n";
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                ShowError("Rigging Error", "Auto-rigging failed", ex);
             }
             finally
             {
