@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Deep3DStudio.Scene;
 using Deep3DStudio.Model;
+using Deep3DStudio.Configuration;
 using TorchSharp;
 using static TorchSharp.torch;
 
@@ -17,34 +18,28 @@ namespace Deep3DStudio.DeepMeshPrior
             // torch.InitializeDeviceType(DeviceType.CUDA); // Optional, auto-detected
 
             // Resolve device based on settings
-            var settings = Deep3DStudio.Configuration.IniSettings.Instance;
+            var settings = IniSettings.Instance;
             Device device = torch.CPU;
 
-            if ((settings.AIDevice == Deep3DStudio.Configuration.AIComputeDevice.CUDA ||
-                 settings.AIDevice == Deep3DStudio.Configuration.AIComputeDevice.ROCm) && torch.cuda.is_available())
+            if (settings.AIDevice == AIComputeDevice.CUDA && torch.cuda.is_available())
             {
-                // ROCm also uses the CUDA backend in TorchSharp (HIP mapping)
                 device = torch.CUDA;
             }
-            else if (settings.AIDevice == Deep3DStudio.Configuration.AIComputeDevice.MPS)
+            else if (settings.AIDevice == AIComputeDevice.ROCm && torch.cuda.is_available())
             {
-                // Note: TorchSharp 0.102 might not expose backends.mps_is_available() directly.
-                // We rely on the user selection and try to usage.
-                // In newer versions: torch.backends.mps_is_available() or torch.mps_is_available()
-                // For safety in this version, we assume if MPS is selected on Mac, it should work or fail gracefully.
-                // But since 'torch.MPS' device exists in recent TorchSharp, we use it.
-                // If this fails to compile due to missing 'torch.MPS', we will fallback to string "mps".
+                // ROCm via TorchSharp uses CUDA backend
+                device = torch.CUDA;
+            }
+            else if (settings.AIDevice == AIComputeDevice.MPS)
+            {
                 try {
                      device = torch.MPS;
                 } catch {
-                     // Fallback if torch.MPS is not defined in this binding version
+                     // Fallback
                      device = new Device("mps");
                 }
             }
-            // TorchSharp does not currently support DirectML backend natively in the same way PyTorch does.
-            // DirectML support in C# would require a specific backend loaded.
-            // For now, we fallback to CPU if DirectML is selected in C# native components to avoid crash.
-            else if (settings.AIDevice == Deep3DStudio.Configuration.AIComputeDevice.DirectML)
+            else if (settings.AIDevice == AIComputeDevice.DirectML)
             {
                 // Warn user
                 Console.WriteLine("Warning: DirectML selected but not supported in native DeepMeshPrior. Falling back to CPU.");
@@ -76,13 +71,6 @@ namespace Deep3DStudio.DeepMeshPrior
             var (edgeIndex, edgeWeight) = GraphUtils.ComputeAdjacencyMatrix(inputMesh, device);
 
             // Laplacian Matrix for Loss
-            // L = I - D^-1 A
-            // We have normalized A_hat = D^-0.5 A D^-0.5
-            // Standard Laplacian loss usually uses Uniform Laplacian or Cotangent.
-            // The uniform Laplacian uses v_i - mean(neighbors),
-            // which corresponds to L_uniform = I - D^-1 A_binary.
-
-            // Let's build L_uniform
             var L_uniform = BuildUniformLaplacian(inputMesh, device);
 
             // 2. Model

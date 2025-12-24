@@ -4,9 +4,11 @@ using OpenTK.Mathematics;
 using MathNet.Numerics.LinearAlgebra;
 using SkiaSharp;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace Deep3DStudio.Model
 {
+    // ... [MeshData class remains same] ...
     public class MeshData
     {
         public List<Vector3> Vertices { get; set; } = new List<Vector3>();
@@ -15,14 +17,10 @@ namespace Deep3DStudio.Model
         public List<Vector2> UVs { get; set; } = new List<Vector2>();
         public List<int> Indices { get; set; } = new List<int>();
 
-        // Texture data (if any)
         public SKBitmap? Texture { get; set; }
-        public int TextureId { get; set; } = -1; // OpenGL Texture ID
+        public int TextureId { get; set; } = -1;
 
         public bool HasTexture => Texture != null || TextureId != -1;
-
-        // Maps original pixel index (y * width + x) to vertex index in Vertices list.
-        // Value is -1 if no vertex was generated for that pixel (filtered out).
         public int[]? PixelToVertexIndex { get; set; }
 
         public void ApplyTransform(Matrix4 transform)
@@ -43,7 +41,7 @@ namespace Deep3DStudio.Model
             clone.Colors = new List<Vector3>(Colors);
             clone.UVs = new List<Vector2>(UVs);
             clone.Indices = new List<int>(Indices);
-            clone.Texture = Texture; // Shallow copy bitmap ref
+            clone.Texture = Texture;
             clone.TextureId = TextureId;
             if (PixelToVertexIndex != null)
                 clone.PixelToVertexIndex = (int[])PixelToVertexIndex.Clone();
@@ -57,9 +55,7 @@ namespace Deep3DStudio.Model
 
             // Initialize normals with zero vectors
             for (int i = 0; i < Vertices.Count; i++)
-            {
                 Normals.Add(Vector3.Zero);
-            }
 
             // Accumulate face normals
             for (int i = 0; i < Indices.Count; i += 3)
@@ -78,7 +74,6 @@ namespace Deep3DStudio.Model
                 Vector3 edge2 = v3 - v1;
                 Vector3 normal = Vector3.Cross(edge1, edge2);
 
-                // Add weighted by area (cross product magnitude)
                 Normals[i1] += normal;
                 Normals[i2] += normal;
                 Normals[i3] += normal;
@@ -88,13 +83,9 @@ namespace Deep3DStudio.Model
             for (int i = 0; i < Normals.Count; i++)
             {
                 if (Normals[i].LengthSquared > 1e-6f)
-                {
                     Normals[i] = Normals[i].Normalized();
-                }
                 else
-                {
-                    Normals[i] = Vector3.UnitY; // Default up
-                }
+                    Normals[i] = Vector3.UnitY;
             }
         }
 
@@ -117,16 +108,12 @@ namespace Deep3DStudio.Model
 
     public static class GeometryUtils
     {
-        /// <summary>
-        /// Computes the optimal rigid transformation (Rotation + Translation) aligning source points to destination points
-        /// using the Kabsch algorithm (SVD).
-        /// </summary>
+        // ... [Rigid Transform methods remain same] ...
         public static Matrix4 ComputeRigidTransform(List<Vector3> srcPoints, List<Vector3> dstPoints)
         {
             if (srcPoints.Count != dstPoints.Count || srcPoints.Count < 3)
                 return Matrix4.Identity;
 
-            // 1. Compute Centroids
             Vector3 centroidSrc = Vector3.Zero;
             Vector3 centroidDst = Vector3.Zero;
             for(int i=0; i<srcPoints.Count; i++)
@@ -137,9 +124,7 @@ namespace Deep3DStudio.Model
             centroidSrc /= srcPoints.Count;
             centroidDst /= dstPoints.Count;
 
-            // 2. Center points & Build Covariance Matrix H = Sum ( (p_src - c_src) * (p_dst - c_dst)^T )
             var matH = Matrix<double>.Build.Dense(3, 3);
-
             for(int i=0; i<srcPoints.Count; i++)
             {
                 var pS = srcPoints[i] - centroidSrc;
@@ -150,16 +135,12 @@ namespace Deep3DStudio.Model
                 matH[2,0] += pS.Z * pD.X; matH[2,1] += pS.Z * pD.Y; matH[2,2] += pS.Z * pD.Z;
             }
 
-            // 3. SVD
             var svd = matH.Svd(true);
             var U = svd.U;
             var Vt = svd.VT;
             var V = Vt.Transpose();
-
-            // 4. Rotation R = V * U^T
             var R_mat = V * U.Transpose();
 
-            // Check reflection
             if (R_mat.Determinant() < 0)
             {
                 var V_prime = V.Clone();
@@ -167,7 +148,6 @@ namespace Deep3DStudio.Model
                 R_mat = V_prime * U.Transpose();
             }
 
-            // 5. Translation t = c_dst - R * c_src
             var M = Matrix4.Identity;
             M.M11 = (float)R_mat[0,0]; M.M12 = (float)R_mat[1,0]; M.M13 = (float)R_mat[2,0];
             M.M21 = (float)R_mat[0,1]; M.M22 = (float)R_mat[1,1]; M.M23 = (float)R_mat[2,1];
@@ -377,23 +357,18 @@ namespace Deep3DStudio.Model
             float confThreshold = 1.1f;
             float edgeThreshold = 0.2f;
 
-            // 1. Vertices
             for (int y = 0; y < height; y++)
             {
                 for (int x = 0; x < width; x++)
                 {
                     int pIdx = y * width + x;
-
-                    // Access conf: [1, y, x] -> y * width + x
                     float confidence = conf[pIdx];
 
                     if (confidence > confThreshold)
                     {
-                        // Access pts: [1, y, x, 3] -> (y * width + x) * 3 + c
                         float px = pts[pIdx * 3 + 0];
                         float py = pts[pIdx * 3 + 1];
                         float pz = pts[pIdx * 3 + 2];
-
                         var c = colors[pIdx];
 
                         mesh.Vertices.Add(new Vector3(px, py, pz));
@@ -407,7 +382,6 @@ namespace Deep3DStudio.Model
                 }
             }
 
-            // 2. Indices (Triangles)
             for (int y = 0; y < height - 1; y++)
             {
                 for (int x = 0; x < width - 1; x++)
@@ -536,24 +510,52 @@ namespace Deep3DStudio.Model
             int resY = density.GetLength(1);
             int resZ = density.GetLength(2);
 
-            for (int x = 0; x < resX - 1; x++)
+            // Thread-safe collection for parallel execution via thread-local lists
+            // Since indices must refer to vertices in order, we can't easily parallelize the list construction
+            // without a post-pass or using a more complex structure (e.g. per-block mesh merging).
+            // However, typical MC implementations are fast enough sequentially on 128^3.
+            // For rigorous optimization, we can parallelize the loop and collect triangle soups, then merge.
+
+            // To ensure "Computation Device" preference, if it was GPU (Parallel), we should try to parallelize.
+            // Let's implement a thread-local list approach to parallelize triangle generation.
+
+            object lockObj = new object();
+
+            Parallel.For(0, resX - 1, x =>
             {
+                var localVerts = new List<Vector3>();
+                var localCols = new List<Vector3>();
+
                 for (int y = 0; y < resY - 1; y++)
                 {
                     for (int z = 0; z < resZ - 1; z++)
                     {
-                        ProcessCube(x, y, z, density, color, min, voxelSize, isoLevel, mesh);
+                        ProcessCubeList(x, y, z, density, color, min, voxelSize, isoLevel, localVerts, localCols);
                     }
                 }
-            }
+
+                lock (lockObj)
+                {
+                    // Add all to global mesh. Note: simple triangle soup, no shared vertices here.
+                    // To optimize, we'd need vertex welding later.
+                    int baseIdx = mesh.Vertices.Count;
+                    mesh.Vertices.AddRange(localVerts);
+                    mesh.Colors.AddRange(localCols);
+                    for(int i=0; i<localVerts.Count; i++)
+                    {
+                        mesh.Indices.Add(baseIdx + i);
+                    }
+                }
+            });
+
             return mesh;
         }
 
-        private static void ProcessCube(int x, int y, int z, float[,,] density, Vector3[,,] color, Vector3 min, Vector3 voxelSize, float isoLevel, MeshData mesh)
+        private static void ProcessCubeList(int x, int y, int z, float[,,] density, Vector3[,,] color, Vector3 min, Vector3 voxelSize, float isoLevel, List<Vector3> verts, List<Vector3> cols)
         {
             float[] vals = new float[8];
             Vector3[] poss = new Vector3[8];
-            Vector3[] cols = new Vector3[8];
+            Vector3[] cVals = new Vector3[8];
 
             for(int i=0; i<8; i++)
             {
@@ -562,7 +564,7 @@ namespace Deep3DStudio.Model
                 int dz = (i & 4) >> 2;
                 vals[i] = density[x + dx, y + dy, z + dz];
                 poss[i] = min + new Vector3((x + dx) * voxelSize.X, (y + dy) * voxelSize.Y, (z + dz) * voxelSize.Z);
-                cols[i] = color[x + dx, y + dy, z + dz];
+                cVals[i] = color[x + dx, y + dy, z + dz];
             }
 
             int cubeIndex = 0;
@@ -580,64 +582,43 @@ namespace Deep3DStudio.Model
             Vector3[] vertList = new Vector3[12];
             Vector3[] colList = new Vector3[12];
 
-            if ((edgeTable[cubeIndex] & 1) != 0) VertexInterp(isoLevel, poss[0], poss[1], vals[0], vals[1], cols[0], cols[1], out vertList[0], out colList[0]);
-            if ((edgeTable[cubeIndex] & 2) != 0) VertexInterp(isoLevel, poss[1], poss[2], vals[1], vals[2], cols[1], cols[2], out vertList[1], out colList[1]);
-            if ((edgeTable[cubeIndex] & 4) != 0) VertexInterp(isoLevel, poss[2], poss[3], vals[2], vals[3], cols[2], cols[3], out vertList[2], out colList[2]);
-            if ((edgeTable[cubeIndex] & 8) != 0) VertexInterp(isoLevel, poss[3], poss[0], vals[3], vals[0], cols[3], cols[0], out vertList[3], out colList[3]);
-            if ((edgeTable[cubeIndex] & 16) != 0) VertexInterp(isoLevel, poss[4], poss[5], vals[4], vals[5], cols[4], cols[5], out vertList[4], out colList[4]);
-            if ((edgeTable[cubeIndex] & 32) != 0) VertexInterp(isoLevel, poss[5], poss[6], vals[5], vals[6], cols[5], cols[6], out vertList[5], out colList[5]);
-            if ((edgeTable[cubeIndex] & 64) != 0) VertexInterp(isoLevel, poss[6], poss[7], vals[6], vals[7], cols[6], cols[7], out vertList[6], out colList[6]);
-            if ((edgeTable[cubeIndex] & 128) != 0) VertexInterp(isoLevel, poss[7], poss[4], vals[7], vals[4], cols[7], cols[4], out vertList[7], out colList[7]);
-            if ((edgeTable[cubeIndex] & 256) != 0) VertexInterp(isoLevel, poss[0], poss[4], vals[0], vals[4], cols[0], cols[4], out vertList[8], out colList[8]);
-            if ((edgeTable[cubeIndex] & 512) != 0) VertexInterp(isoLevel, poss[1], poss[5], vals[1], vals[5], cols[1], cols[5], out vertList[9], out colList[9]);
-            if ((edgeTable[cubeIndex] & 1024) != 0) VertexInterp(isoLevel, poss[2], poss[6], vals[2], vals[6], cols[2], cols[6], out vertList[10], out colList[10]);
-            if ((edgeTable[cubeIndex] & 2048) != 0) VertexInterp(isoLevel, poss[3], poss[7], vals[3], vals[7], cols[3], cols[7], out vertList[11], out colList[11]);
+            if ((edgeTable[cubeIndex] & 1) != 0) VertexInterp(isoLevel, poss[0], poss[1], vals[0], vals[1], cVals[0], cVals[1], out vertList[0], out colList[0]);
+            if ((edgeTable[cubeIndex] & 2) != 0) VertexInterp(isoLevel, poss[1], poss[2], vals[1], vals[2], cVals[1], cVals[2], out vertList[1], out colList[1]);
+            if ((edgeTable[cubeIndex] & 4) != 0) VertexInterp(isoLevel, poss[2], poss[3], vals[2], vals[3], cVals[2], cVals[3], out vertList[2], out colList[2]);
+            if ((edgeTable[cubeIndex] & 8) != 0) VertexInterp(isoLevel, poss[3], poss[0], vals[3], vals[0], cVals[3], cVals[0], out vertList[3], out colList[3]);
+            if ((edgeTable[cubeIndex] & 16) != 0) VertexInterp(isoLevel, poss[4], poss[5], vals[4], vals[5], cVals[4], cVals[5], out vertList[4], out colList[4]);
+            if ((edgeTable[cubeIndex] & 32) != 0) VertexInterp(isoLevel, poss[5], poss[6], vals[5], vals[6], cVals[5], cVals[6], out vertList[5], out colList[5]);
+            if ((edgeTable[cubeIndex] & 64) != 0) VertexInterp(isoLevel, poss[6], poss[7], vals[6], vals[7], cVals[6], cVals[7], out vertList[6], out colList[6]);
+            if ((edgeTable[cubeIndex] & 128) != 0) VertexInterp(isoLevel, poss[7], poss[4], vals[7], vals[4], cVals[7], cVals[4], out vertList[7], out colList[7]);
+            if ((edgeTable[cubeIndex] & 256) != 0) VertexInterp(isoLevel, poss[0], poss[4], vals[0], vals[4], cVals[0], cVals[4], out vertList[8], out colList[8]);
+            if ((edgeTable[cubeIndex] & 512) != 0) VertexInterp(isoLevel, poss[1], poss[5], vals[1], vals[5], cVals[1], cVals[5], out vertList[9], out colList[9]);
+            if ((edgeTable[cubeIndex] & 1024) != 0) VertexInterp(isoLevel, poss[2], poss[6], vals[2], vals[6], cVals[2], cVals[6], out vertList[10], out colList[10]);
+            if ((edgeTable[cubeIndex] & 2048) != 0) VertexInterp(isoLevel, poss[3], poss[7], vals[3], vals[7], cVals[3], cVals[7], out vertList[11], out colList[11]);
 
             for (int i = 0; i < 15 && triTable[cubeIndex, i] != -1; i += 3)
             {
-                int i1 = triTable[cubeIndex, i];
-                int i2 = triTable[cubeIndex, i + 1];
-                int i3 = triTable[cubeIndex, i + 2];
+                verts.Add(vertList[triTable[cubeIndex, i]]);
+                cols.Add(colList[triTable[cubeIndex, i]]);
 
-                mesh.Vertices.Add(vertList[i1]);
-                mesh.Colors.Add(colList[i1]);
-                mesh.Indices.Add(mesh.Vertices.Count - 1);
+                verts.Add(vertList[triTable[cubeIndex, i+1]]);
+                cols.Add(colList[triTable[cubeIndex, i+1]]);
 
-                mesh.Vertices.Add(vertList[i2]);
-                mesh.Colors.Add(colList[i2]);
-                mesh.Indices.Add(mesh.Vertices.Count - 1);
-
-                mesh.Vertices.Add(vertList[i3]);
-                mesh.Colors.Add(colList[i3]);
-                mesh.Indices.Add(mesh.Vertices.Count - 1);
+                verts.Add(vertList[triTable[cubeIndex, i+2]]);
+                cols.Add(colList[triTable[cubeIndex, i+2]]);
             }
         }
 
         private static void VertexInterp(float isoLevel, Vector3 p1, Vector3 p2, float v1, float v2, Vector3 c1, Vector3 c2, out Vector3 p, out Vector3 c)
         {
-             if (Math.Abs(isoLevel - v1) < 0.00001f)
-             {
-                 p = p1;
-                 c = c1;
-                 return;
-             }
-             if (Math.Abs(isoLevel - v2) < 0.00001f)
-             {
-                 p = p2;
-                 c = c2;
-                 return;
-             }
-             if (Math.Abs(v1 - v2) < 0.00001f)
-             {
-                 p = p1;
-                 c = c1;
-                 return;
-             }
+             if (Math.Abs(isoLevel - v1) < 0.00001f) { p = p1; c = c1; return; }
+             if (Math.Abs(isoLevel - v2) < 0.00001f) { p = p2; c = c2; return; }
+             if (Math.Abs(v1 - v2) < 0.00001f) { p = p1; c = c1; return; }
              float mu = (isoLevel - v1) / (v2 - v1);
              p = p1 + mu * (p2 - p1);
              c = c1 + mu * (c2 - c1);
         }
 
+        // ... [Edge Tables and Tri Tables remain same] ...
         public static int[] GetMarchingCubesEdges(int cubeIndex)
         {
             var edges = new List<int>();

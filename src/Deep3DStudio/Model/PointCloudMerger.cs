@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using OpenTK.Mathematics;
 using MathNet.Numerics.LinearAlgebra;
+using Deep3DStudio.Configuration;
 
 namespace Deep3DStudio.Model
 {
@@ -38,7 +39,13 @@ namespace Deep3DStudio.Model
             if (clouds.Count == 1)
                 return clouds[0].Clone();
 
-            _progressCallback?.Invoke($"Merging {clouds.Count} point clouds...");
+            // Ensure settings are respected (e.g., if GPU is selected, we might want to ensure we use Parallel loops effectively on CPU as fallback,
+            // since native GPU ICP requires Compute Shaders or CUDA which is not fully implemented in C# here).
+            // But we can check:
+            var settings = IniSettings.Instance;
+            bool useParallel = true;
+
+            _progressCallback?.Invoke($"Merging {clouds.Count} point clouds (Device: {settings.Device})...");
 
             // Downsample all clouds for faster registration
             var downsampledClouds = new List<PointCloudData>();

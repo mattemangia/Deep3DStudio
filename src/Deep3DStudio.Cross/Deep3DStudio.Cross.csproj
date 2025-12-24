@@ -7,6 +7,8 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon>logo.ico</ApplicationIcon>
+    <!-- Fix for NFD on macOS -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <ItemGroup>
@@ -61,6 +63,18 @@
 
     <Copy SourceFiles="@(PythonEnv)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="Exists('%(FullPath)')" />
     <Copy SourceFiles="@(Models)" DestinationFolder="$(OutDir)\models\%(RecursiveDir)" SkipUnchangedFiles="true" Condition="Exists('%(FullPath)')" />
+  </Target>
+
+  <!-- Manual fix for NativeFileDialogs on macOS -->
+  <Target Name="CopyNfdLibs" AfterTargets="Build" Condition="$([MSBuild]::IsOsPlatform('OSX'))">
+      <Message Text="Copying NFD native libraries for macOS..." Importance="high" />
+      <!-- Try to find the dylib in the nuget packages if possible, or assume runtimes folder structure -->
+      <ItemGroup>
+          <NfdLibs Include="$(OutDir)runtimes\osx-arm64\native\*.dylib" />
+          <NfdLibs Include="$(OutDir)runtimes\osx-x64\native\*.dylib" />
+          <NfdLibs Include="$(OutDir)runtimes\osx\native\*.dylib" />
+      </ItemGroup>
+      <Copy SourceFiles="@(NfdLibs)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
   </Target>
 
 </Project>
