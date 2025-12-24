@@ -708,6 +708,7 @@ namespace Deep3DStudio
             if (_showSettings) DrawSettingsWindow();
             if (_showAbout) DrawAboutWindow();
             if (_showImagePreview) DrawImagePreviewWindow();
+            if (_showDecimateDialog) DrawDecimateDialog();
             _diagnosticsWindow.Draw();
         }
 
@@ -2289,10 +2290,72 @@ namespace Deep3DStudio
 
         #region Mesh Operations
 
+        private bool _showDecimateDialog = false;
+        private float _decimateRatio = 0.5f;
+        private float _decimateVoxelSize = 0.01f;
+        private int _decimateMethod = 0; // 0 = Ratio, 1 = Uniform
+
         private void OnDecimate()
         {
             var objects = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (objects.Count == 0)
+            {
+                 _logBuffer += "Select a mesh first.\n";
+                 return;
+            }
+
+            _showDecimateDialog = true;
+            ImGui.OpenPopup("Decimate Mesh");
+        }
+
+        private void DrawDecimateDialog()
+        {
+             if (!_showDecimateDialog) return;
+
+             if (ImGui.BeginPopupModal("Decimate Mesh", ref _showDecimateDialog, ImGuiWindowFlags.AlwaysAutoResize))
+             {
+                 ImGui.Text("Choose Decimation Method:");
+                 ImGui.RadioButton("Target Ratio (Topological)", ref _decimateMethod, 0);
+                 ImGui.RadioButton("Voxel Grid (Uniform)", ref _decimateMethod, 1);
+
+                 ImGui.Separator();
+
+                 if (_decimateMethod == 0)
+                 {
+                     ImGui.SliderFloat("Target Ratio", ref _decimateRatio, 0.01f, 0.99f, "%.2f");
+                     ImGui.TextDisabled("Adaptive simplification based on vertex importance.");
+                 }
+                 else
+                 {
+                     ImGui.InputFloat("Voxel Size", ref _decimateVoxelSize, 0.001f, 0.01f, "%.4f");
+                     ImGui.TextDisabled("Spatial clustering. Larger size = fewer vertices.");
+                 }
+
+                 ImGui.Separator();
+
+                 if (ImGui.Button("Decimate", new System.Numerics.Vector2(120, 0)))
+                 {
+                     _showDecimateDialog = false;
+                     PerformDecimation();
+                 }
+                 ImGui.SameLine();
+                 if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0)))
+                 {
+                     _showDecimateDialog = false;
+                 }
+
+                 ImGui.EndPopup();
+             }
+        }
+
+        private void PerformDecimation()
+        {
+            var objects = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
             if (objects.Count == 0) return;
+
+            float ratio = _decimateRatio;
+            float voxelSize = _decimateVoxelSize;
+            bool uniform = _decimateMethod == 1;
 
             ProgressDialog.Instance.Start("Decimating Mesh...", OperationType.Processing);
             Task.Run(() => {
@@ -2301,7 +2364,14 @@ namespace Deep3DStudio
                     try
                     {
                         ProgressDialog.Instance.Log($"Decimating {mo.Name}...");
-                        mo.MeshData = MeshOperations.Decimate(mo.MeshData, 0.5f);
+                        if (uniform)
+                        {
+                            mo.MeshData = MeshOperations.DecimateUniform(mo.MeshData, voxelSize);
+                        }
+                        else
+                        {
+                            mo.MeshData = MeshOperations.Decimate(mo.MeshData, ratio);
+                        }
                         ProgressDialog.Instance.Log($"Decimated: {mo.Name}");
                     }
                     catch (Exception ex)

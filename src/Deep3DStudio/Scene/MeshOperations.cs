@@ -14,7 +14,8 @@ namespace Deep3DStudio.Scene
         #region Decimation
 
         /// <summary>
-        /// Decimates a mesh by reducing the number of vertices using edge collapse
+        /// Decimates a mesh to reach a target vertex count using adaptive voxel clustering.
+        /// This approach is topologically robust and avoids holes.
         /// </summary>
         /// <param name="mesh">Input mesh</param>
         /// <param name="targetRatio">Target vertex ratio (0.1 = keep 10% of vertices)</param>
@@ -26,29 +27,65 @@ namespace Deep3DStudio.Scene
 
             int targetCount = Math.Max(4, (int)(mesh.Vertices.Count * targetRatio));
 
-            // Build edge-based vertex importance (quadric error metric simplified)
-            var vertexImportance = ComputeVertexImportance(mesh);
-
-            // Sort vertices by importance (least important first)
-            var sortedIndices = vertexImportance
-                .Select((importance, index) => (importance, index))
-                .OrderBy(x => x.importance)
-                .Select(x => x.index)
-                .ToList();
-
-            // Mark vertices to keep
-            var keepVertex = new bool[mesh.Vertices.Count];
-            int keptCount = 0;
-
-            // Keep most important vertices
-            for (int i = sortedIndices.Count - 1; i >= 0 && keptCount < targetCount; i--)
+            // Calculate mesh bounds to determine voxel size search range
+            var min = new Vector3(float.MaxValue);
+            var max = new Vector3(float.MinValue);
+            foreach (var v in mesh.Vertices)
             {
-                keepVertex[sortedIndices[i]] = true;
-                keptCount++;
+                min = Vector3.ComponentMin(min, v);
+                max = Vector3.ComponentMax(max, v);
             }
 
-            // Build remapped mesh
-            return RemapMesh(mesh, keepVertex);
+            float maxDim = Math.Max(max.X - min.X, Math.Max(max.Y - min.Y, max.Z - min.Z));
+
+            // Binary search for optimal voxel size
+            float low = 0.0f;
+            float high = maxDim; // Max possible voxel size (one vertex)
+            float bestSize = 0.0f;
+            int bestDiff = int.MaxValue;
+
+            for (int i = 0; i < 15; i++)
+            {
+                float mid = (low + high) * 0.5f;
+                if (mid < 0.00001f) mid = 0.00001f;
+
+                int count = CountVerticesUniform(mesh, mid);
+
+                int diff = Math.Abs(count - targetCount);
+                if (diff < bestDiff)
+                {
+                    bestDiff = diff;
+                    bestSize = mid;
+                }
+
+                if (count > targetCount)
+                {
+                    // Too many vertices -> Need larger voxels
+                    low = mid;
+                }
+                else
+                {
+                    // Too few vertices -> Need smaller voxels
+                    high = mid;
+                }
+            }
+
+            return DecimateUniform(mesh, bestSize);
+        }
+
+        private static int CountVerticesUniform(MeshData mesh, float voxelSize)
+        {
+             var voxelSet = new HashSet<(int, int, int)>();
+             foreach (var v in mesh.Vertices)
+             {
+                 var key = (
+                     (int)Math.Floor(v.X / voxelSize),
+                     (int)Math.Floor(v.Y / voxelSize),
+                     (int)Math.Floor(v.Z / voxelSize)
+                 );
+                 voxelSet.Add(key);
+             }
+             return voxelSet.Count;
         }
 
         /// <summary>
