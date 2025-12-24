@@ -15,7 +15,25 @@ namespace Deep3DStudio.DeepMeshPrior
         {
             // Initialize Torch
             // torch.InitializeDeviceType(DeviceType.CUDA); // Optional, auto-detected
-            var device = torch.cuda.is_available() ? torch.CUDA : torch.CPU;
+
+            // Resolve device based on settings
+            var settings = Deep3DStudio.Configuration.IniSettings.Instance;
+            Device device = torch.CPU;
+
+            if (settings.AIDevice == Deep3DStudio.Configuration.AIComputeDevice.CUDA && torch.cuda.is_available())
+            {
+                device = torch.CUDA;
+            }
+            // TorchSharp does not currently support DirectML backend natively in the same way PyTorch does.
+            // DirectML support in C# would require a specific backend loaded.
+            // For now, we fallback to CPU if DirectML is selected in C# native components to avoid crash.
+            else if (settings.AIDevice == Deep3DStudio.Configuration.AIComputeDevice.DirectML)
+            {
+                // Warn user
+                Console.WriteLine("Warning: DirectML selected but not supported in native DeepMeshPrior. Falling back to CPU.");
+                device = torch.CPU;
+            }
+
             Console.WriteLine($"DeepMeshPrior using device: {device}");
 
             // 1. Prepare Data

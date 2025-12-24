@@ -163,6 +163,11 @@ def setup_python_embed(target_dir, target_platform):
 
     # Requirements list
     base_reqs = ["torch", "torchvision", "numpy", "Pillow", "opencv-python", "rembg", "onnxruntime", "scipy"]
+
+    # Add torch-directml for Windows platforms
+    if "win" in target_platform:
+        base_reqs.append("torch-directml")
+
     all_reqs = set(base_reqs)
     for m in MODELS.values():
         for r in m.get("requirements", []):

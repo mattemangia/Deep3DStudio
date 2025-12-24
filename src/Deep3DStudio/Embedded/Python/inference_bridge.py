@@ -7,23 +7,43 @@ import numpy as np
 from PIL import Image
 import torchvision.transforms as transforms
 
+# Try importing torch_directml safely
+try:
+    import torch_directml
+except ImportError:
+    torch_directml = None
+
 loaded_models = {}
+
+def get_torch_device(device_str):
+    if device_str == "directml":
+        if torch_directml:
+            return torch_directml.device()
+        else:
+            print("Warning: DirectML requested but torch-directml not installed. Falling back to CPU.")
+            return torch.device("cpu")
+    elif device_str == "cuda" and not torch.cuda.is_available():
+        print("Warning: CUDA requested but not available. Falling back to CPU.")
+        return torch.device("cpu")
+    elif device_str is None:
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    return torch.device(device_str)
 
 def load_model(model_name, weights_path, device=None):
     global loaded_models
     if model_name in loaded_models:
         return True
 
-    if device is None:
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-    print(f"Loading {model_name} from {weights_path} on {device}...")
+    # Resolve device object
+    device_obj = get_torch_device(device)
+    print(f"Loading {model_name} from {weights_path} on {device_obj}...")
 
     try:
         if model_name == 'dust3r':
             from dust3r.model import AsymmetricCroCo3DStereo
             model = AsymmetricCroCo3DStereo.from_pretrained(weights_path)
-            model.to(device)
+            model.to(device_obj)
             model.eval()
             loaded_models[model_name] = model
 
@@ -33,7 +53,7 @@ def load_model(model_name, weights_path, device=None):
             # Use specific filenames as downloaded by setup_deployment.py
             model = TSR.from_pretrained(model_dir, config_name="triposr_config.yaml", weight_name="triposr_weights.pth")
             model.renderer.set_bg_color([0, 0, 0])
-            model.to(device)
+            model.to(device_obj)
             model.eval()
             loaded_models[model_name] = model
 
@@ -42,7 +62,7 @@ def load_model(model_name, weights_path, device=None):
             from tsr.system import TSR
             model_dir = os.path.dirname(weights_path)
             model = TSR.from_pretrained(model_dir, config_name="triposf_config.yaml", weight_name="triposf_weights.pth")
-            model.to(device)
+            model.to(device_obj)
             model.eval()
             loaded_models[model_name] = model
 
@@ -65,7 +85,7 @@ def load_model(model_name, weights_path, device=None):
                  model = LGM()
                  model.load_state_dict(state_dict, strict=False)
 
-             model.to(device)
+             model.to(device_obj)
              model.eval()
              loaded_models[model_name] = model
 
@@ -75,14 +95,15 @@ def load_model(model_name, weights_path, device=None):
              # Wonder3D usually needs a full directory structure.
              # If base_dir contains just the .pth, this might fail unless pipeline handles it.
              # We assume setup has placed necessary config files if available.
-             model = MVDiffusionPipeline.from_pretrained(base_dir, torch_dtype=torch.float16 if device == 'cuda' else torch.float32)
-             model.to(device)
+             is_cuda = (device_obj.type == 'cuda')
+             model = MVDiffusionPipeline.from_pretrained(base_dir, torch_dtype=torch.float16 if is_cuda else torch.float32)
+             model.to(device_obj)
              loaded_models[model_name] = model
 
         elif model_name == 'unirig':
              from unirig.model import UniRigModel
              model = UniRigModel.load_from_checkpoint(weights_path)
-             model.to(device)
+             model.to(device_obj)
              model.eval()
              loaded_models[model_name] = model
 
