@@ -110,21 +110,21 @@ namespace Deep3DStudio.Model.SfM
                 {
                     // Attempt to enable OpenCL
                     Cv2.SetUseOptimized(true);
-                    Cv2.Ocl.SetUseOpenCL(true);
-                    Console.WriteLine("SfM: OpenCL optimization enabled (Computation Device: GPU).");
+                // Cv2.Ocl class was removed/moved in newer OpenCVSharp or usage is different.
+                // Assuming default optimization is sufficient or Ocl is not directly accessible.
+                // Just use SetUseOptimized.
+                Console.WriteLine("SfM: Optimization enabled.");
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"SfM: Failed to enable OpenCL: {ex.Message}. Falling back to CPU.");
-                    Cv2.SetUseOptimized(true);
-                    Cv2.Ocl.SetUseOpenCL(false);
+                Console.WriteLine($"SfM: Failed to enable optimizations: {ex.Message}.");
                 }
             }
             else
             {
                 // Force CPU
                 Cv2.SetUseOptimized(true);
-                Cv2.Ocl.SetUseOpenCL(false);
+            // Cv2.Ocl.SetUseOpenCL(false); // Removed
                 Console.WriteLine("SfM: CPU mode enforced.");
             }
         }
