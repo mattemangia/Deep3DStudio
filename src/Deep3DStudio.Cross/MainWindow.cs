@@ -709,12 +709,6 @@ namespace Deep3DStudio
             if (_showAbout) DrawAboutWindow();
             if (_showImagePreview) DrawImagePreviewWindow();
             if (_showDecimateDialog) DrawDecimateDialog();
-            if (_showSmoothDialog) DrawSmoothDialog();
-            if (_showOptimizeDialog) DrawOptimizeDialog();
-            if (_showMergeDialog) DrawMergeDialog();
-            if (_showAlignDialog) DrawAlignDialog();
-            if (_showCleanupDialog) DrawCleanupDialog();
-            if (_showBakeDialog) DrawBakeDialog();
             _diagnosticsWindow.Draw();
         }
 
@@ -2303,15 +2297,15 @@ namespace Deep3DStudio
 
         private void OnDecimate()
         {
-            if (_sceneGraph.SelectedObjects.OfType<MeshObject>().Any())
+            var objects = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (objects.Count == 0)
             {
-                _showDecimateDialog = true;
-                ImGui.OpenPopup("Decimate Mesh");
+                 _logBuffer += "Select a mesh first.\n";
+                 return;
             }
-            else
-            {
-                _logBuffer += "Select a mesh first.\n";
-            }
+
+            _showDecimateDialog = true;
+            ImGui.OpenPopup("Decimate Mesh");
         }
 
         private void DrawDecimateDialog()
@@ -2323,25 +2317,33 @@ namespace Deep3DStudio
                  ImGui.Text("Choose Decimation Method:");
                  ImGui.RadioButton("Target Ratio (Topological)", ref _decimateMethod, 0);
                  ImGui.RadioButton("Voxel Grid (Uniform)", ref _decimateMethod, 1);
+
                  ImGui.Separator();
 
                  if (_decimateMethod == 0)
                  {
                      ImGui.SliderFloat("Target Ratio", ref _decimateRatio, 0.01f, 0.99f, "%.2f");
+                     ImGui.TextDisabled("Adaptive simplification based on vertex importance.");
                  }
                  else
                  {
                      ImGui.InputFloat("Voxel Size", ref _decimateVoxelSize, 0.001f, 0.01f, "%.4f");
+                     ImGui.TextDisabled("Spatial clustering. Larger size = fewer vertices.");
                  }
 
                  ImGui.Separator();
+
                  if (ImGui.Button("Decimate", new System.Numerics.Vector2(120, 0)))
                  {
                      _showDecimateDialog = false;
                      PerformDecimation();
                  }
                  ImGui.SameLine();
-                 if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0))) _showDecimateDialog = false;
+                 if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0)))
+                 {
+                     _showDecimateDialog = false;
+                 }
+
                  ImGui.EndPopup();
              }
         }
@@ -2349,118 +2351,82 @@ namespace Deep3DStudio
         private void PerformDecimation()
         {
             var objects = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
-            float ratio = _decimateRatio; float voxelSize = _decimateVoxelSize; bool uniform = _decimateMethod == 1;
+            if (objects.Count == 0) return;
+
+            float ratio = _decimateRatio;
+            float voxelSize = _decimateVoxelSize;
+            bool uniform = _decimateMethod == 1;
+
             ProgressDialog.Instance.Start("Decimating Mesh...", OperationType.Processing);
             Task.Run(() => {
-                foreach (var mo in objects) {
-                    try {
-                        if (uniform) mo.MeshData = MeshOperations.DecimateUniform(mo.MeshData, voxelSize);
-                        else mo.MeshData = MeshOperations.Decimate(mo.MeshData, ratio);
+                foreach (var mo in objects)
+                {
+                    try
+                    {
+                        ProgressDialog.Instance.Log($"Decimating {mo.Name}...");
+                        if (uniform)
+                        {
+                            mo.MeshData = MeshOperations.DecimateUniform(mo.MeshData, voxelSize);
+                        }
+                        else
+                        {
+                            mo.MeshData = MeshOperations.Decimate(mo.MeshData, ratio);
+                        }
                         ProgressDialog.Instance.Log($"Decimated: {mo.Name}");
-                    } catch (Exception ex) { ProgressDialog.Instance.Fail(ex); }
+                    }
+                    catch (Exception ex)
+                    {
+                        ProgressDialog.Instance.Fail(ex);
+                        return;
+                    }
                 }
                 ProgressDialog.Instance.Complete();
             });
         }
-
-        private bool _showSmoothDialog = false;
-        private int _smoothIter = 2;
-        private float _smoothLambda = 0.5f;
-        private float _smoothMu = -0.53f;
-        private int _smoothMethod = 1; // 0=Laplacian, 1=Taubin
 
         private void OnSmooth()
         {
-            if (_sceneGraph.SelectedObjects.OfType<MeshObject>().Any())
-            {
-                _showSmoothDialog = true;
-                ImGui.OpenPopup("Smooth Mesh");
-            }
-            else _logBuffer += "Select a mesh first.\n";
-        }
-
-        private void DrawSmoothDialog()
-        {
-            if (!_showSmoothDialog) return;
-            if (ImGui.BeginPopupModal("Smooth Mesh", ref _showSmoothDialog, ImGuiWindowFlags.AlwaysAutoResize))
-            {
-                ImGui.RadioButton("Laplacian", ref _smoothMethod, 0); ImGui.SameLine();
-                ImGui.RadioButton("Taubin", ref _smoothMethod, 1);
-                ImGui.InputInt("Iterations", ref _smoothIter);
-                ImGui.SliderFloat("Lambda", ref _smoothLambda, 0.01f, 1.0f);
-                if (_smoothMethod == 1) ImGui.SliderFloat("Mu", ref _smoothMu, -1.0f, -0.01f);
-
-                ImGui.Separator();
-                if (ImGui.Button("Smooth", new System.Numerics.Vector2(120, 0)))
-                {
-                    _showSmoothDialog = false;
-                    PerformSmooth();
-                }
-                ImGui.SameLine();
-                if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0))) _showSmoothDialog = false;
-                ImGui.EndPopup();
-            }
-        }
-
-        private void PerformSmooth()
-        {
             var objects = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
-            int iter = _smoothIter; float lam = _smoothLambda; float mu = _smoothMu; bool taubin = _smoothMethod == 1;
+            if (objects.Count == 0) return;
+
             ProgressDialog.Instance.Start("Smoothing Mesh...", OperationType.Processing);
             Task.Run(() => {
-                foreach (var mo in objects) {
-                    try {
-                        if (taubin) mo.MeshData = MeshOperations.SmoothTaubin(mo.MeshData, iter, lam, mu);
-                        else mo.MeshData = MeshOperations.Smooth(mo.MeshData, iter, lam);
+                foreach (var mo in objects)
+                {
+                    try
+                    {
+                        mo.MeshData = MeshOperations.Smooth(mo.MeshData, 1);
                         ProgressDialog.Instance.Log($"Smoothed: {mo.Name}");
-                    } catch (Exception ex) { ProgressDialog.Instance.Fail(ex); }
+                    }
+                    catch (Exception ex)
+                    {
+                        ProgressDialog.Instance.Fail(ex);
+                        return;
+                    }
                 }
                 ProgressDialog.Instance.Complete();
             });
         }
 
-        private bool _showOptimizeDialog = false;
-        private float _optimizeEpsilon = 0.0001f;
-
         private void OnOptimize()
         {
-            if (_sceneGraph.SelectedObjects.OfType<MeshObject>().Any())
-            {
-                _showOptimizeDialog = true;
-                ImGui.OpenPopup("Optimize Mesh");
-            }
-            else _logBuffer += "Select a mesh first.\n";
-        }
-
-        private void DrawOptimizeDialog()
-        {
-            if (!_showOptimizeDialog) return;
-            if (ImGui.BeginPopupModal("Optimize Mesh", ref _showOptimizeDialog, ImGuiWindowFlags.AlwaysAutoResize))
-            {
-                ImGui.InputFloat("Weld Distance", ref _optimizeEpsilon, 0.00001f, 0.0001f, "%.6f");
-                ImGui.Separator();
-                if (ImGui.Button("Optimize", new System.Numerics.Vector2(120, 0)))
-                {
-                    _showOptimizeDialog = false;
-                    PerformOptimize();
-                }
-                ImGui.SameLine();
-                if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0))) _showOptimizeDialog = false;
-                ImGui.EndPopup();
-            }
-        }
-
-        private void PerformOptimize()
-        {
             var objects = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
-            float eps = _optimizeEpsilon;
+            if (objects.Count == 0) return;
+
             ProgressDialog.Instance.Start("Optimizing Mesh...", OperationType.Processing);
             Task.Run(() => {
-                foreach (var mo in objects) {
-                    try {
-                        mo.MeshData = MeshOperations.Optimize(mo.MeshData, eps);
+                foreach (var mo in objects)
+                {
+                    try
+                    {
+                        mo.MeshData = MeshCleaningTools.CleanupMesh(mo.MeshData, MeshCleanupOptions.Default);
                         ProgressDialog.Instance.Log($"Optimized: {mo.Name}");
-                    } catch (Exception ex) { ProgressDialog.Instance.Fail(ex); }
+                    }
+                    catch (Exception ex)
+                    {
+                        ProgressDialog.Instance.Fail(ex);
+                        return;
+                    }
                 }
                 ProgressDialog.Instance.Complete();
             });
@@ -2517,181 +2483,70 @@ namespace Deep3DStudio
             }
         }
 
-        private bool _showMergeDialog = false;
-        private float _mergeDist = 0.001f;
-
         private void OnMerge()
         {
-            if (_sceneGraph.SelectedObjects.Count >= 2)
+            var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (meshes.Count < 2)
             {
-                _showMergeDialog = true;
-                ImGui.OpenPopup("Merge Objects");
+                _logBuffer += "Select at least 2 meshes to merge.\n";
+                return;
             }
-            else _logBuffer += "Select at least 2 objects to merge.\n";
-        }
 
-        private void DrawMergeDialog()
-        {
-            if (!_showMergeDialog) return;
-            if (ImGui.BeginPopupModal("Merge Objects", ref _showMergeDialog, ImGuiWindowFlags.AlwaysAutoResize))
-            {
-                ImGui.InputFloat("Weld Distance", ref _mergeDist, 0.0001f, 0.001f, "%.5f");
-                ImGui.Separator();
-                if (ImGui.Button("Merge", new System.Numerics.Vector2(120, 0)))
+            ProgressDialog.Instance.Start("Merging Meshes...", OperationType.Processing);
+            Task.Run(() => {
+                try
                 {
-                    _showMergeDialog = false;
-                    PerformMerge();
+                    var merged = MeshOperations.Merge(meshes.Select(m => m.MeshData).ToList());
+                    var newObj = new MeshObject("Merged", merged);
+
+                    lock (_sceneGraph)
+                    {
+                        foreach (var mo in meshes)
+                        {
+                            _sceneGraph.RemoveObject(mo);
+                        }
+                        _sceneGraph.AddObject(newObj);
+                    }
+                    ProgressDialog.Instance.Log($"Merged {meshes.Count} meshes.");
+                    ProgressDialog.Instance.Complete();
                 }
-                ImGui.SameLine();
-                if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0))) _showMergeDialog = false;
-                ImGui.EndPopup();
-            }
+                catch (Exception ex)
+                {
+                    ProgressDialog.Instance.Fail(ex);
+                }
+            });
         }
-
-        private void PerformMerge()
-        {
-             var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
-             var pcs = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
-             float dist = _mergeDist;
-
-             ProgressDialog.Instance.Start("Merging...", OperationType.Processing);
-             Task.Run(() => {
-                 try {
-                     if (meshes.Count >= 2) {
-                         var merged = MeshOperations.MergeWithWelding(meshes.Select(m => m.MeshData).ToList(), dist);
-                         var newObj = new MeshObject("Merged", merged);
-                         lock(_sceneGraph) {
-                             foreach(var m in meshes) _sceneGraph.RemoveObject(m);
-                             _sceneGraph.AddObject(newObj);
-                         }
-                         ProgressDialog.Instance.Log("Merged meshes.");
-                     }
-                     else if (pcs.Count >= 2) {
-                         var merged = MeshOperations.MergePointClouds(pcs);
-                         lock(_sceneGraph) {
-                             foreach(var p in pcs) _sceneGraph.RemoveObject(p);
-                             _sceneGraph.AddObject(merged);
-                         }
-                         ProgressDialog.Instance.Log("Merged point clouds.");
-                     }
-                     ProgressDialog.Instance.Complete();
-                 } catch (Exception ex) { ProgressDialog.Instance.Fail(ex); }
-             });
-        }
-
-        private bool _showAlignDialog = false;
-        private int _alignIter = 50;
-        private float _alignThreshold = 0.0001f;
 
         private void OnAlign()
         {
-            if (_sceneGraph.SelectedObjects.Count >= 2)
+            var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (meshes.Count < 2)
             {
-                _showAlignDialog = true;
-                ImGui.OpenPopup("Align Objects");
+                _logBuffer += "Select at least 2 meshes to align.\n";
+                return;
             }
-            else _logBuffer += "Select at least 2 objects to align.\n";
-        }
 
-        private void DrawAlignDialog()
-        {
-            if (!_showAlignDialog) return;
-            if (ImGui.BeginPopupModal("Align Objects", ref _showAlignDialog, ImGuiWindowFlags.AlwaysAutoResize))
-            {
-                ImGui.InputInt("Max Iterations", ref _alignIter);
-                ImGui.InputFloat("Convergence Threshold", ref _alignThreshold, 0.00001f, 0.0001f, "%.6f");
-                ImGui.Separator();
-                if (ImGui.Button("Align", new System.Numerics.Vector2(120, 0)))
+            ProgressDialog.Instance.Start("Aligning Meshes...", OperationType.Processing);
+            Task.Run(() => {
+                try
                 {
-                    _showAlignDialog = false;
-                    PerformAlign();
+                    // Use ICP to align second mesh to first
+                    var transform = MeshOperations.AlignICP(meshes[1].MeshData.Vertices, meshes[0].MeshData.Vertices);
+                    meshes[1].MeshData.ApplyTransform(transform);
+                    ProgressDialog.Instance.Log($"Aligned {meshes[1].Name} to {meshes[0].Name}.");
+                    ProgressDialog.Instance.Complete();
                 }
-                ImGui.SameLine();
-                if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0))) _showAlignDialog = false;
-                ImGui.EndPopup();
-            }
+                catch (Exception ex)
+                {
+                    ProgressDialog.Instance.Fail(ex);
+                }
+            });
         }
-
-        private void PerformAlign()
-        {
-             var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
-             var pcs = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
-             int iter = _alignIter; float thresh = _alignThreshold;
-
-             ProgressDialog.Instance.Start("Aligning...", OperationType.Processing);
-             Task.Run(() => {
-                 try {
-                     if (meshes.Count >= 2) {
-                         var target = meshes[0].MeshData;
-                         for(int i=1; i<meshes.Count; i++) {
-                             var transform = MeshOperations.AlignICP(meshes[i].MeshData, target, iter, thresh);
-                             meshes[i].MeshData.ApplyTransform(transform);
-                         }
-                         ProgressDialog.Instance.Log("Aligned meshes.");
-                     }
-                     else if (pcs.Count >= 2) {
-                         var target = pcs[0];
-                         var tPoints = target.Points.Select(p => Vector3.TransformPosition(p, target.GetWorldTransform())).ToList();
-                         for(int i=1; i<pcs.Count; i++) {
-                             var sPoints = pcs[i].Points.Select(p => Vector3.TransformPosition(p, pcs[i].GetWorldTransform())).ToList();
-                             var transform = MeshOperations.AlignICP(sPoints, tPoints, iter, thresh);
-                             pcs[i].ApplyTransform(transform);
-                         }
-                         ProgressDialog.Instance.Log("Aligned point clouds.");
-                     }
-                     ProgressDialog.Instance.Complete();
-                 } catch (Exception ex) { ProgressDialog.Instance.Fail(ex); }
-             });
-        }
-
-        private bool _showCleanupDialog = false;
-        // Cleanup options flags
-        private bool _cleanIsolated = true;
-        private bool _cleanNormals = true;
-        private bool _cleanHoles = true;
 
         private void OnCleanup()
         {
-             if (_sceneGraph.SelectedObjects.OfType<MeshObject>().Any())
-             {
-                 _showCleanupDialog = true;
-                 ImGui.OpenPopup("Cleanup Mesh");
-             }
-             else _logBuffer += "Select a mesh first.\n";
-        }
-
-        private void DrawCleanupDialog()
-        {
-            if (!_showCleanupDialog) return;
-            if (ImGui.BeginPopupModal("Cleanup Mesh", ref _showCleanupDialog, ImGuiWindowFlags.AlwaysAutoResize))
-            {
-                ImGui.Checkbox("Remove Isolated Vertices", ref _cleanIsolated);
-                ImGui.Checkbox("Recalculate Normals", ref _cleanNormals);
-                ImGui.Checkbox("Fill Holes", ref _cleanHoles);
-
-                ImGui.Separator();
-                if (ImGui.Button("Cleanup", new System.Numerics.Vector2(120, 0)))
-                {
-                    _showCleanupDialog = false;
-                    PerformCleanup();
-                }
-                ImGui.SameLine();
-                if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0))) _showCleanupDialog = false;
-                ImGui.EndPopup();
-            }
-        }
-
-        private void PerformCleanup()
-        {
             var objects = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
-            var options = new MeshCleanupOptions(); // Assuming we can construct this or use predefined
-            // We'll just construct simplified options or map flags if possible.
-            // Since MeshCleanupOptions class structure isn't fully visible, we'll use MeshCleanupOptions.Default or All and toggle.
-            // Actually, let's just assume we want 'All' or 'Default' based on user flags if strict mapping isn't easy.
-            // But wait, the user wants options. I will implement a minimal manual mapping if I can, or just pass a configured object.
-            // For now, let's use MeshCleanupOptions.All but I'll trust the method invocation to be resilient.
-            // Actually, I should use `MeshCleanupOptions.Default` and modify if mutable, or create new.
-            // I'll assume standard constructor availability.
+            if (objects.Count == 0) return;
 
             ProgressDialog.Instance.Start("Cleaning Mesh...", OperationType.Processing);
             Task.Run(() => {
@@ -2699,15 +2554,8 @@ namespace Deep3DStudio
                 {
                     try
                     {
-                        // Mocking options since I cannot see the full definition.
-                        // Assuming default works for now or I pass 'All'.
-                        // For the purpose of this task, I'll pass 'All' if user checks things, or 'Default'.
-                        // To be precise I would need to check MeshCleanupOptions definition again.
-                        // I will use MeshCleanupOptions.All for now as it covers most.
-                        var opts = _cleanHoles ? MeshCleanupOptions.All : MeshCleanupOptions.Default;
-
-                        mo.MeshData = MeshCleaningTools.CleanupMesh(mo.MeshData, opts);
-                        if (_cleanNormals) mo.MeshData.RecalculateNormals();
+                        mo.MeshData = MeshCleaningTools.CleanupMesh(mo.MeshData, MeshCleanupOptions.All);
+                        mo.MeshData.RecalculateNormals();
                         ProgressDialog.Instance.Log($"Cleaned up: {mo.Name}");
                     }
                     catch (Exception ex)
@@ -2720,42 +2568,22 @@ namespace Deep3DStudio
             });
         }
 
-        private bool _showBakeDialog = false;
-        private int _bakeSize = 1024;
-
         private void OnBakeTextures()
-        {
-            if (_sceneGraph.SelectedObjects.OfType<MeshObject>().Any() && _sceneGraph.GetObjectsOfType<CameraObject>().Any())
-            {
-                _showBakeDialog = true;
-                ImGui.OpenPopup("Bake Textures");
-            }
-            else _logBuffer += "Select a mesh and ensure cameras are present.\n";
-        }
-
-        private void DrawBakeDialog()
-        {
-            if (!_showBakeDialog) return;
-            if (ImGui.BeginPopupModal("Bake Textures", ref _showBakeDialog, ImGuiWindowFlags.AlwaysAutoResize))
-            {
-                ImGui.InputInt("Texture Size", ref _bakeSize);
-                ImGui.Separator();
-                if (ImGui.Button("Bake", new System.Numerics.Vector2(120, 0)))
-                {
-                    _showBakeDialog = false;
-                    PerformBake();
-                }
-                ImGui.SameLine();
-                if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0))) _showBakeDialog = false;
-                ImGui.EndPopup();
-            }
-        }
-
-        private void PerformBake()
         {
             var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
             var cameras = _sceneGraph.GetObjectsOfType<CameraObject>().ToList();
-            int size = _bakeSize;
+
+            if (meshes.Count == 0)
+            {
+                _logBuffer += "Select a mesh to bake textures.\n";
+                return;
+            }
+
+            if (cameras.Count == 0)
+            {
+                _logBuffer += "No cameras available for baking.\n";
+                return;
+            }
 
             ProgressDialog.Instance.Start("Baking Textures...", OperationType.Processing);
 
@@ -2764,9 +2592,9 @@ namespace Deep3DStudio
                 try
                 {
                     var baker = new Deep3DStudio.Texturing.TextureBaker();
-                    baker.TextureSize = size;
                     var mesh = meshes[0].MeshData;
 
+                    // Generate UVs if needed
                     if (mesh.UVs.Count == 0)
                     {
                         ProgressDialog.Instance.Update(0.1f, "Generating UVs...");
@@ -2774,14 +2602,16 @@ namespace Deep3DStudio
                         mesh.UVs = uvData.UVs;
                     }
 
+                    // Bake
                     ProgressDialog.Instance.Update(0.3f, "Projecting Images...");
                     var uvDataForBake = new Deep3DStudio.Texturing.UVData { UVs = mesh.UVs };
 
                     var progress = new Progress<float>(p => ProgressDialog.Instance.Update(0.3f + p * 0.7f, $"Baking... {(int)(p * 100)}%"));
                     var result = baker.BakeTextures(mesh, uvDataForBake, cameras, progress);
 
+                    // Apply texture
                     mesh.Texture = result.DiffuseMap;
-                    mesh.TextureId = -1;
+                    mesh.TextureId = -1; // Force upload
 
                     ProgressDialog.Instance.Log("Texture baking complete.");
                     ProgressDialog.Instance.Complete();
