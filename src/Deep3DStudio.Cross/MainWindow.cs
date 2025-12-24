@@ -1352,12 +1352,12 @@ namespace Deep3DStudio
             if (DrawIconTextButton("##RigSkel", IconType.Skeleton, "View Skeleton", iconSize))
             {
                 // Toggle skeleton visibility in the scene
-                var skeletons = _sceneGraph.AllObjects.OfType<SkeletonObject>().ToList();
-                foreach (var skel in skeletons)
+                var allSkeletons = _sceneGraph.GetAllObjects().OfType<SkeletonObject>().ToList();
+                foreach (var skel in allSkeletons)
                 {
                     skel.Visible = !skel.Visible;
                 }
-                _logBuffer += $"Toggled visibility for {skeletons.Count} skeleton(s).\n";
+                _logBuffer += $"Toggled visibility for {allSkeletons.Count} skeleton(s).\n";
             }
 
             ImGui.Separator();
@@ -1365,12 +1365,12 @@ namespace Deep3DStudio
             ImGui.TextDisabled("'Auto Rig' to generate skeleton");
 
             // Show selected skeleton info if any
-            var skeletons = _sceneGraph.SelectedObjects.OfType<SkeletonObject>().ToList();
-            if (skeletons.Count > 0)
+            var selectedSkeletons = _sceneGraph.SelectedObjects.OfType<SkeletonObject>().ToList();
+            if (selectedSkeletons.Count > 0)
             {
                 ImGui.Separator();
-                ImGui.Text($"Selected: {skeletons[0].Name}");
-                ImGui.Text($"Joints: {skeletons[0].Skeleton?.Joints.Count ?? 0}");
+                ImGui.Text($"Selected: {selectedSkeletons[0].Name}");
+                ImGui.Text($"Joints: {selectedSkeletons[0].Skeleton?.Joints.Count ?? 0}");
             }
         }
 
