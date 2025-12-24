@@ -1914,7 +1914,7 @@ namespace Deep3DStudio
 
         private void DrawAboutWindow()
         {
-            ImGui.SetNextWindowSize(new System.Numerics.Vector2(400, 420), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSize(new System.Numerics.Vector2(400, 500), ImGuiCond.Always);
 
             if (ImGui.Begin("About Deep3DStudio", ref _showAbout, ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoResize))
             {
