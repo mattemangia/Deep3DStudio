@@ -20,8 +20,10 @@ namespace Deep3DStudio.DeepMeshPrior
             var settings = Deep3DStudio.Configuration.IniSettings.Instance;
             Device device = torch.CPU;
 
-            if (settings.AIDevice == Deep3DStudio.Configuration.AIComputeDevice.CUDA && torch.cuda.is_available())
+            if ((settings.AIDevice == Deep3DStudio.Configuration.AIComputeDevice.CUDA ||
+                 settings.AIDevice == Deep3DStudio.Configuration.AIComputeDevice.ROCm) && torch.cuda.is_available())
             {
+                // ROCm also uses the CUDA backend in TorchSharp (HIP mapping)
                 device = torch.CUDA;
             }
             else if (settings.AIDevice == Deep3DStudio.Configuration.AIComputeDevice.MPS)

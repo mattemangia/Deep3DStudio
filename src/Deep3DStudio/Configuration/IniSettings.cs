@@ -48,7 +48,8 @@ namespace Deep3DStudio.Configuration
         CPU,
         CUDA,
         DirectML, // For AMD/Intel GPUs on Windows
-        MPS       // For macOS (Metal Performance Shaders)
+        MPS,      // For macOS (Metal Performance Shaders)
+        ROCm      // For AMD GPUs on Linux
     }
 
     /// <summary>

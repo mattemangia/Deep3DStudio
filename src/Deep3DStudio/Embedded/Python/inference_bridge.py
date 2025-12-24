@@ -28,6 +28,16 @@ def get_torch_device(device_str):
         else:
             print("Warning: MPS requested but not available. Falling back to CPU.")
             return torch.device("cpu")
+    elif device_str == "rocm":
+        # ROCm uses the 'cuda' device interface in PyTorch
+        if torch.cuda.is_available() and (torch.version.hip is not None or "rocm" in torch.__version__):
+            return torch.device("cuda")
+        elif torch.cuda.is_available():
+             print("Warning: ROCm requested, but generic CUDA detected (likely NVIDIA). Using CUDA.")
+             return torch.device("cuda")
+        else:
+            print("Warning: ROCm requested but GPU not available. Falling back to CPU.")
+            return torch.device("cpu")
     elif device_str == "cuda" and not torch.cuda.is_available():
         print("Warning: CUDA requested but not available. Falling back to CPU.")
         return torch.device("cpu")
