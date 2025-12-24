@@ -3039,36 +3039,37 @@ namespace Deep3DStudio
 
         private void RunTripoSFRefinement()
         {
-            var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
-            if (meshes.Count == 0)
+            // TripoSF is an image-to-mesh model, not a mesh refiner
+            // It generates mesh from images using feed-forward inference
+            if (_loadedImages.Count == 0)
             {
-                _logBuffer += "Error: No mesh selected for TripoSF refinement.\n";
+                _logBuffer += "Error: TripoSF requires loaded images. Load an image first.\n";
                 return;
             }
 
-            ProgressDialog.Instance.Start("TripoSF Refinement...", OperationType.Processing);
-            Task.Run(async () => {
+            ProgressDialog.Instance.Start("TripoSF Generation...", OperationType.Processing);
+            Task.Run(() => {
                 try
                 {
-                    // TripoSF uses the AI workflow manager
-                    foreach (var mesh in meshes)
-                    {
-                        var result = await AIModelManager.Instance.ExecuteWorkflowAsync(
-                            WorkflowPipeline.MeshToTripoSF,
-                            null, // No images needed
-                            mesh.MeshData,
-                            (status, progress) => ProgressDialog.Instance.Update(progress, status)
-                        );
+                    var triposf = new Deep3DStudio.Model.AIModels.TripoSFInference();
+                    var mesh = triposf.GenerateFromImage(_loadedImages[0]);
 
-                        if (result != null && result.Meshes.Count > 0)
-                        {
-                            EnqueueAction(() => {
-                                mesh.MeshData = result.Meshes[0];
-                                ProgressDialog.Instance.Log($"Refined: {mesh.Name}");
-                            });
-                        }
+                    if (mesh.Vertices.Count > 0)
+                    {
+                        EnqueueAction(() => {
+                            var obj = new MeshObject("TripoSF_Mesh", mesh);
+                            lock (_sceneGraph)
+                            {
+                                _sceneGraph.AddObject(obj);
+                            }
+                            ProgressDialog.Instance.Log("TripoSF mesh generated.");
+                            ProgressDialog.Instance.Complete();
+                        });
                     }
-                    EnqueueAction(() => ProgressDialog.Instance.Complete());
+                    else
+                    {
+                        EnqueueAction(() => ProgressDialog.Instance.Fail(new Exception("TripoSF returned empty mesh")));
+                    }
                 }
                 catch (Exception ex)
                 {
