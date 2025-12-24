@@ -682,6 +682,12 @@ namespace Deep3DStudio
             if (_showLogPanel)
                 RenderLogPanel();
 
+            // Info Overlay
+            if (IniSettings.Instance.ShowInfoOverlay)
+            {
+                RenderInfoOverlay();
+            }
+
             // Dialogs
             if (_showSettings) DrawSettingsWindow();
             if (_showAbout) DrawAboutWindow();
@@ -1531,6 +1537,36 @@ namespace Deep3DStudio
                 if (ImGui.GetScrollY() >= ImGui.GetScrollMaxY())
                     ImGui.SetScrollHereY(1.0f);
                 ImGui.EndChild();
+            }
+            ImGui.End();
+        }
+
+        private void RenderInfoOverlay()
+        {
+            float padding = 10.0f;
+            var windowPos = new System.Numerics.Vector2(padding + (_showLeftPanel ? _leftPanelWidth : _showVerticalToolbar ? _verticalToolbarWidth : 0), _toolbarHeight + 30);
+
+            ImGui.SetNextWindowPos(windowPos, ImGuiCond.Always);
+            ImGui.SetNextWindowBgAlpha(0.35f); // Transparent background
+
+            if (ImGui.Begin("InfoOverlay", ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoMove))
+            {
+                float fps = _viewport.FPS;
+                ImGui.Text($"FPS: {fps:F1}");
+                ImGui.Separator();
+
+                int objCount = _sceneGraph.GetVisibleObjects().Count();
+                int selCount = _sceneGraph.SelectedObjects.Count;
+
+                ImGui.Text($"Objects: {objCount}");
+                if (selCount > 0)
+                {
+                    ImGui.TextColored(new System.Numerics.Vector4(1.0f, 0.8f, 0.2f, 1.0f), $"Selected: {selCount}");
+                }
+
+                // Gizmo mode
+                string mode = _viewport.CurrentGizmoMode.ToString();
+                ImGui.TextDisabled($"Mode: {mode}");
             }
             ImGui.End();
         }

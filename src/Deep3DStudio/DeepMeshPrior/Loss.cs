@@ -13,11 +13,24 @@ namespace Deep3DStudio.DeepMeshPrior
             return torch.mean(torch.square(diff));
         }
 
-        public static Tensor MeshLaplacianLoss(Tensor pred_pos, int[][] ve, int[][] edges, Device device)
+        public static Tensor MeshLaplacianLoss(Tensor pred_pos, Tensor edgeIndex)
         {
-            // Placeholder for an edge-list Laplacian loss; use the explicit Laplacian
-            // implementation until this variant is wired up.
-            return torch.tensor(0.0f, device: device);
+            // Edge-list Laplacian Loss
+            // Loss = sum_{i,j in E} || v_i - v_j ||^2
+            // This is equivalent to Uniform Laplacian L = D - A, x^T L x = sum (v_i - v_j)^2
+            // This pulls connected vertices together.
+
+            // edgeIndex is [2, E]
+            var srcIdx = edgeIndex[0]; // [E]
+            var dstIdx = edgeIndex[1]; // [E]
+
+            var src = pred_pos.index_select(0, srcIdx); // [E, 3]
+            var dst = pred_pos.index_select(0, dstIdx); // [E, 3]
+
+            var diff = src - dst;
+            var sqDist = torch.sum(torch.square(diff), dim: 1); // [E]
+
+            return torch.mean(sqDist); // Mean over edges
         }
 
         public static Tensor LaplacianLossExplicit(Tensor pred_pos, Tensor laplacianMat)
