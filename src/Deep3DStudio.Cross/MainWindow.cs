@@ -339,12 +339,15 @@ namespace Deep3DStudio
                 }
 
                 _viewport.Render((int)vpX, (int)vpY, (int)vpW, (int)vpH, ClientSize.X, ClientSize.Y);
+                CheckError("After Viewport");
 
                 // Render UI
                 RenderUI();
             }
 
+            CheckError("Before ImGui");
             _controller.Render();
+            CheckError("After ImGui");
 
             // Check for OpenGL errors
             var err = GL.GetError();
@@ -354,6 +357,15 @@ namespace Deep3DStudio
             }
 
             SwapBuffers();
+        }
+
+        private void CheckError(string stage)
+        {
+            var err = GL.GetError();
+            if (err != OpenTK.Graphics.OpenGL.ErrorCode.NoError && err != OpenTK.Graphics.OpenGL.ErrorCode.InvalidFramebufferOperation)
+            {
+                Console.WriteLine($"OpenGL Error at MainWindow {stage}: {err}");
+            }
         }
 
         protected override void OnUnload()

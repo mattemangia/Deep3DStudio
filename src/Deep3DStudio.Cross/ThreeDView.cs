@@ -67,13 +67,18 @@ namespace Deep3DStudio.Viewport
 
         public void Render(int width, int height)
         {
+            CheckError("Start Render");
+
             // Ensure fixed-function pipeline is active (disable any active shaders from ImGui)
             GL.UseProgram(0);
-            // In Compatibility Profile, 0 is the default VAO.
-            // On some drivers/contexts, explicit binding might be needed or problematic if not strictly supported.
-            // We swallow any potential error here to prevent infinite error loops if the platform dislikes this redundancy.
+
+            // Explicitly unbind everything to ensure clean state for legacy drawing
             GL.BindVertexArray(0);
-            GL.GetError(); // Consume potential InvalidOperation from BindVertexArray(0) on legacy contexts
+            GL.BindBuffer(BufferTarget.ArrayBuffer, 0);
+            GL.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+
+            // Consume potential errors from state reset on strict contexts
+            while (GL.GetError() != ErrorCode.NoError) { }
 
             if (height == 0) height = 1;
 
@@ -102,15 +107,26 @@ namespace Deep3DStudio.Viewport
             GL.LoadMatrix(ref _projectionMatrix);
             GL.MatrixMode(MatrixMode.Modelview);
             GL.LoadMatrix(ref _finalViewMatrix);
+            CheckError("Matrices");
 
             if (s.ShowGrid) DrawGrid();
             if (s.ShowAxes) DrawAxes();
 
             DrawScene();
+            CheckError("DrawScene");
 
             if (s.ShowGizmo && _sceneGraph.SelectedObjects.Count > 0 && _gizmoMode != GizmoMode.Select && _gizmoMode != GizmoMode.None)
             {
                 DrawGizmo();
+            }
+        }
+
+        private void CheckError(string stage)
+        {
+            var err = GL.GetError();
+            if (err != OpenTK.Graphics.OpenGL.ErrorCode.NoError && err != OpenTK.Graphics.OpenGL.ErrorCode.InvalidFramebufferOperation)
+            {
+                Console.WriteLine($"OpenGL Error at ThreeDView {stage}: {err}");
             }
         }
 
