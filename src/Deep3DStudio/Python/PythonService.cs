@@ -242,8 +242,6 @@ namespace Deep3DStudio.Python
         /// </summary>
         private void CleanSysPath(string pythonHome)
         {
-            if (!_isInitialized) return;
-
             using (Py.GIL())
             {
                 try
@@ -472,8 +470,6 @@ namespace Deep3DStudio.Python
 
         private void SetupStdioRedirection()
         {
-            if (!_isInitialized) return;
-
             using (Py.GIL())
             {
                 string redirectScript = @"
