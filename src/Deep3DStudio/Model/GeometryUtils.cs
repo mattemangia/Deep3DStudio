@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 
 namespace Deep3DStudio.Model
 {
-    // ... [MeshData class remains same] ...
     public class MeshData
     {
         public List<Vector3> Vertices { get; set; } = new List<Vector3>();
@@ -108,7 +107,6 @@ namespace Deep3DStudio.Model
 
     public static class GeometryUtils
     {
-        // ... [Rigid Transform methods remain same] ...
         public static Matrix4 ComputeRigidTransform(List<Vector3> srcPoints, List<Vector3> dstPoints)
         {
             if (srcPoints.Count != dstPoints.Count || srcPoints.Count < 3)
@@ -618,7 +616,6 @@ namespace Deep3DStudio.Model
              c = c1 + mu * (c2 - c1);
         }
 
-        // ... [Edge Tables and Tri Tables remain same] ...
         public static int[] GetMarchingCubesEdges(int cubeIndex)
         {
             var edges = new List<int>();
