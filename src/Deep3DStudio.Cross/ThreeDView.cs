@@ -7,6 +7,7 @@ using Deep3DStudio.Scene;
 using Deep3DStudio.Configuration;
 using Deep3DStudio.Model;
 using System.Linq;
+using ErrorCode = OpenTK.Graphics.OpenGL.ErrorCode;
 
 namespace Deep3DStudio.Viewport
 {
