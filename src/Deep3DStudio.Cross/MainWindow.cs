@@ -1476,50 +1476,283 @@ namespace Deep3DStudio
 
         private void DrawSettingsWindow()
         {
-            ImGui.SetNextWindowSize(new System.Numerics.Vector2(400, 500), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSize(new System.Numerics.Vector2(550, 650), ImGuiCond.FirstUseEver);
 
             if (ImGui.Begin("Settings", ref _showSettings))
             {
                 var s = IniSettings.Instance;
 
-                if (ImGui.CollapsingHeader("Viewport", ImGuiTreeNodeFlags.DefaultOpen))
+                if (ImGui.BeginTabBar("SettingsTabs"))
                 {
-                    bool grid = s.ShowGrid;
-                    if (ImGui.Checkbox("Show Grid", ref grid)) s.ShowGrid = grid;
+                    // --- General Settings ---
+                    if (ImGui.BeginTabItem("General"))
+                    {
+                        ImGui.Spacing();
+                        if (ImGui.CollapsingHeader("System & Compute", ImGuiTreeNodeFlags.DefaultOpen))
+                        {
+                            // Compute Device
+                            int device = (int)s.Device;
+                            string[] devices = Enum.GetNames(typeof(ComputeDevice));
+                            if (ImGui.Combo("Meshing Device", ref device, devices, devices.Length))
+                                s.Device = (ComputeDevice)device;
 
-                    bool axes = s.ShowAxes;
-                    if (ImGui.Checkbox("Show Axes", ref axes)) s.ShowAxes = axes;
+                            // Meshing Algorithm
+                            int algo = (int)s.MeshingAlgo;
+                            string[] algos = Enum.GetNames(typeof(MeshingAlgorithm));
+                            if (ImGui.Combo("Default Meshing", ref algo, algos, algos.Length))
+                                s.MeshingAlgo = (MeshingAlgorithm)algo;
 
-                    bool cameras = s.ShowCameras;
-                    if (ImGui.Checkbox("Show Cameras", ref cameras)) s.ShowCameras = cameras;
-                }
+                            // Coordinate System
+                            int coord = (int)s.CoordSystem;
+                            string[] coords = Enum.GetNames(typeof(CoordinateSystem));
+                            if (ImGui.Combo("Coordinate System", ref coord, coords, coords.Length))
+                                s.CoordSystem = (CoordinateSystem)coord;
+                        }
 
-                if (ImGui.CollapsingHeader("Reconstruction"))
-                {
-                    int method = (int)s.ReconstructionMethod;
-                    string[] methods = Enum.GetNames(typeof(ReconstructionMethod));
-                    if (ImGui.Combo("Default Method", ref method, methods, methods.Length))
-                        s.ReconstructionMethod = (ReconstructionMethod)method;
-                }
+                        ImGui.Spacing();
+                        if (ImGui.CollapsingHeader("Reconstruction", ImGuiTreeNodeFlags.DefaultOpen))
+                        {
+                            int method = (int)s.ReconstructionMethod;
+                            string[] methods = Enum.GetNames(typeof(ReconstructionMethod));
+                            if (ImGui.Combo("Default Method", ref method, methods, methods.Length))
+                                s.ReconstructionMethod = (ReconstructionMethod)method;
 
-                if (ImGui.CollapsingHeader("Performance"))
-                {
-                    ImGui.Text("OpenGL Version: " + GL.GetString(StringName.Version));
-                    ImGui.Text("Renderer: " + GL.GetString(StringName.Renderer));
+                            int bbox = (int)s.BoundingBoxStyle;
+                            string[] bboxStyles = Enum.GetNames(typeof(BoundingBoxMode));
+                            if (ImGui.Combo("Bounding Box", ref bbox, bboxStyles, bboxStyles.Length))
+                                s.BoundingBoxStyle = (BoundingBoxMode)bbox;
+                        }
+
+                        ImGui.Spacing();
+                        if (ImGui.CollapsingHeader("Viewport Appearance"))
+                        {
+                            // Background Color
+                            var bg = new System.Numerics.Vector3(s.ViewportBgR, s.ViewportBgG, s.ViewportBgB);
+                            if (ImGui.ColorEdit3("Background Color", ref bg))
+                            {
+                                s.ViewportBgR = bg.X; s.ViewportBgG = bg.Y; s.ViewportBgB = bg.Z;
+                            }
+
+                            // Grid Color
+                            var gridCol = new System.Numerics.Vector3(s.GridColorR, s.GridColorG, s.GridColorB);
+                            if (ImGui.ColorEdit3("Grid Color", ref gridCol))
+                            {
+                                s.GridColorR = gridCol.X; s.GridColorG = gridCol.Y; s.GridColorB = gridCol.Z;
+                            }
+
+                            bool grid = s.ShowGrid;
+                            if (ImGui.Checkbox("Show Grid", ref grid)) s.ShowGrid = grid;
+
+                            bool axes = s.ShowAxes;
+                            if (ImGui.Checkbox("Show Axes", ref axes)) s.ShowAxes = axes;
+
+                            bool cameras = s.ShowCameras;
+                            if (ImGui.Checkbox("Show Cameras", ref cameras)) s.ShowCameras = cameras;
+
+                            bool gizmo = s.ShowGizmo;
+                            if (ImGui.Checkbox("Show Gizmo", ref gizmo)) s.ShowGizmo = gizmo;
+
+                            bool info = s.ShowInfoOverlay;
+                            if (ImGui.Checkbox("Show Info Overlay", ref info)) s.ShowInfoOverlay = info;
+                        }
+
+                        ImGui.EndTabItem();
+                    }
+
+                    // --- AI Models Settings ---
+                    if (ImGui.BeginTabItem("AI Models"))
+                    {
+                        ImGui.Spacing();
+
+                        // Global AI Settings
+                        ImGui.TextColored(new System.Numerics.Vector4(0.4f, 0.8f, 1.0f, 1.0f), "Global AI Configuration");
+
+                        int aiDevice = (int)s.AIDevice;
+                        string[] aiDevices = Enum.GetNames(typeof(AIComputeDevice));
+                        if (ImGui.Combo("AI Compute Device", ref aiDevice, aiDevices, aiDevices.Length))
+                            s.AIDevice = (AIComputeDevice)aiDevice;
+
+                        int img3d = (int)s.ImageTo3D;
+                        string[] img3dModels = Enum.GetNames(typeof(ImageTo3DModel));
+                        if (ImGui.Combo("Image-to-3D Model", ref img3d, img3dModels, img3dModels.Length))
+                            s.ImageTo3D = (ImageTo3DModel)img3d;
+
+                        int meshEx = (int)s.MeshExtraction;
+                        string[] meshExMethods = Enum.GetNames(typeof(MeshExtractionMethod));
+                        if (ImGui.Combo("Mesh Extraction", ref meshEx, meshExMethods, meshExMethods.Length))
+                            s.MeshExtraction = (MeshExtractionMethod)meshEx;
+
+                        ImGui.Separator();
+                        ImGui.Spacing();
+
+                        if (ImGui.CollapsingHeader("Dust3r (Multi-View)"))
+                        {
+                            // Dust3r doesn't have many exposed parameters in IniSettings,
+                            // but usually runs based on reconstruction method.
+                            ImGui.TextWrapped("Dust3r is the default multi-view reconstruction engine. It requires a GPU with significant VRAM for best performance.");
+                        }
+
+                        if (ImGui.CollapsingHeader("TripoSR (Single Image)"))
+                        {
+                            int res = s.TripoSRResolution;
+                            if (ImGui.SliderInt("Resolution", ref res, 128, 1024)) s.TripoSRResolution = res;
+
+                            int mcRes = s.TripoSRMarchingCubesRes;
+                            if (ImGui.SliderInt("Marching Cubes Res", ref mcRes, 32, 512)) s.TripoSRMarchingCubesRes = mcRes;
+
+                            string path = s.TripoSRModelPath;
+                            if (ImGui.InputText("Model Path##TripoSR", ref path, 256)) s.TripoSRModelPath = path;
+                        }
+
+                        if (ImGui.CollapsingHeader("LGM (Large Gaussian Model)"))
+                        {
+                            int flow = s.LGMFlowSteps;
+                            if (ImGui.SliderInt("Flow Steps", ref flow, 10, 100)) s.LGMFlowSteps = flow;
+
+                            int qRes = s.LGMQueryResolution;
+                            if (ImGui.SliderInt("Query Resolution", ref qRes, 64, 512)) s.LGMQueryResolution = qRes;
+
+                            int lgmRes = s.LGMResolution;
+                            if (ImGui.SliderInt("Resolution", ref lgmRes, 256, 1024)) s.LGMResolution = lgmRes;
+
+                            string path = s.LGMModelPath;
+                            if (ImGui.InputText("Model Path##LGM", ref path, 256)) s.LGMModelPath = path;
+                        }
+
+                        if (ImGui.CollapsingHeader("Wonder3D"))
+                        {
+                            int steps = s.Wonder3DSteps;
+                            if (ImGui.SliderInt("Steps", ref steps, 10, 100)) s.Wonder3DSteps = steps;
+
+                            float guidance = s.Wonder3DGuidanceScale;
+                            if (ImGui.SliderFloat("Guidance Scale", ref guidance, 1.0f, 10.0f)) s.Wonder3DGuidanceScale = guidance;
+
+                            int diffSteps = s.Wonder3DDiffusionSteps;
+                            if (ImGui.SliderInt("Diffusion Steps", ref diffSteps, 10, 100)) s.Wonder3DDiffusionSteps = diffSteps;
+
+                            string path = s.Wonder3DModelPath;
+                            if (ImGui.InputText("Model Path##Wonder3D", ref path, 256)) s.Wonder3DModelPath = path;
+                        }
+
+                        if (ImGui.CollapsingHeader("UniRig (Auto Rigging)"))
+                        {
+                            int rigMethod = (int)s.RiggingModel;
+                            string[] rigMethods = Enum.GetNames(typeof(RiggingMethod));
+                            if (ImGui.Combo("Rigging Method", ref rigMethod, rigMethods, rigMethods.Length))
+                                s.RiggingModel = (RiggingMethod)rigMethod;
+
+                            int joints = s.UniRigMaxJoints;
+                            if (ImGui.SliderInt("Max Joints", ref joints, 16, 256)) s.UniRigMaxJoints = joints;
+
+                            int bones = s.UniRigMaxBonesPerVertex;
+                            if (ImGui.SliderInt("Bones Per Vertex", ref bones, 1, 8)) s.UniRigMaxBonesPerVertex = bones;
+
+                            string path = s.UniRigModelPath;
+                            if (ImGui.InputText("Model Path##UniRig", ref path, 256)) s.UniRigModelPath = path;
+                        }
+
+                        ImGui.EndTabItem();
+                    }
+
+                    // --- Refinement Settings ---
+                    if (ImGui.BeginTabItem("Refinement"))
+                    {
+                        ImGui.Spacing();
+
+                        int meshRefine = (int)s.MeshRefinement;
+                        string[] meshRefineMethods = Enum.GetNames(typeof(MeshRefinementMethod));
+                        if (ImGui.Combo("Mesh Refinement", ref meshRefine, meshRefineMethods, meshRefineMethods.Length))
+                            s.MeshRefinement = (MeshRefinementMethod)meshRefine;
+
+                        ImGui.Spacing();
+
+                        if (ImGui.CollapsingHeader("DeepMeshPrior (Optimization)"))
+                        {
+                            ImGui.TextWrapped("Optimization of existing meshes using Graph Convolutional Networks.");
+
+                            int iter = s.DeepMeshPriorIterations;
+                            if (ImGui.InputInt("Iterations", ref iter)) s.DeepMeshPriorIterations = Math.Max(100, iter);
+
+                            float lr = s.DeepMeshPriorLearningRate;
+                            if (ImGui.InputFloat("Learning Rate", ref lr, 0.001f, 0.01f, "%.4f")) s.DeepMeshPriorLearningRate = lr;
+
+                            float lap = s.DeepMeshPriorLaplacianWeight;
+                            if (ImGui.InputFloat("Laplacian Weight", ref lap, 0.1f)) s.DeepMeshPriorLaplacianWeight = lap;
+                        }
+
+                        if (ImGui.CollapsingHeader("Gaussian SDF Refiner"))
+                        {
+                            int grid = s.GaussianSDFGridResolution;
+                            if (ImGui.SliderInt("Grid Resolution", ref grid, 64, 512)) s.GaussianSDFGridResolution = grid;
+
+                            float sigma = s.GaussianSDFSigma;
+                            if (ImGui.SliderFloat("Sigma", ref sigma, 0.1f, 5.0f)) s.GaussianSDFSigma = sigma;
+
+                            float iso = s.GaussianSDFIsoLevel;
+                            if (ImGui.SliderFloat("Iso Level", ref iso, -1.0f, 1.0f)) s.GaussianSDFIsoLevel = iso;
+                        }
+
+                        if (ImGui.CollapsingHeader("TripoSF (Refinement)"))
+                        {
+                            int res = s.TripoSFResolution;
+                            if (ImGui.SliderInt("Resolution", ref res, 256, 1024)) s.TripoSFResolution = res;
+
+                            int dil = s.TripoSFSparseDilation;
+                            if (ImGui.SliderInt("Sparse Dilation", ref dil, 0, 5)) s.TripoSFSparseDilation = dil;
+
+                            string path = s.TripoSFModelPath;
+                            if (ImGui.InputText("Model Path##TripoSF", ref path, 256)) s.TripoSFModelPath = path;
+                        }
+
+                        if (ImGui.CollapsingHeader("Point Cloud Merger"))
+                        {
+                            float vox = s.MergerVoxelSize;
+                            if (ImGui.InputFloat("Voxel Size", ref vox, 0.001f)) s.MergerVoxelSize = Math.Max(0.001f, vox);
+
+                            int iter = s.MergerMaxIterations;
+                            if (ImGui.InputInt("Max Iterations", ref iter)) s.MergerMaxIterations = iter;
+
+                            float outlier = s.MergerOutlierThreshold;
+                            if (ImGui.SliderFloat("Outlier Threshold", ref outlier, 0.5f, 5.0f)) s.MergerOutlierThreshold = outlier;
+                        }
+
+                        if (ImGui.CollapsingHeader("NeRF (Legacy)"))
+                        {
+                            int iter = s.NeRFIterations;
+                            if (ImGui.InputInt("Iterations", ref iter)) s.NeRFIterations = iter;
+
+                            int grid = s.VoxelGridSize;
+                            if (ImGui.InputInt("Voxel Grid Size", ref grid)) s.VoxelGridSize = grid;
+
+                            float lr = s.NeRFLearningRate;
+                            if (ImGui.InputFloat("Learning Rate", ref lr, 0.01f)) s.NeRFLearningRate = lr;
+                        }
+
+                        ImGui.EndTabItem();
+                    }
+
+                    ImGui.EndTabBar();
                 }
 
                 ImGui.Separator();
 
-                if (ImGui.Button("Save Settings"))
+                // Bottom buttons
+                if (ImGui.Button("Save Settings", new System.Numerics.Vector2(120, 30)))
                 {
                     s.Save();
                     _logBuffer += "Settings saved.\n";
                 }
                 ImGui.SameLine();
-                if (ImGui.Button("Reset to Defaults"))
+                if (ImGui.Button("Reset to Defaults", new System.Numerics.Vector2(140, 30)))
                 {
                     s.Reset();
                 }
+
+                // Tech Info at bottom
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.TextDisabled($"OpenGL: {GL.GetString(StringName.Version)}");
+                ImGui.TextDisabled($"Renderer: {GL.GetString(StringName.Renderer)}");
             }
             ImGui.End();
         }

@@ -11,6 +11,7 @@ using Deep3DStudio.Python;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using SkiaSharp;
+using Deep3DStudio.Model;
 
 namespace Deep3DStudio
 {
@@ -52,14 +53,69 @@ namespace Deep3DStudio
 
         /// <summary>
         /// Loads the application window icon from embedded resource.
-        /// Creates multiple sizes for best appearance on all platforms.
         /// </summary>
         private static WindowIcon? LoadWindowIcon()
         {
             try
             {
-                // Create a procedural icon that matches the logo's design
-                // (3D wireframe cube with blue-purple-orange gradient)
+                // Load logo.png from embedded resources
+                var assembly = Assembly.GetExecutingAssembly();
+
+                // Find resource ending with logo.png
+                string? resourceName = null;
+                foreach (var name in assembly.GetManifestResourceNames())
+                {
+                    if (name.EndsWith("logo.png"))
+                    {
+                        resourceName = name;
+                        break;
+                    }
+                }
+
+                if (resourceName == null)
+                {
+                    Console.WriteLine("Warning: logo.png not found in resources, using procedural icon.");
+                    return CreateProceduralIcon();
+                }
+
+                using var stream = assembly.GetManifestResourceStream(resourceName);
+                if (stream != null)
+                {
+                    // Decode using SkiaSharp to get RGBA pixels
+                    using var bitmap = SKBitmap.Decode(stream);
+                    if (bitmap != null)
+                    {
+                        // OpenTK WindowIcon expects Images array.
+                        // We can provide the original size.
+                        // Ensure RGBA and Unpremultiplied Alpha for Window Icon
+                        // Using Unpremul to avoid dark halos on macOS/Windows
+                        var info = new SKImageInfo(bitmap.Width, bitmap.Height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+                        using var rgbaBitmap = new SKBitmap(info);
+
+                        // We need to draw the original bitmap onto the new one, but Copy/Draw might premultiply.
+                        // Instead, let's try to convert pixel data directly if possible, or redraw.
+                        // SKCanvas usually works with Premul.
+                        // For Unpremul, we might need to rely on the decode providing it or manual copy.
+                        // SKBitmap.Decode usually provides Premul.
+
+                        // Safe approach: Decode directly to desired info if possible, or copy pixels.
+                        if (bitmap.ColorType == SKColorType.Rgba8888 && bitmap.AlphaType == SKAlphaType.Unpremul)
+                        {
+                             var pixels = new byte[bitmap.Width * bitmap.Height * 4];
+                             Marshal.Copy(bitmap.GetPixels(), pixels, 0, pixels.Length);
+                             return new WindowIcon(new Image(bitmap.Width, bitmap.Height, pixels));
+                        }
+
+                        // Force conversion
+                        if (bitmap.CopyTo(rgbaBitmap))
+                        {
+                            var pixels = new byte[rgbaBitmap.Width * rgbaBitmap.Height * 4];
+                            Marshal.Copy(rgbaBitmap.GetPixels(), pixels, 0, pixels.Length);
+                            return new WindowIcon(new Image(rgbaBitmap.Width, rgbaBitmap.Height, pixels));
+                        }
+                    }
+                }
+
                 return CreateProceduralIcon();
             }
             catch (Exception ex)
