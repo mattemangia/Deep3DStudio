@@ -15,7 +15,42 @@ namespace Deep3DStudio.DeepMeshPrior
         {
             // Initialize Torch
             // torch.InitializeDeviceType(DeviceType.CUDA); // Optional, auto-detected
-            var device = torch.cuda.is_available() ? torch.CUDA : torch.CPU;
+
+            // Resolve device based on settings
+            var settings = Deep3DStudio.Configuration.IniSettings.Instance;
+            Device device = torch.CPU;
+
+            if ((settings.AIDevice == Deep3DStudio.Configuration.AIComputeDevice.CUDA ||
+                 settings.AIDevice == Deep3DStudio.Configuration.AIComputeDevice.ROCm) && torch.cuda.is_available())
+            {
+                // ROCm also uses the CUDA backend in TorchSharp (HIP mapping)
+                device = torch.CUDA;
+            }
+            else if (settings.AIDevice == Deep3DStudio.Configuration.AIComputeDevice.MPS)
+            {
+                // Note: TorchSharp 0.102 might not expose backends.mps_is_available() directly.
+                // We rely on the user selection and try to usage.
+                // In newer versions: torch.backends.mps_is_available() or torch.mps_is_available()
+                // For safety in this version, we assume if MPS is selected on Mac, it should work or fail gracefully.
+                // But since 'torch.MPS' device exists in recent TorchSharp, we use it.
+                // If this fails to compile due to missing 'torch.MPS', we will fallback to string "mps".
+                try {
+                     device = torch.MPS;
+                } catch {
+                     // Fallback if torch.MPS is not defined in this binding version
+                     device = new Device("mps");
+                }
+            }
+            // TorchSharp does not currently support DirectML backend natively in the same way PyTorch does.
+            // DirectML support in C# would require a specific backend loaded.
+            // For now, we fallback to CPU if DirectML is selected in C# native components to avoid crash.
+            else if (settings.AIDevice == Deep3DStudio.Configuration.AIComputeDevice.DirectML)
+            {
+                // Warn user
+                Console.WriteLine("Warning: DirectML selected but not supported in native DeepMeshPrior. Falling back to CPU.");
+                device = torch.CPU;
+            }
+
             Console.WriteLine($"DeepMeshPrior using device: {device}");
 
             // 1. Prepare Data

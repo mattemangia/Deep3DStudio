@@ -47,7 +47,9 @@ namespace Deep3DStudio.Configuration
     {
         CPU,
         CUDA,
-        DirectML  // For AMD/Intel GPUs on Windows
+        DirectML, // For AMD/Intel GPUs on Windows
+        MPS,      // For macOS (Metal Performance Shaders)
+        ROCm      // For AMD GPUs on Linux
     }
 
     /// <summary>
@@ -653,6 +655,14 @@ namespace Deep3DStudio.Configuration
             RiggingModel = RiggingMethod.None;
             MeshExtraction = MeshExtractionMethod.MarchingCubes;
             MeshRefinement = MeshRefinementMethod.None;
+
+            // Default AI Device based on Platform
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                AIDevice = AIComputeDevice.MPS;
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                AIDevice = AIComputeDevice.CUDA; // Prefer CUDA on Windows, user can switch to DirectML
+            else
+                AIDevice = AIComputeDevice.CUDA; // Linux
 
             // TripoSR
             TripoSRResolution = 256;

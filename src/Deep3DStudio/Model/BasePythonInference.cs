@@ -27,7 +27,9 @@ namespace Deep3DStudio.Model
             return settings.AIDevice switch
             {
                 AIComputeDevice.CUDA => "cuda",
-                AIComputeDevice.DirectML => "cpu", // DirectML not directly supported by PyTorch, fallback to CPU
+                AIComputeDevice.ROCm => "rocm",
+                AIComputeDevice.DirectML => "directml",
+                AIComputeDevice.MPS => "mps",
                 _ => "cpu"
             };
         }

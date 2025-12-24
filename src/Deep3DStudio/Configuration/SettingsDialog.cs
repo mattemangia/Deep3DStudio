@@ -7,6 +7,7 @@ namespace Deep3DStudio.Configuration
     public class SettingsDialog : Dialog
     {
         private ComboBoxText _deviceCombo;
+        private ComboBoxText _aiDeviceCombo;
         private ComboBoxText _meshingCombo;
         private ComboBoxText _coordCombo;
         private ComboBoxText _bboxCombo;
@@ -43,6 +44,14 @@ namespace Deep3DStudio.Configuration
                 _deviceCombo.AppendText(name);
             _deviceCombo.Active = (int)IniSettings.Instance.Device;
             generalBox.PackStart(_deviceCombo, false, false, 0);
+
+            // AI Compute Device
+            generalBox.PackStart(new Label("AI Inference Device:") { Halign = Align.Start }, false, false, 0);
+            _aiDeviceCombo = new ComboBoxText();
+            foreach (var name in Enum.GetNames(typeof(AIComputeDevice)))
+                _aiDeviceCombo.AppendText(name);
+            _aiDeviceCombo.Active = (int)IniSettings.Instance.AIDevice;
+            generalBox.PackStart(_aiDeviceCombo, false, false, 0);
 
             // Meshing Algorithm
             generalBox.PackStart(new Label("Meshing Algorithm:") { Halign = Align.Start }, false, false, 0);
@@ -263,6 +272,7 @@ namespace Deep3DStudio.Configuration
         private void RefreshUIFromSettings()
         {
             _deviceCombo.Active = (int)IniSettings.Instance.Device;
+            _aiDeviceCombo.Active = (int)IniSettings.Instance.AIDevice;
             _meshingCombo.Active = (int)IniSettings.Instance.MeshingAlgo;
             _reconCombo.Active = (int)IniSettings.Instance.ReconstructionMethod;
             _coordCombo.Active = (int)IniSettings.Instance.CoordSystem;
@@ -299,6 +309,7 @@ namespace Deep3DStudio.Configuration
 
             // General settings
             settings.Device = (ComputeDevice)_deviceCombo.Active;
+            settings.AIDevice = (AIComputeDevice)_aiDeviceCombo.Active;
             settings.MeshingAlgo = (MeshingAlgorithm)_meshingCombo.Active;
             settings.ReconstructionMethod = (ReconstructionMethod)_reconCombo.Active;
             settings.CoordSystem = (CoordinateSystem)_coordCombo.Active;
