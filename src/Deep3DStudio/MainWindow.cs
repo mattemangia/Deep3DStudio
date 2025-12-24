@@ -2727,14 +2727,37 @@ namespace Deep3DStudio
                 return;
             }
 
-            foreach (var meshObj in selectedMeshes)
+            var dlg = new DecimateDialog(this);
+            if (dlg.Run() == (int)ResponseType.Ok)
             {
-                meshObj.MeshData = MeshOperations.Decimate(meshObj.MeshData, 0.5f);
-                meshObj.UpdateBounds();
-            }
+                float ratio = dlg.Ratio;
+                float voxelSize = dlg.VoxelSize;
+                bool isUniform = dlg.IsUniform;
 
-            _viewport.QueueDraw();
-            _statusLabel.Text = $"Decimated {selectedMeshes.Count} mesh(es)";
+                _statusLabel.Text = "Decimating...";
+                while (Application.EventsPending()) Application.RunIteration();
+
+                Task.Run(() => {
+                    foreach (var meshObj in selectedMeshes)
+                    {
+                        if (isUniform)
+                        {
+                            meshObj.MeshData = MeshOperations.DecimateUniform(meshObj.MeshData, voxelSize);
+                        }
+                        else
+                        {
+                            meshObj.MeshData = MeshOperations.Decimate(meshObj.MeshData, ratio);
+                        }
+                        meshObj.UpdateBounds();
+                    }
+
+                    Application.Invoke((s, args) => {
+                        _viewport.QueueDraw();
+                        _statusLabel.Text = $"Decimated {selectedMeshes.Count} mesh(es)";
+                    });
+                });
+            }
+            dlg.Destroy();
         }
 
         private void OnSmoothClicked(object? sender, EventArgs e)
