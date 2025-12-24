@@ -58,10 +58,25 @@ namespace Deep3DStudio.Viewport
         // Viewport dimensions for ray casting
         private int _viewportX, _viewportY, _viewportWidth, _viewportHeight;
 
+        // Performance
+        private int _frameCount = 0;
+        private float _fps = 0;
+        private DateTime _lastFpsUpdate = DateTime.Now;
+
+        public float FPS => _fps;
+
         public ThreeDView(SceneGraph sceneGraph)
         {
             _sceneGraph = sceneGraph;
         }
+
+        // Display Options
+        public bool ShowGrid { get; set; } = true;
+        public bool ShowAxes { get; set; } = true;
+        public bool ShowGizmo { get; set; } = true;
+        public bool ShowCameras { get; set; } = true;
+        public bool ShowInfoText { get; set; } = true; // Kept for API compatibility, but rendering is moved to UI
+        public float CameraFrustumScale { get; set; } = 0.3f;
 
         public GizmoMode CurrentGizmoMode
         {
@@ -81,6 +96,17 @@ namespace Deep3DStudio.Viewport
         public void Render(int width, int height)
         {
             CheckError("Start Render");
+
+            // Update FPS
+            _frameCount++;
+            var now = DateTime.Now;
+            var elapsed = (now - _lastFpsUpdate).TotalSeconds;
+            if (elapsed >= 1.0)
+            {
+                _fps = (float)(_frameCount / elapsed);
+                _frameCount = 0;
+                _lastFpsUpdate = now;
+            }
 
             // Ensure fixed-function pipeline is active (disable any active shaders from ImGui)
             GL.UseProgram(0);
@@ -556,9 +582,8 @@ namespace Deep3DStudio.Viewport
                     // Actually DrawSkeleton should probably handle the root transform.
                     // Let's defer to the standard logic if possible, or handle it specially.
                     // SkeletonObject is a SceneObject, so it has a transform.
-                    // The joints inside have world positions or local.
-                    // Let's assume GetWorldPosition handles hierarchy.
-                    // So we can draw in World Space without pushing Skeleton's matrix IF we use GetWorldPosition.
+                    // The joints are usually relative to the skeleton root.
+                    // So we apply the SkeletonObject transform.
                     continue;
                 }
 
