@@ -52,6 +52,38 @@ namespace Deep3DStudio.Configuration
         ROCm      // For AMD GPUs on Linux
     }
 
+    public enum ComputeDevice
+    {
+        CPU,
+        GPU
+    }
+
+    public enum MeshingAlgorithm
+    {
+        MarchingCubes,
+        DeepMeshPrior,
+        Poisson
+    }
+
+    public enum CoordinateSystem
+    {
+        RightHanded_Y_Up,
+        RightHanded_Z_Up
+    }
+
+    public enum BoundingBoxMode
+    {
+        Corners,
+        Full
+    }
+
+    public enum PointCloudColorMode
+    {
+        RGB,
+        Height,
+        Normal
+    }
+
     /// <summary>
     /// INI file based settings manager with platform-specific storage locations.
     /// - Windows: %APPDATA%/Deep3DStudio/settings.ini
@@ -230,6 +262,9 @@ namespace Deep3DStudio.Configuration
         public void Load()
         {
             _sections.Clear();
+
+            // Always enforce defaults first, then override
+            ResetToDefaults();
 
             if (!File.Exists(_settingsPath))
             {
@@ -587,6 +622,9 @@ namespace Deep3DStudio.Configuration
                 MergerConvergenceThreshold = Math.Clamp(pcmConv, 1e-8f, 1e-4f);
             if (TryGetValue("PointCloudMerger", "OutlierThreshold", out string? pcmOutStr) && float.TryParse(pcmOutStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var pcmOut))
                 MergerOutlierThreshold = Math.Clamp(pcmOut, 1.0f, 5.0f);
+
+            // Platform-specific enforcement
+            EnforcePlatformConstraints();
         }
 
         /// <summary>
@@ -617,11 +655,32 @@ namespace Deep3DStudio.Configuration
         }
 
         /// <summary>
-        /// Resets all settings to their default values.
+        /// Resets all settings to their default values, intelligently picking defaults based on hardware.
         /// </summary>
         public void ResetToDefaults()
         {
-            Device = ComputeDevice.CPU;
+            // Intelligent Default Selection based on OS
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            {
+                // macOS: Always use MPS for AI if possible, CPU fallback.
+                // Computation: CPU (or check later if OpenCL is usable via OpenCV, but usually CPU is safer for defaults)
+                AIDevice = AIComputeDevice.MPS;
+                Device = ComputeDevice.CPU;
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                // Windows: Prefer CUDA if available, else CPU.
+                // We default to CUDA for AI, assuming user has NVIDIA. If not, they can switch to DirectML.
+                AIDevice = AIComputeDevice.CUDA;
+                Device = ComputeDevice.GPU; // Assume discrete GPU is present
+            }
+            else
+            {
+                // Linux
+                AIDevice = AIComputeDevice.CUDA;
+                Device = ComputeDevice.GPU;
+            }
+
             MeshingAlgo = MeshingAlgorithm.MarchingCubes;
             CoordSystem = CoordinateSystem.RightHanded_Y_Up;
             BoundingBoxStyle = BoundingBoxMode.Full;
@@ -655,14 +714,6 @@ namespace Deep3DStudio.Configuration
             RiggingModel = RiggingMethod.None;
             MeshExtraction = MeshExtractionMethod.MarchingCubes;
             MeshRefinement = MeshRefinementMethod.None;
-
-            // Default AI Device based on Platform
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-                AIDevice = AIComputeDevice.MPS;
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                AIDevice = AIComputeDevice.CUDA; // Prefer CUDA on Windows, user can switch to DirectML
-            else
-                AIDevice = AIComputeDevice.CUDA; // Linux
 
             // TripoSR
             TripoSRResolution = 256;
@@ -699,6 +750,18 @@ namespace Deep3DStudio.Configuration
             TripoSFResolution = 512;
             TripoSFSparseDilation = 1;
             TripoSFModelPath = "models/triposf";
+        }
+
+        private void EnforcePlatformConstraints()
+        {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            {
+                // Force MPS for AI if CUDA/ROCm/DirectML was somehow selected
+                if (AIDevice == AIComputeDevice.CUDA || AIDevice == AIComputeDevice.ROCm || AIDevice == AIComputeDevice.DirectML)
+                {
+                    AIDevice = AIComputeDevice.MPS;
+                }
+            }
         }
     }
 }

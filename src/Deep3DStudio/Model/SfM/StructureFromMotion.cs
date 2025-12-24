@@ -68,6 +68,9 @@ namespace Deep3DStudio.Model.SfM
             Console.WriteLine("              3D MAPPING (C# Port)              ");
             Console.WriteLine("************************************************");
 
+            // Apply Computation Device Settings
+            ConfigureOpenCV();
+
             _views.Clear();
             _reconstructionCloud.Clear();
             _featureToPointMap.Clear();
@@ -96,6 +99,34 @@ namespace Deep3DStudio.Model.SfM
 
             // 5. Convert to SceneResult
             return ConvertToSceneResult();
+        }
+
+        private void ConfigureOpenCV()
+        {
+            var settings = IniSettings.Instance;
+            if (settings.Device == ComputeDevice.GPU)
+            {
+                try
+                {
+                    // Attempt to enable OpenCL
+                    Cv2.SetUseOptimized(true);
+                    Cv2.Ocl.SetUseOpenCL(true);
+                    Console.WriteLine("SfM: OpenCL optimization enabled (Computation Device: GPU).");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"SfM: Failed to enable OpenCL: {ex.Message}. Falling back to CPU.");
+                    Cv2.SetUseOptimized(true);
+                    Cv2.Ocl.SetUseOpenCL(false);
+                }
+            }
+            else
+            {
+                // Force CPU
+                Cv2.SetUseOptimized(true);
+                Cv2.Ocl.SetUseOpenCL(false);
+                Console.WriteLine("SfM: CPU mode enforced.");
+            }
         }
 
         // -----------------------------------------------------------------------
