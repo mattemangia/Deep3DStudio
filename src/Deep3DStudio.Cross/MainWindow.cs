@@ -64,8 +64,8 @@ namespace Deep3DStudio
         private float _leftPanelWidth = 280;
         private float _rightPanelWidth = 280;
         private float _logPanelHeight = 150;
-        private float _toolbarHeight = 38;
-        private float _verticalToolbarWidth = 38;
+        private float _toolbarHeight = 42;
+        private float _verticalToolbarWidth = 42;
 
         // View State
         private bool _showLeftPanel = true;
