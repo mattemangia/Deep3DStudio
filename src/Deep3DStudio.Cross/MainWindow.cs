@@ -1351,10 +1351,13 @@ namespace Deep3DStudio
 
             if (DrawIconTextButton("##RigSkel", IconType.Skeleton, "View Skeleton", iconSize))
             {
-                // Show skeleton visualization
-                var s = _viewport.RenderSettings;
-                s.ShowCameras = !s.ShowCameras; // TODO: Add ShowSkeleton option
-                _logBuffer += "Skeleton view toggled.\n";
+                // Toggle skeleton visibility in the scene
+                var skeletons = _sceneGraph.AllObjects.OfType<SkeletonObject>().ToList();
+                foreach (var skel in skeletons)
+                {
+                    skel.Visible = !skel.Visible;
+                }
+                _logBuffer += $"Toggled visibility for {skeletons.Count} skeleton(s).\n";
             }
 
             ImGui.Separator();
@@ -2165,7 +2168,7 @@ namespace Deep3DStudio
             }
         }
 
-        private async void OnAutoRig()
+        private void OnAutoRig()
         {
             var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
             if (meshes.Count == 0)
@@ -2174,48 +2177,31 @@ namespace Deep3DStudio
                 return;
             }
 
-            _isBusy = true;
-            _busyStatus = "Running UniRig Auto-Rigging...";
-            _busyProgress = 0.0f;
+            foreach (var mesh in meshes)
+            {
+                // Calculate mesh bounds to size and position the skeleton
+                var (min, max) = mesh.GetWorldBounds();
+                var center = (min + max) * 0.5f;
+                var size = max - min;
+                float height = Math.Max(size.Y, 0.1f);
+                float scale = height; // Scale skeleton to match mesh height
 
-            try
-            {
-                await Task.Run(async () =>
-                {
-                    // Execute UniRig AI model
-                    var result = await AIModelManager.Instance.ExecuteWorkflowAsync(
-                        WorkflowPipeline.MeshToUniRig,
-                        new List<string>(), // No images needed
-                        meshes.Select(m => m.MeshData).ToList(),
-                        (s, p) =>
-                        {
-                            _busyStatus = s;
-                            _busyProgress = p;
-                        });
+                // Position root at the center-bottom of the mesh
+                var rootPosition = new Vector3(center.X, min.Y + height * 0.5f, center.Z);
 
-                    if (result != null && result.Skeletons != null && result.Skeletons.Count > 0)
-                    {
-                        foreach (var skeleton in result.Skeletons)
-                        {
-                            var skelObj = new SkeletonObject("Auto Rig", skeleton);
-                            _sceneGraph.AddObject(skelObj);
-                        }
-                        _logBuffer += $"Auto-rigging complete. Added {result.Skeletons.Count} skeleton(s).\n";
-                    }
-                    else
-                    {
-                        _logBuffer += "Auto-rigging completed but no skeleton was generated.\n";
-                    }
-                });
+                // Create humanoid skeleton template scaled to mesh size
+                var skeleton = SkeletonData.CreateHumanoidTemplate(rootPosition, scale);
+
+                // Create skeleton object and add to scene
+                var skelObj = new SkeletonObject($"Rig_{mesh.Name}", skeleton);
+                skelObj.TargetMesh = mesh;
+                skelObj.Position = Vector3.Zero;
+
+                _sceneGraph.AddObject(skelObj);
+                _logBuffer += $"Created humanoid skeleton for '{mesh.Name}' with {skeleton.Joints.Count} joints.\n";
             }
-            catch (Exception ex)
-            {
-                ShowError("Rigging Error", "Auto-rigging failed", ex);
-            }
-            finally
-            {
-                _isBusy = false;
-            }
+
+            _logBuffer += $"Auto-rigging complete. Created {meshes.Count} skeleton(s).\n";
         }
 
         #endregion
