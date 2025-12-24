@@ -406,7 +406,8 @@ namespace Deep3DStudio
 
             _controller.Update(this, (float)e.Time);
 
-            GL.ClearColor(0.15f, 0.15f, 0.15f, 1.0f);
+            var s = IniSettings.Instance;
+            GL.ClearColor(s.ViewportBgR, s.ViewportBgG, s.ViewportBgB, 1.0f);
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit | ClearBufferMask.StencilBufferBit);
 
             if (_showSplash)
