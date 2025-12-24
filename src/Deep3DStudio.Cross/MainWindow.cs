@@ -64,8 +64,8 @@ namespace Deep3DStudio
         private float _leftPanelWidth = 280;
         private float _rightPanelWidth = 280;
         private float _logPanelHeight = 150;
-        private float _toolbarHeight = 45;
-        private float _verticalToolbarWidth = 45;
+        private float _toolbarHeight = 38;
+        private float _verticalToolbarWidth = 38;
 
         // View State
         private bool _showLeftPanel = true;
@@ -786,7 +786,7 @@ namespace Deep3DStudio
             ImGui.Begin("##Toolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
                        ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings);
             {
-                var size = new System.Numerics.Vector2(28, 28);
+                var size = new System.Numerics.Vector2(22, 22);
 
                 // Gizmo Modes
                 DrawToolbarButton("##Select", IconType.Select, _viewport.CurrentGizmoMode == GizmoMode.Select,
@@ -912,7 +912,7 @@ namespace Deep3DStudio
             ImGui.Begin("##VToolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
                        ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings);
             {
-                var size = new System.Numerics.Vector2(28, 28);
+                var size = new System.Numerics.Vector2(22, 22);
 
                 // Focus
                 if (ImGui.ImageButton("##Focus", _iconFactory.GetIcon(IconType.Focus), size))
