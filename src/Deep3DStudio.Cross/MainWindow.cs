@@ -1572,6 +1572,16 @@ namespace Deep3DStudio
                         if (ImGui.Combo("AI Compute Device", ref aiDevice, aiDevices, aiDevices.Length))
                             s.AIDevice = (AIComputeDevice)aiDevice;
 
+                        int img3d = (int)s.ImageTo3D;
+                        string[] img3dModels = Enum.GetNames(typeof(ImageTo3DModel));
+                        if (ImGui.Combo("Image-to-3D Model", ref img3d, img3dModels, img3dModels.Length))
+                            s.ImageTo3D = (ImageTo3DModel)img3d;
+
+                        int meshEx = (int)s.MeshExtraction;
+                        string[] meshExMethods = Enum.GetNames(typeof(MeshExtractionMethod));
+                        if (ImGui.Combo("Mesh Extraction", ref meshEx, meshExMethods, meshExMethods.Length))
+                            s.MeshExtraction = (MeshExtractionMethod)meshEx;
+
                         ImGui.Separator();
                         ImGui.Spacing();
 
@@ -1626,6 +1636,11 @@ namespace Deep3DStudio
 
                         if (ImGui.CollapsingHeader("UniRig (Auto Rigging)"))
                         {
+                            int rigMethod = (int)s.RiggingModel;
+                            string[] rigMethods = Enum.GetNames(typeof(RiggingMethod));
+                            if (ImGui.Combo("Rigging Method", ref rigMethod, rigMethods, rigMethods.Length))
+                                s.RiggingModel = (RiggingMethod)rigMethod;
+
                             int joints = s.UniRigMaxJoints;
                             if (ImGui.SliderInt("Max Joints", ref joints, 16, 256)) s.UniRigMaxJoints = joints;
 
@@ -1642,6 +1657,13 @@ namespace Deep3DStudio
                     // --- Refinement Settings ---
                     if (ImGui.BeginTabItem("Refinement"))
                     {
+                        ImGui.Spacing();
+
+                        int meshRefine = (int)s.MeshRefinement;
+                        string[] meshRefineMethods = Enum.GetNames(typeof(MeshRefinementMethod));
+                        if (ImGui.Combo("Mesh Refinement", ref meshRefine, meshRefineMethods, meshRefineMethods.Length))
+                            s.MeshRefinement = (MeshRefinementMethod)meshRefine;
+
                         ImGui.Spacing();
 
                         if (ImGui.CollapsingHeader("DeepMeshPrior (Optimization)"))
