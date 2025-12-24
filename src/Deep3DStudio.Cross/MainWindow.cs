@@ -1544,7 +1544,9 @@ namespace Deep3DStudio
         private void RenderInfoOverlay()
         {
             float padding = 10.0f;
-            var windowPos = new System.Numerics.Vector2(padding + (_showLeftPanel ? _leftPanelWidth : _showVerticalToolbar ? _verticalToolbarWidth : 0), _toolbarHeight + 30);
+            // Move overlay to the right side of the screen, accounting for the right panel if visible
+            float xPos = ClientSize.X - (_showRightPanel ? _rightPanelWidth : 0) - 200 - padding;
+            var windowPos = new System.Numerics.Vector2(xPos, _toolbarHeight + 30);
 
             ImGui.SetNextWindowPos(windowPos, ImGuiCond.Always);
             ImGui.SetNextWindowBgAlpha(0.35f); // Transparent background

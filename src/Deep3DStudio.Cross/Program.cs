@@ -25,7 +25,7 @@ namespace Deep3DStudio
 
             var nativeWindowSettings = new NativeWindowSettings()
             {
-                Size = new Vector2i(1280, 720),
+                Size = new Vector2i(1600, 900),
                 Title = "Deep3DStudio (Cross-Platform / ImGui)",
                 Flags = ContextFlags.Default,
                 Icon = LoadWindowIcon()
