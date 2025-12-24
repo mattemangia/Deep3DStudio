@@ -2738,20 +2738,21 @@ namespace Deep3DStudio
                 while (Application.EventsPending()) Application.RunIteration();
 
                 Task.Run(() => {
+                    var results = new List<(Scene.MeshObject obj, MeshData newData)>();
                     foreach (var meshObj in selectedMeshes)
                     {
-                        if (isUniform)
-                        {
-                            meshObj.MeshData = MeshOperations.DecimateUniform(meshObj.MeshData, voxelSize);
-                        }
-                        else
-                        {
-                            meshObj.MeshData = MeshOperations.Decimate(meshObj.MeshData, ratio);
-                        }
-                        meshObj.UpdateBounds();
+                        var newData = isUniform
+                            ? MeshOperations.DecimateUniform(meshObj.MeshData, voxelSize)
+                            : MeshOperations.Decimate(meshObj.MeshData, ratio);
+                        results.Add((meshObj, newData));
                     }
 
                     Application.Invoke((s, args) => {
+                        foreach (var res in results)
+                        {
+                            res.obj.MeshData = res.newData;
+                            res.obj.UpdateBounds();
+                        }
                         _viewport.QueueDraw();
                         _statusLabel.Text = $"Decimated {selectedMeshes.Count} mesh(es)";
                     });
@@ -2781,17 +2782,21 @@ namespace Deep3DStudio
                 while (Application.EventsPending()) Application.RunIteration();
 
                 Task.Run(() => {
+                    var results = new List<(Scene.MeshObject obj, MeshData newData)>();
                     foreach (var meshObj in selectedMeshes)
                     {
-                        if (isTaubin)
-                            meshObj.MeshData = MeshOperations.SmoothTaubin(meshObj.MeshData, iterations, lambda, mu);
-                        else
-                            meshObj.MeshData = MeshOperations.Smooth(meshObj.MeshData, iterations, lambda);
-
-                        meshObj.UpdateBounds();
+                        var newData = isTaubin
+                            ? MeshOperations.SmoothTaubin(meshObj.MeshData, iterations, lambda, mu)
+                            : MeshOperations.Smooth(meshObj.MeshData, iterations, lambda);
+                        results.Add((meshObj, newData));
                     }
 
                     Application.Invoke((s, args) => {
+                        foreach (var res in results)
+                        {
+                            res.obj.MeshData = res.newData;
+                            res.obj.UpdateBounds();
+                        }
                         _viewport.QueueDraw();
                         _statusLabel.Text = $"Smoothed {selectedMeshes.Count} mesh(es)";
                     });
@@ -2817,16 +2822,23 @@ namespace Deep3DStudio
                 while (Application.EventsPending()) Application.RunIteration();
 
                 Task.Run(() => {
-                    int totalRemoved = 0;
+                    var results = new List<(Scene.MeshObject obj, MeshData newData, int removed)>();
                     foreach (var meshObj in selectedMeshes)
                     {
                         int before = meshObj.VertexCount;
-                        meshObj.MeshData = MeshOperations.Optimize(meshObj.MeshData, epsilon);
-                        meshObj.UpdateBounds();
-                        totalRemoved += before - meshObj.VertexCount;
+                        var newData = MeshOperations.Optimize(meshObj.MeshData, epsilon);
+                        int removed = before - newData.Vertices.Count;
+                        results.Add((meshObj, newData, removed));
                     }
 
                     Application.Invoke((s, args) => {
+                        int totalRemoved = 0;
+                        foreach (var res in results)
+                        {
+                            res.obj.MeshData = res.newData;
+                            res.obj.UpdateBounds();
+                            totalRemoved += res.removed;
+                        }
                         _viewport.QueueDraw();
                         _statusLabel.Text = $"Optimized: removed {totalRemoved} duplicate vertices";
                     });
@@ -2938,15 +2950,20 @@ namespace Deep3DStudio
 
                     Task.Run(() => {
                         var target = selectedMeshes[0];
+                        var transforms = new List<(Scene.MeshObject obj, OpenTK.Mathematics.Matrix4 transform)>();
+
                         for (int i = 1; i < selectedMeshes.Count; i++)
                         {
-                            var source = selectedMeshes[i];
-                            var transform = MeshOperations.AlignICP(source.MeshData, target.MeshData, iter, threshold);
-                            source.MeshData.ApplyTransform(transform);
-                            source.UpdateBounds();
+                            var transform = MeshOperations.AlignICP(selectedMeshes[i].MeshData, target.MeshData, iter, threshold);
+                            transforms.Add((selectedMeshes[i], transform));
                         }
 
                         Application.Invoke((s, args) => {
+                            foreach (var t in transforms)
+                            {
+                                t.obj.MeshData.ApplyTransform(t.transform);
+                                t.obj.UpdateBounds();
+                            }
                             _viewport.QueueDraw();
                             _statusLabel.Text = $"Aligned {selectedMeshes.Count - 1} mesh(es) to target";
                         });

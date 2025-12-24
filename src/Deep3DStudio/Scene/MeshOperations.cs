@@ -570,7 +570,7 @@ namespace Deep3DStudio.Scene
             var sourcePoints = SamplePoints(sourceVertices, Math.Min(1000, sourceVertices.Count));
 
             // Build KD-tree equivalent (spatial hash) for target
-            var targetHash = BuildSpatialHash(targetVertices, 0.1f);
+            var targetHash = BuildSpatialHash(targetVertices, convergenceThreshold * 100);
 
             float prevError = float.MaxValue;
 
