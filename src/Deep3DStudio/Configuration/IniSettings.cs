@@ -62,7 +62,13 @@ namespace Deep3DStudio.Configuration
     {
         MarchingCubes,
         DeepMeshPrior,
-        Poisson
+        Poisson,
+        TripoSF,
+        LGM,
+        GaussianSDF,
+        GreedyMeshing,
+        SurfaceNets,
+        Blocky
     }
 
     public enum CoordinateSystem
@@ -81,7 +87,8 @@ namespace Deep3DStudio.Configuration
     {
         RGB,
         Height,
-        Normal
+        Normal,
+        DistanceMap
     }
 
     /// <summary>
