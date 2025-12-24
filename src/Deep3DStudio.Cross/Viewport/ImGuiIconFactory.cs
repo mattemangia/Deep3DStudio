@@ -41,7 +41,8 @@ namespace Deep3DStudio.Viewport
         InvertSelection,
         GrowSelection,
         ClearSelection,
-        Smooth
+        Smooth,
+        Fullscreen
     }
 
     public class ImGuiIconFactory : IDisposable
@@ -423,6 +424,35 @@ namespace Deep3DStudio.Viewport
                 path.QuadTo(w * 0.3f, h * 0.2f, w * 0.5f, h * 0.5f);
                 path.QuadTo(w * 0.7f, h * 0.8f, w * 0.9f, h * 0.5f);
                 canvas.DrawPath(path, p);
+            });
+
+            _icons[IconType.Fullscreen] = CreateIcon(SKColors.DodgerBlue, (canvas, w, h) => {
+                // Fullscreen icon - four arrows pointing to corners
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2.5f, Style = SKPaintStyle.Stroke, IsAntialias = true };
+                var pFill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill, IsAntialias = true };
+
+                float margin = w * 0.15f;
+                float arrowSize = w * 0.18f;
+
+                // Top-left corner
+                canvas.DrawLine(margin, margin, margin + arrowSize, margin, p);
+                canvas.DrawLine(margin, margin, margin, margin + arrowSize, p);
+
+                // Top-right corner
+                canvas.DrawLine(w - margin, margin, w - margin - arrowSize, margin, p);
+                canvas.DrawLine(w - margin, margin, w - margin, margin + arrowSize, p);
+
+                // Bottom-left corner
+                canvas.DrawLine(margin, h - margin, margin + arrowSize, h - margin, p);
+                canvas.DrawLine(margin, h - margin, margin, h - margin - arrowSize, p);
+
+                // Bottom-right corner
+                canvas.DrawLine(w - margin, h - margin, w - margin - arrowSize, h - margin, p);
+                canvas.DrawLine(w - margin, h - margin, w - margin, h - margin - arrowSize, p);
+
+                // Center rectangle (representing the window)
+                float rectMargin = w * 0.3f;
+                canvas.DrawRect(rectMargin, rectMargin, w - 2 * rectMargin, h - 2 * rectMargin, p);
             });
         }
 

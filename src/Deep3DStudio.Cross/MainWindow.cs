@@ -359,6 +359,7 @@ namespace Deep3DStudio
                     case Keys.P: _viewport.CurrentGizmoMode = GizmoMode.Pen; break;
                     case Keys.T: _viewport.CurrentGizmoMode = GizmoMode.Rigging; break;
                     case Keys.F: _viewport.FocusOnSelection(); break;
+                    case Keys.F11: ToggleFullscreen(); break;
                     case Keys.Delete:
                         // In Pen mode, delete selected triangles
                         if (_viewport.CurrentGizmoMode == GizmoMode.Pen && _viewport.MeshEditingTool.SelectedTriangles.Count > 0)
@@ -956,6 +957,15 @@ namespace Deep3DStudio
                 DrawToggleBtn("##TglCam", IconType.Camera, s.ShowCameras, v => s.ShowCameras = v, "Show/Hide Cameras", size);
                 ImGui.SameLine();
                 DrawToggleBtn("##TglGrid", IconType.Grid, s.ShowGrid, v => s.ShowGrid = v, "Show/Hide Grid", size);
+
+                ImGui.SameLine();
+                ImGui.Text("|");
+                ImGui.SameLine();
+
+                // Fullscreen toggle
+                bool isFullscreen = WindowState == OpenTK.Windowing.Common.WindowState.Fullscreen;
+                DrawToolbarButton("##Fullscreen", IconType.Fullscreen, isFullscreen, ToggleFullscreen,
+                    isFullscreen ? "Exit Fullscreen (F11)" : "Fullscreen (F11)", size);
             }
             ImGui.End();
         }
@@ -2007,6 +2017,42 @@ namespace Deep3DStudio
 
             if (active) ImGui.PopStyleColor(2);
             if (ImGui.IsItemHovered()) ImGui.SetTooltip(tooltip);
+        }
+
+        // Store window state before fullscreen for restoration
+        private OpenTK.Windowing.Common.WindowState _previousWindowState = OpenTK.Windowing.Common.WindowState.Normal;
+        private OpenTK.Mathematics.Vector2i _previousWindowSize;
+        private OpenTK.Mathematics.Vector2i _previousWindowLocation;
+
+        /// <summary>
+        /// Toggles fullscreen mode. Works on Windows, macOS, and Linux.
+        /// Saves window state before entering fullscreen for proper restoration.
+        /// </summary>
+        private void ToggleFullscreen()
+        {
+            if (WindowState == OpenTK.Windowing.Common.WindowState.Fullscreen)
+            {
+                // Exit fullscreen - restore previous state
+                WindowState = _previousWindowState;
+                if (_previousWindowState == OpenTK.Windowing.Common.WindowState.Normal)
+                {
+                    // Restore window size and position
+                    Size = _previousWindowSize;
+                    Location = _previousWindowLocation;
+                }
+                _logBuffer += "Exited fullscreen mode.\n";
+            }
+            else
+            {
+                // Save current state before going fullscreen
+                _previousWindowState = WindowState;
+                _previousWindowSize = Size;
+                _previousWindowLocation = Location;
+
+                // Enter fullscreen
+                WindowState = OpenTK.Windowing.Common.WindowState.Fullscreen;
+                _logBuffer += "Entered fullscreen mode. Press F11 or click the button to exit.\n";
+            }
         }
 
         #endregion
