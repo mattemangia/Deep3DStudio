@@ -10,6 +10,7 @@ namespace Deep3DStudio.Model
     {
         public string Version { get; set; } = "1.0";
         public List<string> ImagePaths { get; set; } = new List<string>();
+        public List<ProjectImage> Images { get; set; } = new List<ProjectImage>();
         public SceneGraphDTO Scene { get; set; } = new SceneGraphDTO();
         public DateTime Created { get; set; } = DateTime.Now;
         public DateTime LastModified { get; set; } = DateTime.Now;

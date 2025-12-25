@@ -54,9 +54,15 @@ namespace Deep3DStudio
         private bool _errorExpanded = false;
 
         // Image List with Thumbnails
-        private List<string> _loadedImages = new List<string>();
+        private List<ProjectImage> _loadedImages = new List<ProjectImage>();
         private Dictionary<string, int> _imageThumbnails = new Dictionary<string, int>();
         private int _selectedImageIndex = -1;
+
+        // Renaming state
+        private SceneObject _renamingObject = null;
+        private string _renameBuffer = "";
+        private ProjectImage _renamingImage = null;
+        private string _imageRenameBuffer = "";
 
         // Layout
         private float _leftPanelWidth = 280;
@@ -294,9 +300,10 @@ namespace Deep3DStudio
             if (ext == ".jpg" || ext == ".png" || ext == ".jpeg" || ext == ".bmp" || ext == ".tif" || ext == ".tiff")
             {
                 Logger.Debug($"File is an image (ext: {ext})");
-                if (!_loadedImages.Contains(file))
+                if (!_loadedImages.Any(i => i.FilePath == file))
                 {
-                    _loadedImages.Add(file);
+                    var pImg = new ProjectImage { FilePath = file, Alias = Path.GetFileName(file) };
+                    _loadedImages.Add(pImg);
                     Logger.Info($"Image added to list: {Path.GetFileName(file)}");
 
                     // Queue thumbnail creation on the main thread via pending actions
@@ -1212,8 +1219,9 @@ namespace Deep3DStudio
             int col = 0;
             for (int i = 0; i < _loadedImages.Count; i++)
             {
-                string path = _loadedImages[i];
-                string filename = Path.GetFileName(path);
+                var pImg = _loadedImages[i];
+                string path = pImg.FilePath;
+                string displayName = pImg.Alias;
 
                 ImGui.PushID(i);
 
@@ -1240,7 +1248,7 @@ namespace Deep3DStudio
                 else
                 {
                     // Placeholder button
-                    if (ImGui.Button($"[{filename.Substring(0, Math.Min(6, filename.Length))}...]", new System.Numerics.Vector2(thumbSize, thumbSize)))
+                    if (ImGui.Button($"[{displayName.Substring(0, Math.Min(6, displayName.Length))}...]", new System.Numerics.Vector2(thumbSize, thumbSize)))
                     {
                         _selectedImageIndex = i;
                     }
@@ -1253,7 +1261,29 @@ namespace Deep3DStudio
 
                 if (ImGui.IsItemHovered())
                 {
-                    ImGui.SetTooltip(filename);
+                    ImGui.SetTooltip($"{displayName}\n({Path.GetFileName(path)})");
+                }
+
+                // Handle Renaming Input
+                if (_renamingImage == pImg)
+                {
+                    ImGui.SetKeyboardFocusHere();
+                    if (ImGui.InputText("##renameImg", ref _imageRenameBuffer, 64, ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.AutoSelectAll))
+                    {
+                        pImg.Alias = _imageRenameBuffer;
+                        _renamingImage = null;
+                        _isDirty = true;
+                    }
+                    if (ImGui.IsItemDeactivated() && ImGui.IsKeyPressed(ImGuiKey.Escape))
+                    {
+                        _renamingImage = null;
+                    }
+                    if (ImGui.IsItemDeactivatedAfterEdit())
+                    {
+                        pImg.Alias = _imageRenameBuffer;
+                        _renamingImage = null;
+                        _isDirty = true;
+                    }
                 }
 
                 // Double click to preview
@@ -1278,6 +1308,40 @@ namespace Deep3DStudio
                         if (_previewTexture > 0) TextureLoader.DeleteTexture(_previewTexture);
                         _previewTexture = TextureLoader.LoadTextureFromFile(path);
                     }
+
+                    bool hasDepth = pImg.DepthMap != null;
+                    if (ImGui.MenuItem("Depth View", "", false, hasDepth))
+                    {
+                        _previewImagePath = path;
+                        _showImagePreview = true;
+                        if (_previewTexture > 0) TextureLoader.DeleteTexture(_previewTexture);
+                        // Generate depth visualization
+                        using (var bmp = Deep3DStudio.Model.ImageUtils.ColorizeDepthMap(pImg.DepthMap))
+                        {
+                            string temp = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString() + ".png");
+                            try
+                            {
+                                using (var image = SkiaSharp.SKImage.FromBitmap(bmp))
+                                using (var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100))
+                                using (var stream = File.OpenWrite(temp))
+                                {
+                                    data.SaveTo(stream);
+                                }
+                                _previewTexture = TextureLoader.LoadTextureFromFile(temp);
+                            }
+                            finally
+                            {
+                                try { File.Delete(temp); } catch { }
+                            }
+                        }
+                    }
+
+                    if (ImGui.MenuItem("Rename"))
+                    {
+                        _renamingImage = pImg;
+                        _imageRenameBuffer = pImg.Alias;
+                    }
+
                     if (ImGui.MenuItem("Remove"))
                     {
                         lock (_imageThumbnails)
@@ -1330,19 +1394,47 @@ namespace Deep3DStudio
                 string name = obj.Name ?? $"Object {obj.Id}";
                 string icon = obj is MeshObject ? "[M] " : obj is PointCloudObject ? "[P] " : "[O] ";
 
-                if (ImGui.Selectable($"{icon}{name}##{i}", selected))
+                if (_renamingObject == obj)
                 {
-                    if (!ImGui.GetIO().KeyCtrl) _sceneGraph.ClearSelection();
-                    _sceneGraph.Select(obj, !selected);
+                    ImGui.SetKeyboardFocusHere();
+                    if (ImGui.InputText($"##renameObj{i}", ref _renameBuffer, 64, ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.AutoSelectAll))
+                    {
+                        obj.Name = _renameBuffer;
+                        _renamingObject = null;
+                        _isDirty = true;
+                    }
+                    if (ImGui.IsItemDeactivated() && ImGui.IsKeyPressed(ImGuiKey.Escape))
+                    {
+                        _renamingObject = null;
+                    }
+                    if (ImGui.IsItemDeactivatedAfterEdit())
+                    {
+                        obj.Name = _renameBuffer;
+                        _renamingObject = null;
+                        _isDirty = true;
+                    }
                 }
-
-                // Context menu
-                if (ImGui.BeginPopupContextItem())
+                else
                 {
-                    if (ImGui.MenuItem("Focus")) _viewport.FocusOnObject(obj);
-                    if (ImGui.MenuItem("Delete")) _sceneGraph.RemoveObject(obj);
-                    if (ImGui.MenuItem("Duplicate")) OnDuplicateObject(obj);
-                    ImGui.EndPopup();
+                    if (ImGui.Selectable($"{icon}{name}##{i}", selected))
+                    {
+                        if (!ImGui.GetIO().KeyCtrl) _sceneGraph.ClearSelection();
+                        _sceneGraph.Select(obj, !selected);
+                    }
+
+                    // Context menu
+                    if (ImGui.BeginPopupContextItem())
+                    {
+                        if (ImGui.MenuItem("Rename"))
+                        {
+                            _renamingObject = obj;
+                            _renameBuffer = obj.Name ?? "";
+                        }
+                        if (ImGui.MenuItem("Focus")) _viewport.FocusOnObject(obj);
+                        if (ImGui.MenuItem("Delete")) _sceneGraph.RemoveObject(obj);
+                        if (ImGui.MenuItem("Duplicate")) OnDuplicateObject(obj);
+                        ImGui.EndPopup();
+                    }
                 }
 
                 i++;
@@ -2145,35 +2237,42 @@ namespace Deep3DStudio
                             ClearImages();
                             CrossProjectManager.RestoreSceneFromState(state, _sceneGraph);
 
-                            if (state.ImagePaths != null)
+                            // Restore images
+                            if (state.Images != null && state.Images.Count > 0)
+                            {
+                                foreach (var pImg in state.Images)
+                                {
+                                    if (File.Exists(pImg.FilePath))
+                                    {
+                                        if (!_loadedImages.Any(x => x.FilePath == pImg.FilePath))
+                                        {
+                                            _loadedImages.Add(pImg);
+                                            // Thumbnail
+                                            try
+                                            {
+                                                var thumb = TextureLoader.CreateThumbnail(pImg.FilePath, 64);
+                                                if (thumb > 0) lock (_imageThumbnails) _imageThumbnails[pImg.FilePath] = thumb;
+                                            }
+                                            catch { }
+                                        }
+                                    }
+                                }
+                            }
+                            else if (state.ImagePaths != null) // Legacy fallback
                             {
                                 foreach (var img in state.ImagePaths)
                                 {
                                     if (File.Exists(img))
                                     {
-                                        // Just add to list, thumbnail generation is already async in ImportFile
-                                        // Thumbnail creation needs GL context - we're already on main thread via EnqueueAction
-                                        if (!_loadedImages.Contains(img))
+                                        if (!_loadedImages.Any(x => x.FilePath == img))
                                         {
-                                            _loadedImages.Add(img);
-                                            Logger.Info($"Project load: Adding image {Path.GetFileName(img)}");
-                                            // Create thumbnail directly (we're on main thread)
+                                            _loadedImages.Add(new ProjectImage { FilePath = img, Alias = Path.GetFileName(img) });
                                             try
                                             {
                                                 var thumb = TextureLoader.CreateThumbnail(img, 64);
-                                                if (thumb > 0)
-                                                {
-                                                    lock (_imageThumbnails)
-                                                    {
-                                                        _imageThumbnails[img] = thumb;
-                                                    }
-                                                    Logger.Debug($"Project load: Thumbnail created for {Path.GetFileName(img)}");
-                                                }
+                                                if (thumb > 0) lock (_imageThumbnails) _imageThumbnails[img] = thumb;
                                             }
-                                            catch (Exception thumbEx)
-                                            {
-                                                Logger.Exception(thumbEx, $"Project load: Failed to create thumbnail for {Path.GetFileName(img)}");
-                                            }
+                                            catch { }
                                         }
                                     }
                                 }
@@ -2215,18 +2314,6 @@ namespace Deep3DStudio
                     List<string> imagesSnapshot;
                     lock (_sceneGraph)
                     {
-                        // Deep clone might be too expensive, but CrossProjectManager likely just reads properties.
-                        // We assume serialization is read-only.
-                        // However, CrossProjectManager.SaveProject iterates objects.
-                        // Ideally we should clone the data DTOs here.
-                        // For now, let's just run it and hope for the best or rely on the fact that
-                        // users shouldn't be editing while saving dialog is up.
-                        // But wait, the dialog is modeless?
-                        // "do not disable other controls when showing the bar" applies to import/export.
-                        // But Save is critical.
-                        // I will rely on the UI being effectively blocked by the user waiting, or
-                        // implement a proper clone if needed.
-                        // Given constraints, I will wrap the call.
                         CrossProjectManager.SaveProject(_currentProjectPath, _sceneGraph, _loadedImages);
                     }
 
@@ -3163,7 +3250,7 @@ namespace Deep3DStudio
                 try
                 {
                     var triposf = new Deep3DStudio.Model.AIModels.TripoSFInference();
-                    var mesh = triposf.GenerateFromImage(_loadedImages[0]);
+                    var mesh = triposf.GenerateFromImage(_loadedImages[0].FilePath);
 
                     if (mesh.Vertices.Count > 0)
                     {
@@ -3214,7 +3301,10 @@ namespace Deep3DStudio
                     else if (_workflows[_selectedWorkflow].Contains("Wonder3D"))
                         pipeline = WorkflowPipeline.ImageToWonder3D;
 
-                    result = await AIModelManager.Instance.ExecuteWorkflowAsync(pipeline, _loadedImages, null, (s, p) =>
+                    // Convert ProjectImage list to string list
+                    var imagePaths = _loadedImages.Select(i => i.FilePath).ToList();
+
+                    result = await AIModelManager.Instance.ExecuteWorkflowAsync(pipeline, imagePaths, null, (s, p) =>
                     {
                         ProgressDialog.Instance.Update(p, s);
                     });
@@ -3233,6 +3323,10 @@ namespace Deep3DStudio
                             }
                         }
                     }
+
+                    // Populate depth maps for visualization
+                    PopulateDepthData(result);
+
                     ProgressDialog.Instance.Log($"Reconstruction complete. Added {result.Meshes.Count} objects.");
                     ProgressDialog.Instance.Complete();
                 }
@@ -3247,6 +3341,117 @@ namespace Deep3DStudio
             {
                 ProgressDialog.Instance.Fail(ex);
             }
+        }
+
+        private void PopulateDepthData(SceneResult result)
+        {
+            if (result.Poses.Count == 0 || result.Meshes.Count == 0) return;
+
+            // Combine meshes if multiple, similar to GTK implementation
+            var combinedMesh = result.Meshes[0];
+            if (result.Meshes.Count > 1)
+            {
+                combinedMesh = new MeshData();
+                foreach (var m in result.Meshes)
+                {
+                    combinedMesh.Vertices.AddRange(m.Vertices);
+                    combinedMesh.Colors.AddRange(m.Colors);
+                }
+            }
+
+            // Generate depth maps for each pose
+            // Parallelize this as it can be slow
+            Parallel.ForEach(result.Poses, pose =>
+            {
+                try
+                {
+                    // Find corresponding ProjectImage
+                    var pImg = _loadedImages.FirstOrDefault(i => Path.GetFullPath(i.FilePath) == Path.GetFullPath(pose.ImagePath));
+                    if (pImg != null)
+                    {
+                        float focal = pose.GetEffectiveFocalLength();
+                        pImg.DepthMap = ExtractDepthMap(combinedMesh, pose.Width, pose.Height, pose.WorldToCamera, focal);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Exception(ex, $"Failed to generate depth map for {pose.ImagePath}");
+                }
+            });
+        }
+
+        private float[,] ExtractDepthMap(MeshData mesh, int width, int height, Matrix4 worldToCamera, float focalLength = 0)
+        {
+            float[,] depthMap = new float[width, height];
+
+            for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                    depthMap[x, y] = -1.0f;
+
+            if (mesh.PixelToVertexIndex != null && mesh.PixelToVertexIndex.Length == width * height)
+            {
+                // Dense mesh logic
+                for (int y = 0; y < height; y++)
+                {
+                    for (int x = 0; x < width; x++)
+                    {
+                        int pIdx = y * width + x;
+                        int vertIdx = mesh.PixelToVertexIndex[pIdx];
+                        if (vertIdx >= 0 && vertIdx < mesh.Vertices.Count)
+                        {
+                            var v = mesh.Vertices[vertIdx];
+                            var vCam = Vector3.TransformPosition(v, worldToCamera);
+                            depthMap[x, y] = Math.Abs(vCam.Z);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // Sparse Point Cloud Logic (simplified splatting)
+                float focal = focalLength > 0 ? focalLength : Math.Max(width, height) * 0.85f;
+                float cx = width / 2.0f;
+                float cy = height / 2.0f;
+                int splatRadius = 3;
+
+                foreach (var v in mesh.Vertices)
+                {
+                    var vCam = Vector3.TransformPosition(v, worldToCamera);
+                    float depth = Math.Abs(vCam.Z);
+                    if (depth < 0.1f) continue;
+
+                    int px, py;
+                    if (vCam.Z < 0)
+                    {
+                        px = (int)(-focal * vCam.X / vCam.Z + cx);
+                        py = (int)(-focal * vCam.Y / vCam.Z + cy);
+                    }
+                    else
+                    {
+                        px = (int)(focal * vCam.X / vCam.Z + cx);
+                        py = (int)(focal * vCam.Y / vCam.Z + cy);
+                    }
+
+                    for (int dy = -splatRadius; dy <= splatRadius; dy++)
+                    {
+                        for (int dx = -splatRadius; dx <= splatRadius; dx++)
+                        {
+                            if (dx*dx + dy*dy > splatRadius*splatRadius) continue;
+                            int nx = px + dx;
+                            int ny = py + dy;
+
+                            if (nx >= 0 && nx < width && ny >= 0 && ny < height)
+                            {
+                                if (depthMap[nx, ny] < 0 || depth < depthMap[nx, ny])
+                                {
+                                    depthMap[nx, ny] = depth;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return depthMap;
         }
 
         private void OnAutoRig()

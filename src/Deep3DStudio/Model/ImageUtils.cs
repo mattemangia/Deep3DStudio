@@ -107,5 +107,55 @@ namespace Deep3DStudio.Model
 
             return (r, g, b);
         }
+
+        public static SKBitmap ColorizeDepthMap(float[,] depthMap)
+        {
+            if (depthMap == null) return null;
+
+            int width = depthMap.GetLength(0);
+            int height = depthMap.GetLength(1);
+
+            float minDepth = float.MaxValue;
+            float maxDepth = float.MinValue;
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    float d = depthMap[x, y];
+                    if (d > 0)
+                    {
+                        if (d < minDepth) minDepth = d;
+                        if (d > maxDepth) maxDepth = d;
+                    }
+                }
+            }
+
+            float range = maxDepth - minDepth;
+            if (range < 0.0001f) range = 1.0f;
+
+            var bitmap = new SKBitmap(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    float d = depthMap[x, y];
+                    if (d <= 0)
+                    {
+                        // Transparent background
+                        bitmap.SetPixel(x, y, new SKColor(0, 0, 0, 0));
+                    }
+                    else
+                    {
+                        float t = (d - minDepth) / range;
+                        // t = Math.Clamp(t, 0f, 1f);
+
+                        var (r, g, b) = TurboColormap(t);
+                        bitmap.SetPixel(x, y, new SKColor((byte)(r * 255), (byte)(g * 255), (byte)(b * 255), 255));
+                    }
+                }
+            }
+            return bitmap;
+        }
     }
 }

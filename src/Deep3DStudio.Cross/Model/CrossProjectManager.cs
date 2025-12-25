@@ -17,10 +17,13 @@ namespace Deep3DStudio.Model
         };
 
         // Simplified signature without GTK Window dependency
-        public static void SaveProject(string filePath, SceneGraph sceneGraph, List<string> imagePaths)
+        public static void SaveProject(string filePath, SceneGraph sceneGraph, List<ProjectImage> images)
         {
             var state = new ProjectState();
-            state.ImagePaths = new List<string>(imagePaths);
+            state.Images = new List<ProjectImage>(images);
+            // Fallback for legacy
+            state.ImagePaths = images.Select(i => i.FilePath).ToList();
+
             state.Scene = ConvertSceneToDTO(sceneGraph.Root);
             state.LastModified = DateTime.Now;
 
