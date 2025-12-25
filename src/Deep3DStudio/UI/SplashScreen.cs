@@ -55,6 +55,21 @@ namespace Deep3DStudio.UI
             subtitleLabel.ModifyFg(StateType.Normal, new Gdk.Color(200, 200, 200));
             vbox.PackStart(subtitleLabel, false, false, 0);
 
+            var authorLabel1 = new Label("Matteo Mangiagalli - m.mangiagalli@campus.uniurb.it");
+            authorLabel1.ModifyFg(StateType.Normal, new Gdk.Color(180, 180, 180));
+            authorLabel1.Justify = Justification.Center;
+            vbox.PackStart(authorLabel1, false, false, 2);
+
+            var authorLabel2 = new Label("Università degli Studi di Urbino - Carlo Bo");
+            authorLabel2.ModifyFg(StateType.Normal, new Gdk.Color(180, 180, 180));
+            authorLabel2.Justify = Justification.Center;
+            vbox.PackStart(authorLabel2, false, false, 0);
+
+            var authorLabel3 = new Label("2025");
+            authorLabel3.ModifyFg(StateType.Normal, new Gdk.Color(180, 180, 180));
+            authorLabel3.Justify = Justification.Center;
+            vbox.PackStart(authorLabel3, false, false, 10);
+
             // Spinner container to center it
             var spinnerBox = new Box(Orientation.Horizontal, 0);
             _spinner = new Spinner();

@@ -60,8 +60,6 @@ namespace Deep3DStudio.DeepMeshPrior
             // Degrees
             // Count occurrences of each source node
             var deg = torch.zeros(new long[]{numVerts}, dtype: ScalarType.Float32, device: device);
-            // We can't use index_add easily on old TorchSharp or limited ops, let's do it manually or via scatter
-            // On CPU it's fast enough to do in C#
             float[] degrees = new float[numVerts];
             foreach(var edge in edges)
             {

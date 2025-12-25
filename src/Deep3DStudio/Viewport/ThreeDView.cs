@@ -380,9 +380,6 @@ namespace Deep3DStudio.Viewport
                     _legacySupported = true;
                 }
 
-                // Heuristic: If version >= 3.2 and we suspect Core profile (or just to be safe), init modern GL
-                // Note: On some drivers, Compatibility profile is available even in 4.x
-                // We will try to init modern GL resources for grid/axes just in case.
                 InitModernGL();
 
                 GL.Enable(EnableCap.DepthTest);
@@ -1909,10 +1906,6 @@ namespace Deep3DStudio.Viewport
             GL.Vertex2(200, 80);
             GL.Vertex2(5, 80);
             GL.End();
-
-            // Draw text using simple bitmap approach (placeholder - actual text rendering needs font support)
-            // In GTK, we'd use Pango for text rendering, but for GL we need a different approach
-            // For now, we'll draw colored rectangles to indicate status
 
             // FPS indicator bar
             float fpsRatio = Math.Min(1.0f, _fps / 60.0f);

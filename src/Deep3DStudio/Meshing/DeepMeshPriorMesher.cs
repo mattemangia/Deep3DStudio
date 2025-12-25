@@ -22,10 +22,6 @@ namespace Deep3DStudio.Meshing
 
                 progressCallback?.Invoke("Starting DeepMeshPrior optimization...", 0.0f);
 
-                // Run the optimization
-                // Note: TorchSharp operations usually need to run on a thread that can access native libs?
-                // TorchSharp is thread-safe for the most part but let's be careful.
-
                 var result = await optimizer.OptimizeAsync(inputMesh, iterations, lr, lapWeight, progressCallback);
 
                 progressCallback?.Invoke("Optimization complete.", 1.0f);

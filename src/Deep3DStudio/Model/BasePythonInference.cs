@@ -143,8 +143,6 @@ namespace Deep3DStudio.Model
                 };
 
                 // Use PyObject to wrap the delegate - this requires the callback to be invoked within GIL
-                // For now, progress will be reported via print statements in Python
-                // and we'll report key stages from C# side
             }
             catch
             {

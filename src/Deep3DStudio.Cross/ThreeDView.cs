@@ -789,13 +789,9 @@ namespace Deep3DStudio.Viewport
         private void DrawCameraFrustum(CameraObject cam)
         {
             GL.PushMatrix();
-            // Cameras usually don't have SceneObject parents in this simple graph, but just in case
-            // If the camera pose is set, use it.
             if (cam.Pose != null)
             {
-                // Pose is CameraToWorld
                 var m = cam.Pose.CameraToWorld;
-                // Convert OpenTK Matrix4
                 var mat = new Matrix4(
                     m.M11, m.M12, m.M13, m.M14,
                     m.M21, m.M22, m.M23, m.M24,
@@ -854,10 +850,6 @@ namespace Deep3DStudio.Viewport
                     {
                         if (!joint.IsVisible) continue;
 
-                        // Joint world position must be transformed by SkeletonObject if it's local relative to it
-                        // However, Joint.GetWorldPosition() usually assumes world space relative to root joint.
-                        // And SkeletonObject usually positions the root.
-                        // So we assume we need to apply SkeletonObject transform.
                         var worldPos = Vector3.TransformPosition(joint.GetWorldPosition(), skel.GetWorldTransform());
 
                         var screenPosJ = Project(worldPos, width, height);
@@ -867,12 +859,6 @@ namespace Deep3DStudio.Viewport
                         if (distJ < 20 && distJ < minDist)
                         {
                             minDist = distJ;
-                            // Select the joint, but return the skeleton object to the caller?
-                            // Or handle selection here.
-                            // The caller expects a SceneObject.
-                            // If we return 'skel', the whole skeleton is selected.
-                            // To support sub-object selection, we need to handle it on the SkeletonObject or change the return type.
-                            // For now, we'll mark the joint as selected inside the skeleton and return the skeleton.
                             skel.Skeleton.SelectJoint(joint, false);
                             closest = skel;
                         }

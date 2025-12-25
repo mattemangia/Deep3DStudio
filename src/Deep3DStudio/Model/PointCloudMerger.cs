@@ -39,9 +39,6 @@ namespace Deep3DStudio.Model
             if (clouds.Count == 1)
                 return clouds[0].Clone();
 
-            // Ensure settings are respected (e.g., if GPU is selected, we might want to ensure we use Parallel loops effectively on CPU as fallback,
-            // since native GPU ICP requires Compute Shaders or CUDA which is not fully implemented in C# here).
-            // But we can check:
             var settings = IniSettings.Instance;
             bool useParallel = true;
 
