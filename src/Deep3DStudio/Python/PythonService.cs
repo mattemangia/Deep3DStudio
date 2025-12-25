@@ -322,16 +322,23 @@ namespace Deep3DStudio.Python
             string targetDir = Path.Combine(appData, "Deep3DStudio", "python");
             string sourceZip = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "python_env.zip");
 
+            Log($"Looking for Python environment...");
+            Log($"  App base directory: {AppDomain.CurrentDomain.BaseDirectory}");
+            Log($"  python_env.zip path: {sourceZip}");
+            Log($"  python_env.zip exists: {File.Exists(sourceZip)}");
+            Log($"  Target extraction dir: {targetDir}");
+
             if (!File.Exists(sourceZip))
             {
                 // Fallback to local python folder if zip is missing (dev mode)
                 string localPython = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "python");
                 if (Directory.Exists(localPython))
                 {
-                    Log("Using local 'python' directory.");
+                    Log($"Using local 'python' directory at: {localPython}");
                     return;
                 }
                 Log("Warning: python_env.zip not found and no local python dir.");
+                Log("  AI features will be disabled. Please ensure python_env.zip is in the application directory.");
                 return;
             }
 
