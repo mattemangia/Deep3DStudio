@@ -36,6 +36,7 @@ namespace Deep3DStudio
         private string[] _workflows = { "Dust3r (Multi-View)", "TripoSR (Single Image)", "LGM (Gaussian)", "Wonder3D" };
         private string[] _qualities = { "Fast", "Balanced", "High" };
         private string _logBuffer = "";
+        private bool _autoScroll = true;
 
         // UI Windows
         private bool _showSettings = false;
@@ -1733,16 +1734,32 @@ namespace Deep3DStudio
                 {
                     ImGui.SetClipboardText(_logBuffer);
                 }
+                ImGui.SameLine();
+                ImGui.Checkbox("Auto-scroll", ref _autoScroll);
 
                 ImGui.Separator();
 
                 ImGui.BeginChild("LogScroll", new System.Numerics.Vector2(0, 0), ImGuiChildFlags.None, ImGuiWindowFlags.HorizontalScrollbar);
-                bool autoScroll = ImGui.GetScrollY() >= ImGui.GetScrollMaxY();
+
+                if (_autoScroll)
+                    ImGui.SetNextWindowScroll(new System.Numerics.Vector2(0, float.MaxValue));
+
                 ImGui.InputTextMultiline("##LogBuffer", ref _logBuffer, maxLogChars, new System.Numerics.Vector2(-1, -1), ImGuiInputTextFlags.ReadOnly);
-                if (autoScroll)
+
+                // Context Menu for Copy/Clear
+                if (ImGui.BeginPopupContextItem("LogContext"))
                 {
-                    ImGui.SetScrollHereY(1.0f);
+                    if (ImGui.MenuItem("Copy All"))
+                    {
+                        ImGui.SetClipboardText(_logBuffer);
+                    }
+                    if (ImGui.MenuItem("Clear Log"))
+                    {
+                        _logBuffer = "";
+                    }
+                    ImGui.EndPopup();
                 }
+
                 ImGui.EndChild();
             }
             ImGui.End();
