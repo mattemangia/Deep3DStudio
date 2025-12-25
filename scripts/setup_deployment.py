@@ -231,17 +231,42 @@ def setup_python_embed(target_dir, target_platform):
         clean_env["PYTHONNOUSERSITE"] = "1"  # Prevent user site-packages
         clean_env["PYTHONDONTWRITEBYTECODE"] = "1"
 
-        print("Installing pip to embedded Python...")
+        print("=" * 60)
+        print("STEP: Installing pip to embedded Python...")
+        print(f"  Python executable: {python_exe}")
+        print(f"  Python executable exists: {os.path.exists(python_exe)}")
+        print(f"  get-pip.py path: {get_pip_path}")
+        print("=" * 60)
         try:
             # Now that import site is enabled, get-pip.py will install pip properly
-            subprocess.check_call([python_exe, get_pip_path], env=clean_env)
-            print("Pip installed successfully")
+            result = subprocess.run([python_exe, get_pip_path], env=clean_env,
+                                   capture_output=True, text=True)
+            print(f"  get-pip.py stdout:\n{result.stdout[-2000:] if len(result.stdout) > 2000 else result.stdout}")
+            if result.returncode != 0:
+                print(f"  get-pip.py stderr:\n{result.stderr}")
+                print(f"  get-pip.py failed with return code {result.returncode}")
+                return False
+            print("  Pip installed successfully")
         except Exception as e:
-            print(f"Pip install failed: {e}")
+            print(f"  Pip install failed: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
-        print(f"Installing libraries to {site_packages}...")
-        print(f"Libraries: {', '.join(reqs_list)}")
+        # Verify pip is now available
+        print("  Verifying pip installation...")
+        pip_check = subprocess.run([python_exe, "-m", "pip", "--version"],
+                                   env=clean_env, capture_output=True, text=True)
+        print(f"  pip --version: {pip_check.stdout.strip()}")
+        if pip_check.returncode != 0:
+            print(f"  ERROR: pip not found after installation!")
+            print(f"  stderr: {pip_check.stderr}")
+            return False
+
+        print("=" * 60)
+        print(f"STEP: Installing libraries to {site_packages}...")
+        print(f"  Libraries: {', '.join(reqs_list)}")
+        print("=" * 60)
         try:
             # Now pip works because import site is enabled
             # Use --target to ensure packages go to our site-packages
@@ -252,10 +277,25 @@ def setup_python_embed(target_dir, target_platform):
                 "--no-warn-script-location",
             ]
 
-            # Install all packages
+            # Install all packages - use Popen to stream output in real-time
             full_cmd = pip_cmd + reqs_list
-            print(f"Running: {python_exe} -m pip install --target {site_packages} ...")
-            subprocess.check_call(full_cmd, env=clean_env)
+            print(f"  Command: {' '.join(full_cmd[:8])} [... {len(reqs_list)} packages]")
+            print("  Installing (this may take several minutes)...")
+            print("-" * 60)
+
+            # Use Popen for real-time output
+            process = subprocess.Popen(full_cmd, env=clean_env,
+                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                       text=True, bufsize=1)
+            for line in process.stdout:
+                print(f"  {line.rstrip()}")
+            process.wait()
+
+            print("-" * 60)
+            if process.returncode != 0:
+                print(f"  pip install failed with return code {process.returncode}")
+                return False
+            print("  Package installation completed!")
 
         except subprocess.CalledProcessError as e:
             print(f"Lib install failed with return code {e.returncode}")
