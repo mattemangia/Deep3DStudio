@@ -608,7 +608,8 @@ def setup_models(models_dir, python_dir, target_platform):
 
                 if os.path.isdir(src):
                     # If target_name is set, rename the directory in site-packages
-                    dirname = target_name if target_name else os.path.basename(src)
+                    # IMPORTANT: Strip trailing slash before basename() - otherwise basename returns ""
+                    dirname = target_name if target_name else os.path.basename(src.rstrip("/"))
 
                     if target_name and "/" in target_name:
                          # Handle nested targets like wonder3d/mvdiffusion
@@ -620,6 +621,11 @@ def setup_models(models_dir, python_dir, target_platform):
                          dest = os.path.join(parent_dir, parts[1])
                     else:
                          dest = os.path.join(site_packages, dirname)
+
+                    # Safety check: never delete site_packages itself
+                    if not dirname or dest == site_packages:
+                        print(f"ERROR: Invalid dirname '{dirname}' would delete site_packages! Skipping {name}")
+                        continue
 
                     if os.path.exists(dest):
                         shutil.rmtree(dest, onerror=remove_readonly)
