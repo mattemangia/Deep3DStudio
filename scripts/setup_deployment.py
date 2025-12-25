@@ -206,32 +206,55 @@ def setup_python_embed(target_dir, target_platform):
         print(f"Installing libraries to {site_packages}...")
         print(f"Libraries: {', '.join(reqs_list)}")
         try:
-            # Use --prefix to install in the embedded Python structure
-            # Combined with -I (isolated mode) and --ignore-installed to force fresh install
+            # Use --target to install directly to site-packages (more reliable than --prefix)
+            # Combined with -I (isolated mode) to prevent system Python interference
             pip_cmd = [
                 python_exe, "-I", "-m", "pip", "install",
-                "--prefix", python_root,
+                "--target", site_packages,
                 "--ignore-installed",
                 "--no-user",
                 "--no-warn-script-location",
-                "-v"  # Verbose output to help debug
             ] + reqs_list
             print(f"Running: {' '.join(pip_cmd[:8])} ...")
+            print(f"Target directory: {site_packages}")
             subprocess.check_call(pip_cmd, env=clean_env)
         except subprocess.CalledProcessError as e:
             print(f"Lib install failed with return code {e.returncode}")
+            print(f"Please check the output above for detailed errors.")
             return False
         except Exception as e:
             print(f"Lib install failed: {e}")
             return False
 
-        # Verify installation - list what's in site-packages
+        # Verify installation - check that critical packages exist
         print(f"Verifying installation in {site_packages}...")
         if os.path.exists(site_packages):
             packages = [d for d in os.listdir(site_packages) if not d.endswith('.dist-info')]
             print(f"  Found {len(packages)} packages: {', '.join(sorted(packages)[:10])}...")
+
+            # Check for critical packages
+            critical_packages = ['numpy', 'torch', 'PIL', 'cv2']
+            missing = []
+            for pkg in critical_packages:
+                # Check various possible names
+                found = False
+                for item in os.listdir(site_packages):
+                    item_lower = item.lower()
+                    if pkg.lower() in item_lower or (pkg == 'PIL' and 'pillow' in item_lower) or (pkg == 'cv2' and 'opencv' in item_lower):
+                        found = True
+                        break
+                if not found:
+                    missing.append(pkg)
+
+            if missing:
+                print(f"  WARNING: Critical packages may be missing: {', '.join(missing)}")
+                print(f"  This could cause AI features to fail at runtime!")
+                print(f"  Try running: {python_exe} -m pip list --prefix {python_root}")
+            else:
+                print(f"  All critical packages appear to be installed.")
         else:
-            print(f"  WARNING: site-packages directory not found at {site_packages}")
+            print(f"  ERROR: site-packages directory not found at {site_packages}")
+            return False
 
         if os.path.exists(get_pip_path): os.remove(get_pip_path)
 
@@ -283,6 +306,34 @@ def setup_python_embed(target_dir, target_platform):
 
         try:
             subprocess.check_call(cmd)
+
+            # Verify cross-install
+            print(f"Verifying cross-installation in {site_packages}...")
+            if os.path.exists(site_packages):
+                packages = [d for d in os.listdir(site_packages) if not d.endswith('.dist-info')]
+                print(f"  Found {len(packages)} packages: {', '.join(sorted(packages)[:10])}...")
+
+                # Check for critical packages
+                critical_packages = ['numpy', 'torch', 'PIL', 'cv2']
+                missing = []
+                for pkg in critical_packages:
+                    found = False
+                    for item in os.listdir(site_packages):
+                        item_lower = item.lower()
+                        if pkg.lower() in item_lower or (pkg == 'PIL' and 'pillow' in item_lower) or (pkg == 'cv2' and 'opencv' in item_lower):
+                            found = True
+                            break
+                    if not found:
+                        missing.append(pkg)
+
+                if missing:
+                    print(f"  WARNING: Critical packages may be missing: {', '.join(missing)}")
+                else:
+                    print(f"  All critical packages appear to be installed.")
+            else:
+                print(f"  ERROR: site-packages directory not found at {site_packages}")
+                return False
+
         except Exception as e:
             print(f"Cross-install failed: {e}")
             print("Note: Cross-installation requires that all packages have binary wheels available for the target platform.")
