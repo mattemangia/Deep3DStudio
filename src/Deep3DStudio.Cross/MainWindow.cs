@@ -1718,6 +1718,12 @@ namespace Deep3DStudio
 
             ImGui.Begin("Log", ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoResize);
             {
+                const int maxLogChars = 1024 * 1024;
+                if (_logBuffer.Length >= maxLogChars)
+                {
+                    _logBuffer = _logBuffer[^ (maxLogChars - 1)..];
+                }
+
                 if (ImGui.Button("Clear"))
                 {
                     _logBuffer = "";
@@ -1730,10 +1736,13 @@ namespace Deep3DStudio
 
                 ImGui.Separator();
 
-                ImGui.BeginChild("LogScroll");
-                ImGui.TextUnformatted(_logBuffer);
-                if (ImGui.GetScrollY() >= ImGui.GetScrollMaxY())
+                ImGui.BeginChild("LogScroll", new System.Numerics.Vector2(0, 0), ImGuiChildFlags.None, ImGuiWindowFlags.HorizontalScrollbar);
+                bool autoScroll = ImGui.GetScrollY() >= ImGui.GetScrollMaxY();
+                ImGui.InputTextMultiline("##LogBuffer", ref _logBuffer, maxLogChars, new System.Numerics.Vector2(-1, -1), ImGuiInputTextFlags.ReadOnly);
+                if (autoScroll)
+                {
                     ImGui.SetScrollHereY(1.0f);
+                }
                 ImGui.EndChild();
             }
             ImGui.End();
