@@ -38,6 +38,9 @@
 
   <Target Name="CopyDistFiles" AfterTargets="Build">
     <PropertyGroup>
+      <!-- Use explicit path from project directory to avoid resolution issues -->
+      <DistPath>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../../scripts/dist'))</DistPath>
+
       <PythonPlatform Condition="'$(RuntimeIdentifier)' == 'win-x64'">win_amd64</PythonPlatform>
       <PythonPlatform Condition="'$(RuntimeIdentifier)' == 'linux-x64'">linux_x86_64</PythonPlatform>
       <PythonPlatform Condition="'$(RuntimeIdentifier)' == 'linux-arm64'">linux_aarch64</PythonPlatform>
@@ -54,14 +57,14 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <PythonEnv Include="..\..\scripts\dist\$(PythonPlatform)\python_env.zip" />
-      <Models Include="..\..\scripts\dist\models\**\*.*" />
+      <PythonEnv Include="$(DistPath)/$(PythonPlatform)/python_env.zip" />
+      <Models Include="$(DistPath)/models/**/*.*" />
     </ItemGroup>
 
-    <Message Text="Copying Python environment for $(PythonPlatform) from scripts/dist..." Importance="high" />
+    <Message Text="Copying Python environment for $(PythonPlatform) from $(DistPath)..." Importance="high" />
 
     <Copy SourceFiles="@(PythonEnv)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="Exists('%(FullPath)')" />
-    <Copy SourceFiles="@(Models)" DestinationFolder="$(OutDir)\models\%(RecursiveDir)" SkipUnchangedFiles="true" Condition="Exists('%(FullPath)')" />
+    <Copy SourceFiles="@(Models)" DestinationFolder="$(OutDir)/models/%(RecursiveDir)" SkipUnchangedFiles="true" Condition="Exists('%(FullPath)')" />
   </Target>
 
   <!-- Manual fix for NativeFileDialogs on macOS -->

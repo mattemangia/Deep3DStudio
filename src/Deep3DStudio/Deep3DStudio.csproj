@@ -28,8 +28,10 @@
   </ItemGroup>
 
   <Target Name="CopyDistFiles" AfterTargets="Build">
-    <!-- Determine target platform for python artifacts -->
     <PropertyGroup>
+      <!-- Use explicit path from project directory to avoid resolution issues -->
+      <DistPath>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../../scripts/dist'))</DistPath>
+
       <PythonPlatform Condition="'$(RuntimeIdentifier)' == 'win-x64'">win_amd64</PythonPlatform>
       <PythonPlatform Condition="'$(RuntimeIdentifier)' == 'linux-x64'">linux_x86_64</PythonPlatform>
       <PythonPlatform Condition="'$(RuntimeIdentifier)' == 'linux-arm64'">linux_aarch64</PythonPlatform>
@@ -41,21 +43,19 @@
       <PythonPlatform Condition="'$(PythonPlatform)' == '' And $([MSBuild]::IsOsPlatform('Linux'))">linux_x86_64</PythonPlatform>
       <PythonPlatform Condition="'$(PythonPlatform)' == '' And $([MSBuild]::IsOsPlatform('OSX'))">osx_arm64</PythonPlatform>
 
-      <!-- Default to windows if not specified (e.g. dev build) or fallback -->
+      <!-- Fallback -->
       <PythonPlatform Condition="'$(PythonPlatform)' == ''">win_amd64</PythonPlatform>
     </PropertyGroup>
 
     <ItemGroup>
-      <!-- Copy platform specific python zip - using scripts path as base -->
-      <PythonEnv Include="..\..\scripts\dist\$(PythonPlatform)\python_env.zip" />
-      <!-- Copy shared models -->
-      <Models Include="..\..\scripts\dist\models\**\*.*" />
+      <PythonEnv Include="$(DistPath)/$(PythonPlatform)/python_env.zip" />
+      <Models Include="$(DistPath)/models/**/*.*" />
     </ItemGroup>
 
-    <Message Text="Copying Python environment for $(PythonPlatform) from scripts/dist..." Importance="high" />
+    <Message Text="Copying Python environment for $(PythonPlatform) from $(DistPath)..." Importance="high" />
 
     <Copy SourceFiles="@(PythonEnv)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" Condition="Exists('%(FullPath)')" />
-    <Copy SourceFiles="@(Models)" DestinationFolder="$(OutDir)\models\%(RecursiveDir)" SkipUnchangedFiles="true" Condition="Exists('%(FullPath)')" />
+    <Copy SourceFiles="@(Models)" DestinationFolder="$(OutDir)/models/%(RecursiveDir)" SkipUnchangedFiles="true" Condition="Exists('%(FullPath)')" />
   </Target>
 
 </Project>
