@@ -158,8 +158,25 @@ namespace Deep3DStudio.Python
                 Log($"  DLLs/lib-dynload: {dllsDir} (exists: {Directory.Exists(dllsDir)})");
                 Log($"  PYTHONPATH: {pythonPath}");
 
-                // Set Python.NET properties BEFORE initialization (this is the key fix)
+                // CRITICAL: Initialization order matters for proper isolation!
+                // Reference: https://github.com/pythonnet/pythonnet/issues/1517
+                //
+                // 1. Runtime.PythonDLL is already set above (loads DLL, keeps reference)
+                // 2. Set PythonHome FIRST
+                // 3. Then SetNoSiteFlag() (prevents site.py from adding system paths)
+                // 4. Then set PythonPath
+                // 5. Then Initialize()
+
+                // Step 2: Set PythonHome
                 PythonEngine.PythonHome = pythonHome;
+
+                // Step 3: CRITICAL - Disable site.py to prevent system paths from being added
+                // This MUST be called after PythonHome is set but before Initialize()
+                // site.py is what adds /usr/local/..., ~/.local/..., etc. to sys.path
+                PythonEngine.SetNoSiteFlag();
+                Log($"  SetNoSiteFlag: enabled (prevents site.py from adding system paths)");
+
+                // Step 4: Set PythonPath
                 PythonEngine.PythonPath = pythonPath;
 
                 // Also set environment variables as backup
@@ -170,6 +187,7 @@ namespace Deep3DStudio.Python
                 Environment.SetEnvironmentVariable("PYTHONNOUSERSITE", "1", EnvironmentVariableTarget.Process);
                 Environment.SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "1", EnvironmentVariableTarget.Process);
 
+                // Step 5: Initialize Python
                 PythonEngine.Initialize();
                 _threadState = PythonEngine.BeginAllowThreads();
                 _isInitialized = true;
