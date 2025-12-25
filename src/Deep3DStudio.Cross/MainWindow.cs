@@ -121,6 +121,36 @@ namespace Deep3DStudio
                 ProgressDialog.Instance.Update(progress, status);
             };
 
+            // Hook up model loading progress for progress bar during model initialization
+            AIModelManager.Instance.ModelLoadProgress += (stage, progress, message) => {
+                // Start progress dialog if not visible and we're starting to load
+                if (!ProgressDialog.Instance.IsVisible && stage == "init")
+                {
+                    EnqueueAction(() => {
+                        ProgressDialog.Instance.Start("Loading AI Model...", OperationType.Processing);
+                    });
+                }
+
+                // Update progress
+                EnqueueAction(() => {
+                    if (ProgressDialog.Instance.IsVisible)
+                    {
+                        ProgressDialog.Instance.Update(progress, message);
+                        ProgressDialog.Instance.Log($"[{stage}] {message}");
+
+                        // Complete dialog when fully loaded
+                        if (stage == "load" && progress >= 1.0f)
+                        {
+                            ProgressDialog.Instance.Complete();
+                        }
+                        else if (stage == "error")
+                        {
+                            ProgressDialog.Instance.Fail(new Exception(message));
+                        }
+                    }
+                });
+            };
+
             // Init Viewport GL state
             _viewport.InitGL();
 

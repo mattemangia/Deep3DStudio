@@ -162,17 +162,43 @@ namespace Deep3DStudio.Model.AIModels
 
         private bool _disposed;
 
+        /// <summary>
+        /// Event fired when a model's status changes (loaded/unloaded)
+        /// </summary>
         public event Action<string, bool>? ModelStatusChanged;
+
+        /// <summary>
+        /// Event fired during workflow execution with (stepName, progress 0-1)
+        /// </summary>
         public event Action<string, float>? ProgressUpdated;
+
+        /// <summary>
+        /// Event fired during model loading with (stage, progress 0-1, message)
+        /// </summary>
+        public event Action<string, float, string>? ModelLoadProgress;
 
         private AIModelManager() { }
 
-        public TripoSRInference? TripoSR => _tripoSR ??= new TripoSRInference();
-        public TripoSFInference? TripoSF => _tripoSF ??= new TripoSFInference();
-        public LGMInference? LGM => _lgm ??= new LGMInference();
-        public Wonder3DInference? Wonder3D => _wonder3D ??= new Wonder3DInference();
-        public UniRigInference? UniRig => _uniRig ??= new UniRigInference();
-        public Dust3rInference? Dust3r => _dust3r ??= new Dust3rInference();
+        private T? CreateInferenceWithProgress<T>(ref T? field, Func<T> factory) where T : BasePythonInference
+        {
+            if (field == null)
+            {
+                field = factory();
+                // Wire up progress callback
+                field.OnLoadProgress += (stage, progress, message) =>
+                {
+                    ModelLoadProgress?.Invoke(stage, progress, message);
+                };
+            }
+            return field;
+        }
+
+        public TripoSRInference? TripoSR => CreateInferenceWithProgress(ref _tripoSR, () => new TripoSRInference());
+        public TripoSFInference? TripoSF => CreateInferenceWithProgress(ref _tripoSF, () => new TripoSFInference());
+        public LGMInference? LGM => CreateInferenceWithProgress(ref _lgm, () => new LGMInference());
+        public Wonder3DInference? Wonder3D => CreateInferenceWithProgress(ref _wonder3D, () => new Wonder3DInference());
+        public UniRigInference? UniRig => CreateInferenceWithProgress(ref _uniRig, () => new UniRigInference());
+        public Dust3rInference? Dust3r => _dust3r ??= new Dust3rInference();  // Dust3r doesn't inherit from BasePythonInference
 
         public async Task<SceneResult?> GenerateFromSingleImageAsync(
             string imagePath,

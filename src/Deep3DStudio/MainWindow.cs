@@ -145,6 +145,13 @@ namespace Deep3DStudio
             if (_inference.IsLoaded) _statusLabel.Text = "Model Loaded";
             else _statusLabel.Text = "Model Not Found - Check dust3r.onnx";
 
+            // Hook up AI model loading progress to status bar
+            AIModels.AIModelManager.Instance.ModelLoadProgress += (stage, progress, message) => {
+                Application.Invoke((s, e) => {
+                    _statusLabel.Text = $"[{(int)(progress * 100)}%] {message}";
+                });
+            };
+
             _mainHPaned.Position = settings.LastPanelWidth;
 
             _statusLabel.Halign = Align.Start;

@@ -14,12 +14,23 @@ namespace Deep3DStudio.Model
         protected string _modelName;
         protected bool _disposed = false;
 
+        // Progress callback: (stage, progress, message)
+        public event Action<string, float, string>? OnLoadProgress;
+
         public BasePythonInference(string modelName)
         {
             _modelName = modelName;
         }
 
         public bool IsLoaded => _isLoaded;
+
+        /// <summary>
+        /// Reports loading progress to any registered listeners
+        /// </summary>
+        protected void ReportProgress(string stage, float progress, string message)
+        {
+            OnLoadProgress?.Invoke(stage, progress, message);
+        }
 
         protected string GetDeviceString()
         {
@@ -63,10 +74,12 @@ namespace Deep3DStudio.Model
 
             try
             {
+                ReportProgress("init", 0.0f, $"Initializing Python for {_modelName}...");
                 PythonService.Instance.Initialize();
 
                 PythonService.Instance.ExecuteWithGIL((scope) =>
                 {
+                    ReportProgress("init", 0.05f, "Loading inference bridge...");
                     dynamic sys = Py.Import("sys");
                     if (sys.modules.Contains("deep3dstudio_bridge"))
                     {
@@ -89,18 +102,97 @@ namespace Deep3DStudio.Model
                         sys.modules["deep3dstudio_bridge"] = _bridgeModule;
                     }
 
+                    // Set up progress callback from Python to C#
+                    SetupPythonProgressCallback();
+
                     string weightsPath = GetModelPath();
                     string device = GetDeviceString();
 
+                    ReportProgress("load", 0.1f, $"Loading {_modelName} model...");
+
                     // Load the model with configured device
-                    _bridgeModule.load_model(_modelName, weightsPath, device);
+                    bool success = _bridgeModule.load_model(_modelName, weightsPath, device);
+
+                    if (!success)
+                    {
+                        throw new Exception($"Failed to load model {_modelName}");
+                    }
                 });
 
                 _isLoaded = true;
+                ReportProgress("load", 1.0f, $"{_modelName} loaded successfully");
             }
             catch (Exception ex)
             {
+                ReportProgress("error", 0.0f, $"Error initializing {_modelName}: {ex.Message}");
                 Console.WriteLine($"Error initializing {_modelName}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Sets up a Python callback to receive progress updates
+        /// </summary>
+        private void SetupPythonProgressCallback()
+        {
+            try
+            {
+                // Create a Python-callable delegate
+                Action<string, float, string> progressAction = (stage, progress, message) =>
+                {
+                    ReportProgress(stage, progress, message);
+                };
+
+                // Use PyObject to wrap the delegate - this requires the callback to be invoked within GIL
+                // For now, progress will be reported via print statements in Python
+                // and we'll report key stages from C# side
+            }
+            catch
+            {
+                // Callback setup is optional - continue without it
+            }
+        }
+
+        /// <summary>
+        /// Unload the model to free GPU memory
+        /// </summary>
+        public void Unload()
+        {
+            if (!_isLoaded || _bridgeModule == null) return;
+
+            try
+            {
+                PythonService.Instance.ExecuteWithGIL((scope) =>
+                {
+                    _bridgeModule.unload_model(_modelName);
+                });
+                _isLoaded = false;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error unloading {_modelName}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Get current GPU memory usage info
+        /// </summary>
+        public (float UsedMB, float TotalMB) GetGPUMemoryInfo()
+        {
+            if (_bridgeModule == null) return (0, 0);
+
+            try
+            {
+                (float, float) result = (0, 0);
+                PythonService.Instance.ExecuteWithGIL((scope) =>
+                {
+                    dynamic memInfo = _bridgeModule.get_gpu_memory_info();
+                    result = ((float)memInfo[0], (float)memInfo[1]);
+                });
+                return result;
+            }
+            catch
+            {
+                return (0, 0);
             }
         }
 

@@ -2,6 +2,7 @@
 import sys
 import os
 import io
+import gc
 import torch
 import numpy as np
 from PIL import Image
@@ -14,6 +15,111 @@ except ImportError:
     torch_directml = None
 
 loaded_models = {}
+
+# Progress callback - can be set from C# side
+_progress_callback = None
+
+def set_progress_callback(callback):
+    """Set a callback function for progress updates.
+    Callback signature: callback(stage: str, progress: float, message: str)"""
+    global _progress_callback
+    _progress_callback = callback
+
+def report_progress(stage, progress, message):
+    """Report progress to the callback if set"""
+    global _progress_callback
+    if _progress_callback:
+        try:
+            _progress_callback(stage, progress, message)
+        except:
+            pass
+    print(f"[{stage}] {int(progress*100)}% - {message}")
+
+# ============== Memory Management ==============
+
+def get_gpu_memory_info():
+    """Get GPU memory info (used, total) in MB. Returns (0, 0) if not available."""
+    try:
+        if torch.cuda.is_available():
+            device = torch.cuda.current_device()
+            used = torch.cuda.memory_allocated(device) / (1024 * 1024)
+            total = torch.cuda.get_device_properties(device).total_memory / (1024 * 1024)
+            return used, total
+        elif torch.backends.mps.is_available():
+            # MPS doesn't have direct memory query, estimate from system
+            return 0, 0
+    except:
+        pass
+    return 0, 0
+
+def get_available_gpu_memory():
+    """Get available GPU memory in MB"""
+    try:
+        if torch.cuda.is_available():
+            device = torch.cuda.current_device()
+            total = torch.cuda.get_device_properties(device).total_memory
+            used = torch.cuda.memory_allocated(device)
+            cached = torch.cuda.memory_reserved(device)
+            available = (total - used - cached) / (1024 * 1024)
+            return max(0, available)
+    except:
+        pass
+    return float('inf')  # Assume unlimited for CPU/MPS
+
+def clear_gpu_memory():
+    """Clear GPU memory cache"""
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+    # For MPS, just do garbage collection
+    gc.collect()
+
+def check_memory_before_load(model_name, required_mb=2000):
+    """Check if there's enough GPU memory before loading a model.
+    Returns True if OK to proceed, False if should warn/fail."""
+    available = get_available_gpu_memory()
+    if available < required_mb:
+        print(f"Warning: Low GPU memory ({available:.0f}MB available, {required_mb}MB recommended for {model_name})")
+        # Try clearing cache first
+        clear_gpu_memory()
+        available = get_available_gpu_memory()
+        if available < required_mb:
+            print(f"After clearing cache: {available:.0f}MB available")
+            return False
+    return True
+
+def unload_model(model_name):
+    """Unload a specific model to free memory"""
+    global loaded_models
+    if model_name in loaded_models:
+        del loaded_models[model_name]
+        clear_gpu_memory()
+        print(f"Unloaded {model_name}, freed GPU memory")
+        return True
+    return False
+
+def unload_all_models():
+    """Unload all models to free memory"""
+    global loaded_models
+    model_names = list(loaded_models.keys())
+    for name in model_names:
+        del loaded_models[name]
+    loaded_models.clear()
+    clear_gpu_memory()
+    print(f"Unloaded all models: {model_names}")
+
+def get_model_memory_estimate(model_name):
+    """Estimate memory requirement for a model in MB"""
+    estimates = {
+        'dust3r': 3000,
+        'triposr': 2000,
+        'triposf': 2500,
+        'lgm': 4000,
+        'wonder3d': 6000,
+        'unirig': 1500
+    }
+    return estimates.get(model_name, 2000)
 
 def get_torch_device(device_str):
     if device_str == "directml":
@@ -51,49 +157,67 @@ def get_torch_device(device_str):
 def load_model(model_name, weights_path, device=None):
     global loaded_models
     if model_name in loaded_models:
+        report_progress("load", 1.0, f"{model_name} already loaded")
         return True
+
+    # Check memory before loading
+    required_mb = get_model_memory_estimate(model_name)
+    report_progress("load", 0.05, f"Checking GPU memory for {model_name}...")
+
+    if not check_memory_before_load(model_name, required_mb):
+        report_progress("load", 0.1, f"Low memory - unloading unused models...")
+        # Try to free memory by unloading other models
+        unload_all_models()
+        clear_gpu_memory()
 
     # Resolve device object
     device_obj = get_torch_device(device)
+    report_progress("load", 0.1, f"Loading {model_name} on {device_obj}...")
     print(f"Loading {model_name} from {weights_path} on {device_obj}...")
 
     try:
         if model_name == 'dust3r':
+            report_progress("load", 0.2, "Importing Dust3r module...")
             from dust3r.model import AsymmetricCroCo3DStereo
+            report_progress("load", 0.4, "Loading Dust3r weights...")
             model = AsymmetricCroCo3DStereo.from_pretrained(weights_path)
+            report_progress("load", 0.7, "Moving Dust3r to device...")
             model.to(device_obj)
             model.eval()
             loaded_models[model_name] = model
 
         elif model_name == 'triposr':
+            report_progress("load", 0.2, "Importing TripoSR module...")
             from tsr.system import TSR
             model_dir = os.path.dirname(weights_path)
-            # Use specific filenames as downloaded by setup_deployment.py
+            report_progress("load", 0.4, "Loading TripoSR weights...")
             model = TSR.from_pretrained(model_dir, config_name="triposr_config.yaml", weight_name="triposr_weights.pth")
             model.renderer.set_bg_color([0, 0, 0])
+            report_progress("load", 0.7, "Moving TripoSR to device...")
             model.to(device_obj)
             model.eval()
             loaded_models[model_name] = model
 
         elif model_name == 'triposf':
-            # Mapping TripoSF to TSR architecture (Feed Forward)
+            report_progress("load", 0.2, "Importing TripoSF module...")
             from tsr.system import TSR
             model_dir = os.path.dirname(weights_path)
+            report_progress("load", 0.4, "Loading TripoSF weights...")
             model = TSR.from_pretrained(model_dir, config_name="triposf_config.yaml", weight_name="triposf_weights.pth")
+            report_progress("load", 0.7, "Moving TripoSF to device...")
             model.to(device_obj)
             model.eval()
             loaded_models[model_name] = model
 
         elif model_name == 'lgm':
-             # LGM (Large Multi-View Gaussian Model) for Gaussian Splatting
+             report_progress("load", 0.2, "Importing LGM module...")
              from lgm.models import LGM
+             report_progress("load", 0.4, "Loading LGM weights...")
              try:
-                 # Try loading assuming it matches the extension handling or internal logic
                  model = LGM.load_from_checkpoint(weights_path)
              except Exception as e:
                  print(f"LGM load_from_checkpoint failed: {e}, trying manual load...")
                  try:
-                     # Try Safetensors (since we might have downloaded safetensors as .pth)
                      from safetensors.torch import load_file
                      state_dict = load_file(weights_path)
                  except Exception as e2:
@@ -103,31 +227,56 @@ def load_model(model_name, weights_path, device=None):
                  model = LGM()
                  model.load_state_dict(state_dict, strict=False)
 
+             report_progress("load", 0.7, "Moving LGM to device...")
              model.to(device_obj)
              model.eval()
              loaded_models[model_name] = model
 
         elif model_name == 'wonder3d':
+             report_progress("load", 0.2, "Importing Wonder3D module...")
              from wonder3d.mvdiffusion.pipeline_mvdiffusion import MVDiffusionPipeline
              base_dir = os.path.dirname(weights_path)
-             # Wonder3D usually needs a full directory structure.
-             # If base_dir contains just the .pth, this might fail unless pipeline handles it.
-             # We assume setup has placed necessary config files if available.
              is_cuda = (device_obj.type == 'cuda')
+             report_progress("load", 0.4, "Loading Wonder3D pipeline...")
              model = MVDiffusionPipeline.from_pretrained(base_dir, torch_dtype=torch.float16 if is_cuda else torch.float32)
+             report_progress("load", 0.7, "Moving Wonder3D to device...")
              model.to(device_obj)
              loaded_models[model_name] = model
 
         elif model_name == 'unirig':
+             report_progress("load", 0.2, "Importing UniRig module...")
              from unirig.model import UniRigModel
+             report_progress("load", 0.4, "Loading UniRig weights...")
              model = UniRigModel.load_from_checkpoint(weights_path)
+             report_progress("load", 0.7, "Moving UniRig to device...")
              model.to(device_obj)
              model.eval()
              loaded_models[model_name] = model
 
+        # Clear any unused cached memory after loading
+        clear_gpu_memory()
+
+        report_progress("load", 1.0, f"Successfully loaded {model_name}")
         print(f"Successfully loaded {model_name}")
         return True
+
+    except RuntimeError as e:
+        error_msg = str(e)
+        if "out of memory" in error_msg.lower() or "CUDA" in error_msg:
+            report_progress("load", 0.0, f"OOM Error loading {model_name} - trying to free memory...")
+            print(f"OOM Error loading {model_name}: {e}")
+            # Try to recover by clearing memory
+            unload_all_models()
+            clear_gpu_memory()
+            # Report failure
+            report_progress("load", 0.0, f"Failed to load {model_name}: Out of GPU memory")
+        else:
+            report_progress("load", 0.0, f"Failed to load {model_name}: {error_msg[:100]}")
+        import traceback
+        traceback.print_exc()
+        return False
     except Exception as e:
+        report_progress("load", 0.0, f"Failed to load {model_name}: {str(e)[:100]}")
         print(f"Failed to load {model_name}: {e}")
         import traceback
         traceback.print_exc()
