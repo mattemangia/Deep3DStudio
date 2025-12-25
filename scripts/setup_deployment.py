@@ -137,15 +137,25 @@ def setup_python_embed(target_dir, target_platform):
             os.chmod(python_exe, 0o755)
 
     # Determine site-packages path for this platform
+    print(f"DEBUG: python_root = {python_root}")
+    print(f"DEBUG: python_root exists = {os.path.exists(python_root)}")
+
     if "win" in target_platform:
         site_packages = os.path.join(python_root, "Lib", "site-packages")
     else:
         lib_dir = os.path.join(python_root, "lib")
+        print(f"DEBUG: lib_dir = {lib_dir}")
+        print(f"DEBUG: lib_dir exists = {os.path.exists(lib_dir)}")
+        if os.path.exists(lib_dir):
+            print(f"DEBUG: lib_dir contents = {os.listdir(lib_dir)}")
         py_dirs = [d for d in os.listdir(lib_dir) if d.startswith("python")] if os.path.exists(lib_dir) else []
+        print(f"DEBUG: py_dirs = {py_dirs}")
         if py_dirs:
             site_packages = os.path.join(lib_dir, py_dirs[0], "site-packages")
         else:
             site_packages = os.path.join(lib_dir, "python3.10", "site-packages")
+
+    print(f"DEBUG: site_packages = {site_packages}")
 
     # Clean any existing site-packages to ensure fresh install
     if os.path.exists(site_packages):
@@ -153,6 +163,7 @@ def setup_python_embed(target_dir, target_platform):
         shutil.rmtree(site_packages, onerror=remove_readonly)
     os.makedirs(site_packages)
     print(f"Target site-packages: {site_packages}")
+    print(f"DEBUG: site_packages exists after makedirs = {os.path.exists(site_packages)}")
 
     # Determine execution mode (Native vs Cross-Install)
     host_os = platform.system().lower()
@@ -214,16 +225,48 @@ def setup_python_embed(target_dir, target_platform):
                 "--ignore-installed",
                 "--no-user",
                 "--no-warn-script-location",
-            ] + reqs_list
-            print(f"Running: {' '.join(pip_cmd[:8])} ...")
-            print(f"Target directory: {site_packages}")
-            subprocess.check_call(pip_cmd, env=clean_env)
+            ]
+
+            # For macOS, use the official PyTorch index for proper ARM64 support
+            if "osx" in target_platform:
+                # PyTorch for macOS (CPU/MPS) - separate install with index URL
+                torch_pkgs = ["torch", "torchvision"]
+                other_pkgs = [p for p in reqs_list if p not in torch_pkgs]
+
+                # Install PyTorch first with proper index
+                print(f"Installing PyTorch for macOS...")
+                torch_cmd = pip_cmd + ["--index-url", "https://download.pytorch.org/whl/cpu"] + torch_pkgs
+                print(f"Running: {' '.join(torch_cmd)}")
+                # Use check_call to see output in real-time
+                subprocess.check_call(torch_cmd, env=clean_env)
+                print(f"DEBUG: After PyTorch install, site_packages contents: {os.listdir(site_packages) if os.path.exists(site_packages) else 'NOT FOUND'}")
+
+                # Install other packages
+                if other_pkgs:
+                    print(f"Installing other packages: {', '.join(other_pkgs)}")
+                    other_cmd = pip_cmd + other_pkgs
+                    print(f"Running: {' '.join(other_cmd)}")
+                    subprocess.check_call(other_cmd, env=clean_env)
+                    print(f"DEBUG: After other packages, site_packages contents: {os.listdir(site_packages)[:20] if os.path.exists(site_packages) else 'NOT FOUND'}")
+            else:
+                # Windows/Linux - standard install
+                full_cmd = pip_cmd + reqs_list
+                print(f"Running: {' '.join(full_cmd[:10])} ...")
+                print(f"Target directory: {site_packages}")
+                result = subprocess.run(full_cmd, env=clean_env, capture_output=True, text=True)
+                print(f"Pip output: {result.stdout[-2000:] if len(result.stdout) > 2000 else result.stdout}")
+                if result.returncode != 0:
+                    print(f"Pip errors: {result.stderr}")
+                    raise subprocess.CalledProcessError(result.returncode, full_cmd)
+
         except subprocess.CalledProcessError as e:
             print(f"Lib install failed with return code {e.returncode}")
             print(f"Please check the output above for detailed errors.")
             return False
         except Exception as e:
             print(f"Lib install failed: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
         # Verify installation - check that critical packages exist
@@ -544,12 +587,33 @@ def obfuscate_and_clean(python_dir, target_platform):
 
 def create_zip(source_dir, output_zip):
     print(f"Zipping {source_dir} to {output_zip}...")
+
+    # First, show what we're about to zip
+    total_size = 0
+    file_count = 0
+    for root, dirs, files in os.walk(source_dir):
+        for file in files:
+            file_path = os.path.join(root, file)
+            total_size += os.path.getsize(file_path)
+            file_count += 1
+    print(f"  Source: {file_count} files, {total_size / (1024*1024):.1f} MB uncompressed")
+
     with zipfile.ZipFile(output_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for root, dirs, files in os.walk(source_dir):
             for file in files:
                 file_path = os.path.join(root, file)
                 arcname = os.path.relpath(file_path, source_dir)
                 zipf.write(file_path, arcname)
+
+    zip_size = os.path.getsize(output_zip)
+    print(f"  Output: {output_zip}")
+    print(f"  Zip size: {zip_size / (1024*1024):.1f} MB")
+
+    # Warn if zip is suspiciously small (should be at least 500MB with PyTorch)
+    if zip_size < 100 * 1024 * 1024:  # Less than 100MB
+        print(f"  WARNING: Zip file is only {zip_size / (1024*1024):.1f} MB!")
+        print(f"  This is too small - PyTorch alone should be ~500MB+")
+        print(f"  The pip package installation likely FAILED!")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
