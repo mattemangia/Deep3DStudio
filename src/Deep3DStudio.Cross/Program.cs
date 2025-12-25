@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using OpenTK.Windowing.Desktop;
@@ -82,36 +83,43 @@ namespace Deep3DStudio
                 if (stream != null)
                 {
                     // Decode using SkiaSharp to get RGBA pixels
-                    using var bitmap = SKBitmap.Decode(stream);
-                    if (bitmap != null)
+                    using var originalBitmap = SKBitmap.Decode(stream);
+                    if (originalBitmap != null)
                     {
-                        // OpenTK WindowIcon expects Images array.
-                        // We can provide the original size.
-                        // Ensure RGBA and Unpremultiplied Alpha for Window Icon
-                        // Using Unpremul to avoid dark halos on macOS/Windows
-                        var info = new SKImageInfo(bitmap.Width, bitmap.Height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-                        using var rgbaBitmap = new SKBitmap(info);
+                        // Create multiple icon sizes for better compatibility
+                        var sizes = new[] { 16, 32, 48, 64, 128, 256 };
+                        var images = new List<Image>();
 
-                        // We need to draw the original bitmap onto the new one, but Copy/Draw might premultiply.
-                        // Instead, let's try to convert pixel data directly if possible, or redraw.
-                        // SKCanvas usually works with Premul.
-                        // For Unpremul, we might need to rely on the decode providing it or manual copy.
-                        // SKBitmap.Decode usually provides Premul.
-
-                        // Safe approach: Decode directly to desired info if possible, or copy pixels.
-                        if (bitmap.ColorType == SKColorType.Rgba8888 && bitmap.AlphaType == SKAlphaType.Unpremul)
+                        foreach (var size in sizes)
                         {
-                             var pixels = new byte[bitmap.Width * bitmap.Height * 4];
-                             Marshal.Copy(bitmap.GetPixels(), pixels, 0, pixels.Length);
-                             return new WindowIcon(new Image(bitmap.Width, bitmap.Height, pixels));
+                            // Resize and convert to RGBA8888 with Premul alpha (standard for window icons)
+                            var info = new SKImageInfo(size, size, SKColorType.Rgba8888, SKAlphaType.Premul);
+                            using var resizedBitmap = new SKBitmap(info);
+                            using var canvas = new SKCanvas(resizedBitmap);
+
+                            // Clear with transparent
+                            canvas.Clear(SKColors.Transparent);
+
+                            // Draw scaled image with high quality
+                            var srcRect = new SKRect(0, 0, originalBitmap.Width, originalBitmap.Height);
+                            var destRect = new SKRect(0, 0, size, size);
+                            using var paint = new SKPaint
+                            {
+                                FilterQuality = SKFilterQuality.High,
+                                IsAntialias = true
+                            };
+                            canvas.DrawBitmap(originalBitmap, srcRect, destRect, paint);
+                            canvas.Flush();
+
+                            // Extract pixels
+                            var pixels = new byte[size * size * 4];
+                            Marshal.Copy(resizedBitmap.GetPixels(), pixels, 0, pixels.Length);
+                            images.Add(new Image(size, size, pixels));
                         }
 
-                        // Force conversion
-                        if (bitmap.CopyTo(rgbaBitmap))
+                        if (images.Count > 0)
                         {
-                            var pixels = new byte[rgbaBitmap.Width * rgbaBitmap.Height * 4];
-                            Marshal.Copy(rgbaBitmap.GetPixels(), pixels, 0, pixels.Length);
-                            return new WindowIcon(new Image(rgbaBitmap.Width, rgbaBitmap.Height, pixels));
+                            return new WindowIcon(images.ToArray());
                         }
                     }
                 }
@@ -121,7 +129,7 @@ namespace Deep3DStudio
             catch (Exception ex)
             {
                 Console.WriteLine($"Warning: Could not load window icon: {ex.Message}");
-                return null;
+                return CreateProceduralIcon();
             }
         }
 

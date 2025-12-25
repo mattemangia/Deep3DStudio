@@ -205,11 +205,35 @@ namespace Deep3DStudio.UI
                             {
                                 dynamic sys = global::Python.Runtime.Py.Import("sys");
                                 Log("[INFO] Current sys.path:");
+                                string? sitePackagesPath = null;
                                 foreach (var path in sys.path)
                                 {
                                     string pathStr = path.ToString();
                                     bool exists = System.IO.Directory.Exists(pathStr) || System.IO.File.Exists(pathStr);
                                     Log($"  {(exists ? "[EXISTS]" : "[MISSING]")} {pathStr}");
+                                    if (pathStr.Contains("site-packages") && System.IO.Directory.Exists(pathStr))
+                                    {
+                                        sitePackagesPath = pathStr;
+                                    }
+                                }
+
+                                // Show site-packages contents
+                                if (sitePackagesPath != null)
+                                {
+                                    Log($"[INFO] site-packages contents ({sitePackagesPath}):");
+                                    var dirs = System.IO.Directory.GetDirectories(sitePackagesPath);
+                                    int shown = 0;
+                                    foreach (var dir in dirs)
+                                    {
+                                        if (shown++ < 15)
+                                            Log($"  - {System.IO.Path.GetFileName(dir)}");
+                                    }
+                                    if (dirs.Length > 15)
+                                        Log($"  ... and {dirs.Length - 15} more packages");
+                                }
+                                else
+                                {
+                                    Log("[WARN] No valid site-packages directory found in sys.path!");
                                 }
                             }
                             catch (Exception ex)
