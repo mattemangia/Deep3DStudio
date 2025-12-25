@@ -32,16 +32,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="..\Deep3DStudio\Embedded\Python\inference_bridge.py">
-      <Link>Embedded\Python\inference_bridge.py</Link>
-    </EmbeddedResource>
-    <EmbeddedResource Include="..\Deep3DStudio\logo.png">
-      <Link>logo.png</Link>
-    </EmbeddedResource>
-    <Content Include="..\Deep3DStudio\logo.ico">
-      <Link>logo.ico</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
+    <EmbeddedResource Include="Embedded\Python\inference_bridge.py" />
+    <EmbeddedResource Include="logo.png" />
   </ItemGroup>
 
   <Target Name="CopyDistFiles" AfterTargets="Build">
