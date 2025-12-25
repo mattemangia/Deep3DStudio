@@ -333,6 +333,28 @@ def setup_python_embed(target_dir, target_platform):
                 print(f"  Try running: {python_exe} -m pip list --prefix {python_root}")
             else:
                 print(f"  All critical packages appear to be installed.")
+
+            # Debug: Show site-packages size after pip install
+            sp_size = 0
+            sp_files = 0
+            for root, dirs, files in os.walk(site_packages):
+                for f in files:
+                    try:
+                        sp_size += os.path.getsize(os.path.join(root, f))
+                        sp_files += 1
+                    except:
+                        pass
+            print(f"  DEBUG: site-packages size after pip: {sp_size / (1024*1024):.1f} MB, {sp_files} files")
+            torch_path = os.path.join(site_packages, "torch")
+            if os.path.exists(torch_path):
+                torch_size = 0
+                for root, dirs, files in os.walk(torch_path):
+                    for f in files:
+                        try:
+                            torch_size += os.path.getsize(os.path.join(root, f))
+                        except:
+                            pass
+                print(f"  DEBUG: torch/ size: {torch_size / (1024*1024):.1f} MB")
         else:
             print(f"  ERROR: site-packages directory not found at {site_packages}")
             return False
@@ -623,8 +645,43 @@ def obfuscate_and_clean(python_dir, target_platform):
             shutil.rmtree(os.path.join(root, ".git"), onerror=remove_readonly)
             dirs.remove(".git")
 
+def get_dir_size(path):
+    """Get total size of directory in bytes"""
+    total = 0
+    for root, dirs, files in os.walk(path):
+        for file in files:
+            try:
+                total += os.path.getsize(os.path.join(root, file))
+            except:
+                pass
+    return total
+
 def create_zip(source_dir, output_zip):
     print(f"Zipping {source_dir} to {output_zip}...")
+
+    # Debug: Show site-packages contents before zipping
+    print("=" * 60)
+    print("DEBUG: Checking site-packages before zipping...")
+    for platform_name in ["python3.10", "python3.11", "python3.9"]:
+        sp_path = os.path.join(source_dir, "python", "lib", platform_name, "site-packages")
+        if os.path.exists(sp_path):
+            sp_size = get_dir_size(sp_path) / (1024*1024)
+            sp_files = sum(len(files) for _, _, files in os.walk(sp_path))
+            print(f"  {sp_path}")
+            print(f"    Size: {sp_size:.1f} MB, Files: {sp_files}")
+            packages = [d for d in os.listdir(sp_path) if os.path.isdir(os.path.join(sp_path, d)) and not d.endswith('.dist-info')]
+            print(f"    Packages ({len(packages)}): {', '.join(sorted(packages)[:15])}...")
+            # Check for torch specifically
+            torch_path = os.path.join(sp_path, "torch")
+            if os.path.exists(torch_path):
+                torch_size = get_dir_size(torch_path) / (1024*1024)
+                print(f"    torch/ exists: {torch_size:.1f} MB")
+            else:
+                print(f"    WARNING: torch/ NOT FOUND!")
+            break
+    else:
+        print(f"  WARNING: Could not find site-packages in {source_dir}")
+    print("=" * 60)
 
     # First, show what we're about to zip
     total_size = 0
