@@ -44,6 +44,8 @@ namespace Deep3DStudio
         // Selection tracking for Log
         private int _logSelectionStart = 0;
         private int _logSelectionEnd = 0;
+        private int _savedSelectionStart = 0;
+        private int _savedSelectionEnd = 0;
         private ImGuiInputTextCallback _logCallback;
 
         // UI Windows
@@ -1746,7 +1748,11 @@ namespace Deep3DStudio
                 ImGui.SameLine();
                 if (ImGui.Button("Copy"))
                 {
-                    ImGui.SetClipboardText(_logBuffer);
+                    if (!string.IsNullOrEmpty(_logBuffer))
+                    {
+                        ImGui.SetClipboardText(_logBuffer);
+                        Logger.Info("Log copied to clipboard.");
+                    }
                 }
                 ImGui.SameLine();
                 ImGui.Checkbox("Auto-scroll", ref _autoScroll);
@@ -1781,7 +1787,7 @@ namespace Deep3DStudio
                 // Context Menu for Copy/Clear
                 if (ImGui.BeginPopupContextItem("LogContext"))
                 {
-                    bool hasSelection = _logSelectionStart != _logSelectionEnd;
+                    bool hasSelection = _savedSelectionStart != _savedSelectionEnd;
 
                     if (ImGui.MenuItem("Copy Selected", "", false, hasSelection))
                     {
@@ -1789,7 +1795,11 @@ namespace Deep3DStudio
                     }
                     if (ImGui.MenuItem("Copy All"))
                     {
-                        ImGui.SetClipboardText(_logBuffer);
+                        if (!string.IsNullOrEmpty(_logBuffer))
+                        {
+                            ImGui.SetClipboardText(_logBuffer);
+                            Logger.Info("Log copied to clipboard via context menu.");
+                        }
                     }
                     if (ImGui.MenuItem("Clear Log"))
                     {
@@ -3530,8 +3540,24 @@ namespace Deep3DStudio
 
         private unsafe int OnLogCallback(ImGuiInputTextCallbackData* data)
         {
+            // Always update current selection
             _logSelectionStart = data->SelectionStart;
             _logSelectionEnd = data->SelectionEnd;
+
+            // Update saved selection only if we have a valid selection
+            if (data->SelectionStart != data->SelectionEnd)
+            {
+                _savedSelectionStart = data->SelectionStart;
+                _savedSelectionEnd = data->SelectionEnd;
+            }
+            // Only clear saved selection if user left-clicks (intentional deselect) AND context menu is not open
+            else if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !ImGui.IsPopupOpen("LogContext"))
+            {
+                _savedSelectionStart = 0;
+                _savedSelectionEnd = 0;
+            }
+            // If right-click happens, we do nothing here, preserving the last non-zero saved selection
+
             return 0;
         }
 
@@ -3539,8 +3565,9 @@ namespace Deep3DStudio
         {
             try
             {
-                int start = Math.Min(_logSelectionStart, _logSelectionEnd);
-                int length = Math.Abs(_logSelectionStart - _logSelectionEnd);
+                // Use saved selection values which persist through right-click
+                int start = Math.Min(_savedSelectionStart, _savedSelectionEnd);
+                int length = Math.Abs(_savedSelectionStart - _savedSelectionEnd);
 
                 if (length > 0 && !string.IsNullOrEmpty(_logBuffer))
                 {
@@ -3551,6 +3578,7 @@ namespace Deep3DStudio
                     {
                         string selected = System.Text.Encoding.UTF8.GetString(utf8, start, length);
                         ImGui.SetClipboardText(selected);
+                        Logger.Info($"Copied {length} bytes of log text to clipboard.");
                     }
                 }
             }
