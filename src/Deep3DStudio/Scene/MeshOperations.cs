@@ -657,8 +657,6 @@ namespace Deep3DStudio.Scene
 
                 var srcPts = srcIndices.Select(i => srcSampled[i]).ToList();
 
-                // Find congruent set in target
-                // (Simplified - just use random points and check alignment)
                 var tgtIndices = Enumerable.Range(0, tgtSampled.Count)
                     .OrderBy(x => rng.Next())
                     .Take(4)
@@ -679,8 +677,6 @@ namespace Deep3DStudio.Scene
                 }
             }
 
-            // Refine with ICP using best initial alignment
-            // (Would need full mesh for this, returning coarse result)
             return bestTransform;
         }
 

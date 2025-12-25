@@ -349,9 +349,6 @@ namespace Deep3DStudio
                         if (mesh != null)
                         {
                             var obj = new MeshObject(Path.GetFileName(file), mesh);
-                            // Add to scene graph on UI update, but since SceneGraph isn't thread-safe, we should lock or queue.
-                            // But SceneGraph.AddObject usually just modifies a list. Assuming basic thread safety or single writer.
-                            // Better to do this carefully.
                             lock (_sceneGraph)
                             {
                                 _sceneGraph.AddObject(obj);
@@ -648,7 +645,6 @@ namespace Deep3DStudio
             var drawList = ImGui.GetWindowDrawList();
             var center = new System.Numerics.Vector2(ClientSize.X * 0.5f, ClientSize.Y * 0.5f);
 
-            // Gradient background
             drawList.AddRectFilledMultiColor(
                 System.Numerics.Vector2.Zero,
                 new System.Numerics.Vector2(ClientSize.X, ClientSize.Y),
@@ -661,7 +657,6 @@ namespace Deep3DStudio
                 ImGui.Image((IntPtr)_logoTexture, new System.Numerics.Vector2(size, size));
             }
 
-            // Title
             ImGui.PushFont(ImGui.GetIO().Fonts.Fonts[0]);
             string text = "Deep3DStudio";
             var textSize = ImGui.CalcTextSize(text);
@@ -671,20 +666,30 @@ namespace Deep3DStudio
             ImGui.PopStyleColor();
             ImGui.PopFont();
 
-            // Subtitle
             string subtitle = "Neural 3D Reconstruction Studio";
             var subSize = ImGui.CalcTextSize(subtitle);
             ImGui.SetCursorPos(new System.Numerics.Vector2(center.X - subSize.X * 0.5f, center.Y + 75));
             ImGui.TextDisabled(subtitle);
 
-            // Status
+            string authorLine1 = "Matteo Mangiagalli - m.mangiagalli@campus.uniurb.it";
+            string authorLine2 = "Università degli Studi di Urbino - Carlo Bo";
+            string authorLine3 = "2025";
+            var authorSize1 = ImGui.CalcTextSize(authorLine1);
+            ImGui.SetCursorPos(new System.Numerics.Vector2(center.X - authorSize1.X * 0.5f, center.Y + 100));
+            ImGui.TextDisabled(authorLine1);
+            var authorSize2 = ImGui.CalcTextSize(authorLine2);
+            ImGui.SetCursorPos(new System.Numerics.Vector2(center.X - authorSize2.X * 0.5f, center.Y + 120));
+            ImGui.TextDisabled(authorLine2);
+            var authorSize3 = ImGui.CalcTextSize(authorLine3);
+            ImGui.SetCursorPos(new System.Numerics.Vector2(center.X - authorSize3.X * 0.5f, center.Y + 140));
+            ImGui.TextDisabled(authorLine3);
+
             string status = _pythonReady ? "Ready" : "Initializing AI Engine...";
             var statusSize = ImGui.CalcTextSize(status);
-            ImGui.SetCursorPos(new System.Numerics.Vector2(center.X - statusSize.X * 0.5f, center.Y + 110));
+            ImGui.SetCursorPos(new System.Numerics.Vector2(center.X - statusSize.X * 0.5f, center.Y + 175));
 
             if (!_pythonReady)
             {
-                // Simple loading animation
                 float time = (float)(DateTime.Now.TimeOfDay.TotalSeconds % 1.0);
                 ImGui.TextColored(new System.Numerics.Vector4(0.4f, 0.6f, 0.9f, 0.5f + 0.5f * (float)Math.Sin(time * Math.PI * 2)), status);
             }
@@ -693,7 +698,6 @@ namespace Deep3DStudio
                 ImGui.TextColored(new System.Numerics.Vector4(0.4f, 0.9f, 0.4f, 1.0f), status);
             }
 
-            // Version
             string version = "Version 1.0.0";
             var verSize = ImGui.CalcTextSize(version);
             ImGui.SetCursorPos(new System.Numerics.Vector2(ClientSize.X - verSize.X - 10, ClientSize.Y - 25));
@@ -2105,6 +2109,12 @@ namespace Deep3DStudio
                 ImGui.BulletText("OpenTK & ImGui.NET");
                 ImGui.BulletText("SkiaSharp");
                 ImGui.BulletText("Dust3r, TripoSR, LGM AI Models");
+
+                ImGui.Separator();
+                ImGui.Text("Author:");
+                ImGui.TextWrapped("Matteo Mangiagalli - m.mangiagalli@campus.uniurb.it");
+                ImGui.TextWrapped("Università degli Studi di Urbino - Carlo Bo");
+                ImGui.Text("2025");
 
                 ImGui.Separator();
 

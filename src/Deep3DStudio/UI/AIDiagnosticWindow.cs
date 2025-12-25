@@ -95,8 +95,6 @@ namespace Deep3DStudio.UI
                 string pythonHome = "";
                 try
                 {
-                    // Accessing private members via reflection or just inferring based on logic in PythonService
-                    // PythonService doesn't expose Home path publicly easily, but we can check the standard paths.
                     string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
                     string targetDir = System.IO.Path.Combine(appData, "Deep3DStudio", "python");
                     string localDir = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "python");
@@ -257,25 +255,12 @@ namespace Deep3DStudio.UI
                                 }
                             }
 
-                            // Check if inference_bridge can be imported (requires appending path?)
                             try {
                                 dynamic sys = global::Python.Runtime.Py.Import("sys");
-                                // Add Embedded/Python to path if needed?
-                                // Usually the bridge is just a file we execute or import if in path.
-                                // The project embeds it, but where is it on disk?
-                                // MainWindow.cs doesn't show extraction of bridge.
-                                // It might be assumed to be in the python path or same dir.
-                                // Let's try to import it if it exists as file.
 
-                                // Check if `inference_bridge.py` exists
                                 string bridgePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "inference_bridge.py");
-                                // Or in Embedded/Python?
-
-                                // If it's an embedded resource, we can't import it directly as a file unless extracted.
-                                // However, let's assume the user wants to check the dependencies required by the models.
 
                                 Log("[INFO] Checking specific model dependencies...");
-                                // Example checks based on requirements
                             }
                             catch(Exception ex)
                             {

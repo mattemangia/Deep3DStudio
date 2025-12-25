@@ -477,10 +477,8 @@ namespace Deep3DStudio.Python
             }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
             {
-                // If pythonHome was set to the root (parent of lib), adjust path
                 string libPath = Path.Combine(pythonHome, "lib", "libpython3.10.so");
                 if (File.Exists(libPath)) return libPath;
-                // Fallback if home points directly to lib (unlikely with FindPythonHomeRecursive logic but possible)
                 return Path.Combine(pythonHome, "libpython3.10.so");
             }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
@@ -502,19 +500,11 @@ import sys
 class LoggerWriter:
     def write(self, message):
         import Deep3DStudio.Python
-        # We will use a callback mechanism or simple print hook if possible.
-        # But calling back into C# from here requires loading the CLR assembly.
         pass
     def flush(self):
         pass
 
-# Simple redirection via sys.stdout assignment is tricky without full interop setup.
-# Easier method: Use Python.Runtime.PyObject to wrap a C# object.
 ";
-                // Alternative: We define a C# class that we expose to Python
-                // However, simpler is just to capture output if we run scripts via RunString
-                // But for global capturing:
-
                 dynamic sys = Py.Import("sys");
                 sys.stdout = new OutputRedirector(this);
                 sys.stderr = new OutputRedirector(this);
@@ -590,12 +580,8 @@ class LoggerWriter:
         {
             if (!string.IsNullOrEmpty(message))
             {
-                // Invoke log event.
-                // Note: This runs on the thread Python is executing on.
-                // Log method handles it.
-                 // We might want to filter newlines if they are just flushing
-                 if (message != "\n")
-                    Console.WriteLine("[Py] " + message); // Direct to console for now, service event later
+                if (message != "\n")
+                    Console.WriteLine("[Py] " + message);
             }
         }
 

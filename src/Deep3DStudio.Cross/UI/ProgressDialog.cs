@@ -117,7 +117,6 @@ namespace Deep3DStudio.UI
                 else barColor = new Vector4(0.2f, 0.4f, 0.8f, 1.0f); // Blue
 
                 ImGui.PushStyleColor(ImGuiCol.PlotHistogram, barColor);
-                // Indeterminate if running but progress 0? No, let's just use what we have.
                 string overlay = $"{StatusText} {(int)(Progress * 100)}%";
                 ImGui.ProgressBar(Progress, new Vector2(-1, 25), overlay);
                 ImGui.PopStyleColor();

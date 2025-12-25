@@ -2584,6 +2584,21 @@ namespace Deep3DStudio
             labelDesc.ModifyFg(StateType.Normal, new Gdk.Color(220, 220, 220));
             vbox.PackStart(labelDesc, false, false, 0);
 
+            var authorLabel1 = new Label("Matteo Mangiagalli - m.mangiagalli@campus.uniurb.it");
+            authorLabel1.Justify = Justification.Center;
+            authorLabel1.ModifyFg(StateType.Normal, new Gdk.Color(200, 200, 200));
+            vbox.PackStart(authorLabel1, false, false, 0);
+
+            var authorLabel2 = new Label("Università degli Studi di Urbino - Carlo Bo");
+            authorLabel2.Justify = Justification.Center;
+            authorLabel2.ModifyFg(StateType.Normal, new Gdk.Color(200, 200, 200));
+            vbox.PackStart(authorLabel2, false, false, 0);
+
+            var authorLabel3 = new Label("2025");
+            authorLabel3.Justify = Justification.Center;
+            authorLabel3.ModifyFg(StateType.Normal, new Gdk.Color(200, 200, 200));
+            vbox.PackStart(authorLabel3, false, false, 0);
+
             contentArea.PackStart(vbox, true, true, 0);
             contentArea.ShowAll();
 
