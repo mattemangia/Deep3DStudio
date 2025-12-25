@@ -9,6 +9,7 @@
     <ApplicationIcon>logo.ico</ApplicationIcon>
     <!-- Fix for NFD on macOS -->
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <PackageIcon>logo.png</PackageIcon>
   </PropertyGroup>
 
   <ItemGroup>
