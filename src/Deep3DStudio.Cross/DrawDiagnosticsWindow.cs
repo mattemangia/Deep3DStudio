@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using ImGuiNET;
 using Deep3DStudio.Python;
@@ -137,6 +138,51 @@ namespace Deep3DStudio
 
                         using (global::Python.Runtime.Py.GIL())
                         {
+                            // Show sys.path for debugging
+                            try
+                            {
+                                dynamic sys = global::Python.Runtime.Py.Import("sys");
+                                Log("[INFO] Python sys.path:");
+                                foreach (var p in sys.path)
+                                {
+                                    string pathStr = p.ToString();
+                                    bool exists = Directory.Exists(pathStr) || File.Exists(pathStr);
+                                    Log($"  {(exists ? "[OK]" : "[MISSING]")} {pathStr}");
+                                }
+
+                                // Check site-packages specifically
+                                string? sitePackagesPath = null;
+                                foreach (var p in sys.path)
+                                {
+                                    string pathStr = p.ToString();
+                                    if (pathStr.Contains("site-packages") && Directory.Exists(pathStr))
+                                    {
+                                        sitePackagesPath = pathStr;
+                                        break;
+                                    }
+                                }
+
+                                if (sitePackagesPath != null)
+                                {
+                                    Log($"[INFO] site-packages contents ({sitePackagesPath}):");
+                                    var dirs = Directory.GetDirectories(sitePackagesPath).Take(15);
+                                    foreach (var dir in dirs)
+                                    {
+                                        Log($"  - {Path.GetFileName(dir)}");
+                                    }
+                                    if (Directory.GetDirectories(sitePackagesPath).Length > 15)
+                                        Log($"  ... and {Directory.GetDirectories(sitePackagesPath).Length - 15} more");
+                                }
+                                else
+                                {
+                                    Log("[WARN] No valid site-packages directory found in sys.path!");
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Log($"[WARN] Could not inspect sys.path: {ex.Message}");
+                            }
+
                             string[] libs = { "numpy", "torch", "cv2", "PIL" };
                             foreach(var lib in libs)
                             {
