@@ -638,7 +638,7 @@ namespace Deep3DStudio
                 if (ImGui.Button("Copy to Clipboard", new System.Numerics.Vector2(150, 30)))
                 {
                     var text = $"{_errorTitle}\n\n{_errorMessage}\n\n{_errorStackTrace}";
-                    ImGui.SetClipboardText(text);
+                    ClipboardString = text;
                 }
 
                 ImGui.End();
@@ -1750,7 +1750,7 @@ namespace Deep3DStudio
                 {
                     if (!string.IsNullOrEmpty(_logBuffer))
                     {
-                        ImGui.SetClipboardText(_logBuffer);
+                        ClipboardString = _logBuffer;
                         Logger.Info("Log copied to clipboard.");
                     }
                 }
@@ -1797,7 +1797,7 @@ namespace Deep3DStudio
                     {
                         if (!string.IsNullOrEmpty(_logBuffer))
                         {
-                            ImGui.SetClipboardText(_logBuffer);
+                            ClipboardString = _logBuffer;
                             Logger.Info("Log copied to clipboard via context menu.");
                         }
                     }
@@ -3577,7 +3577,7 @@ namespace Deep3DStudio
                     if (start >= 0 && start + length <= utf8.Length)
                     {
                         string selected = System.Text.Encoding.UTF8.GetString(utf8, start, length);
-                        ImGui.SetClipboardText(selected);
+                        ClipboardString = selected;
                         Logger.Info($"Copied {length} bytes of log text to clipboard.");
                     }
                 }
