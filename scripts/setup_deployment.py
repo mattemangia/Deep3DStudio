@@ -94,6 +94,17 @@ def remove_readonly(func, path, excinfo):
     os.chmod(path, stat.S_IWRITE)
     func(path)
 
+def get_dir_size(path):
+    """Get total size of directory in bytes"""
+    total = 0
+    for root, dirs, files in os.walk(path):
+        for file in files:
+            try:
+                total += os.path.getsize(os.path.join(root, file))
+            except:
+                pass
+    return total
+
 def setup_python_embed(target_dir, target_platform):
     print(f"Setting up Python for {target_platform} in {target_dir}...")
     if not os.path.exists(target_dir):
@@ -469,6 +480,18 @@ def setup_python_embed(target_dir, target_platform):
     if os.path.exists(tcl_dir):
         shutil.rmtree(tcl_dir, onerror=remove_readonly)
 
+    # Debug: Final check before returning
+    print(f"DEBUG: setup_python_embed finishing, checking site_packages...")
+    if "win" in target_platform:
+        final_sp = os.path.join(target_dir, "python", "Lib", "site-packages")
+    else:
+        final_sp = os.path.join(target_dir, "python", "lib", "python3.10", "site-packages")
+    if os.path.exists(final_sp):
+        sp_size = get_dir_size(final_sp)
+        print(f"DEBUG: site_packages at end of setup_python_embed: {sp_size / (1024*1024):.1f} MB")
+    else:
+        print(f"DEBUG: WARNING - site_packages not found at {final_sp}")
+
     return True
 
 def setup_models(models_dir, python_dir, target_platform):
@@ -611,6 +634,19 @@ def setup_models(models_dir, python_dir, target_platform):
             if os.path.exists(temp_repo):
                shutil.rmtree(temp_repo, onerror=remove_readonly)
 
+    # Debug: Check site_packages after setup_models
+    print(f"DEBUG: setup_models finishing, checking site_packages...")
+    if os.path.exists(site_packages):
+        sp_size = get_dir_size(site_packages)
+        print(f"DEBUG: site_packages at end of setup_models: {sp_size / (1024*1024):.1f} MB")
+        torch_path = os.path.join(site_packages, "torch")
+        if os.path.exists(torch_path):
+            print(f"DEBUG: torch/ exists")
+        else:
+            print(f"DEBUG: WARNING - torch/ NOT FOUND after setup_models!")
+    else:
+        print(f"DEBUG: WARNING - site_packages not found!")
+
 def obfuscate_and_clean(python_dir, target_platform):
     """
     Compile Python source files to bytecode and clean up unnecessary files.
@@ -645,16 +681,22 @@ def obfuscate_and_clean(python_dir, target_platform):
             shutil.rmtree(os.path.join(root, ".git"), onerror=remove_readonly)
             dirs.remove(".git")
 
-def get_dir_size(path):
-    """Get total size of directory in bytes"""
-    total = 0
-    for root, dirs, files in os.walk(path):
-        for file in files:
-            try:
-                total += os.path.getsize(os.path.join(root, file))
-            except:
-                pass
-    return total
+    # Debug: Check site_packages after obfuscate_and_clean
+    print(f"DEBUG: obfuscate_and_clean finishing...")
+    if "win" in target_platform:
+        sp_path = os.path.join(python_dir, "python", "Lib", "site-packages")
+    else:
+        sp_path = os.path.join(python_dir, "python", "lib", "python3.10", "site-packages")
+    if os.path.exists(sp_path):
+        sp_size = get_dir_size(sp_path)
+        print(f"DEBUG: site_packages at end of obfuscate_and_clean: {sp_size / (1024*1024):.1f} MB")
+        torch_path = os.path.join(sp_path, "torch")
+        if os.path.exists(torch_path):
+            print(f"DEBUG: torch/ exists")
+        else:
+            print(f"DEBUG: WARNING - torch/ NOT FOUND after obfuscate_and_clean!")
+    else:
+        print(f"DEBUG: WARNING - site_packages not found!")
 
 def create_zip(source_dir, output_zip):
     print(f"Zipping {source_dir} to {output_zip}...")
