@@ -36,6 +36,15 @@ namespace Deep3DStudio
         private string[] _workflows = { "Dust3r (Multi-View)", "TripoSR (Single Image)", "LGM (Gaussian)", "Wonder3D" };
         private string[] _qualities = { "Fast", "Balanced", "High" };
         private string _logBuffer = "";
+        private bool _autoScroll = true;
+        private int _lastLogLength = 0;
+        private float _lastLogWidth = 0;
+        private float _cachedLogHeight = 0;
+
+        // Selection tracking for Log
+        private int _logSelectionStart = 0;
+        private int _logSelectionEnd = 0;
+        private ImGuiInputTextCallback _logCallback;
 
         // UI Windows
         private bool _showSettings = false;
@@ -98,6 +107,12 @@ namespace Deep3DStudio
             _sceneGraph = new SceneGraph();
             _sceneGraph.SceneChanged += (s, e) => { _isDirty = true; UpdateTitle(); };
             _viewport = new ThreeDView(_sceneGraph);
+
+            // Keep callback alive
+            unsafe
+            {
+                _logCallback = OnLogCallback;
+            }
         }
 
         protected override void OnLoad()
@@ -1733,16 +1748,56 @@ namespace Deep3DStudio
                 {
                     ImGui.SetClipboardText(_logBuffer);
                 }
+                ImGui.SameLine();
+                ImGui.Checkbox("Auto-scroll", ref _autoScroll);
 
                 ImGui.Separator();
 
                 ImGui.BeginChild("LogScroll", new System.Numerics.Vector2(0, 0), ImGuiChildFlags.None, ImGuiWindowFlags.HorizontalScrollbar);
-                bool autoScroll = ImGui.GetScrollY() >= ImGui.GetScrollMaxY();
-                ImGui.InputTextMultiline("##LogBuffer", ref _logBuffer, maxLogChars, new System.Numerics.Vector2(-1, -1), ImGuiInputTextFlags.ReadOnly);
-                if (autoScroll)
+
+                float width = ImGui.GetContentRegionAvail().X;
+                bool newText = _logBuffer.Length > _lastLogLength;
+
+                if (Math.Abs(width - _lastLogWidth) > 1.0f || newText)
+                {
+                    _cachedLogHeight = ImGui.CalcTextSize(_logBuffer, width).Y + ImGui.GetTextLineHeight() * 2;
+                    _lastLogWidth = width;
+                }
+
+                // Ensure minimum height to fill the view if log is short
+                float minHeight = ImGui.GetContentRegionAvail().Y;
+                float height = Math.Max(minHeight, _cachedLogHeight);
+
+                ImGui.InputTextMultiline("##LogBuffer", ref _logBuffer, maxLogChars, new System.Numerics.Vector2(-1, height),
+                    ImGuiInputTextFlags.ReadOnly | ImGuiInputTextFlags.CallbackAlways, _logCallback);
+
+                if (_autoScroll && newText)
                 {
                     ImGui.SetScrollHereY(1.0f);
                 }
+
+                _lastLogLength = _logBuffer.Length;
+
+                // Context Menu for Copy/Clear
+                if (ImGui.BeginPopupContextItem("LogContext"))
+                {
+                    bool hasSelection = _logSelectionStart != _logSelectionEnd;
+
+                    if (ImGui.MenuItem("Copy Selected", "", false, hasSelection))
+                    {
+                        CopySelectedLogText();
+                    }
+                    if (ImGui.MenuItem("Copy All"))
+                    {
+                        ImGui.SetClipboardText(_logBuffer);
+                    }
+                    if (ImGui.MenuItem("Clear Log"))
+                    {
+                        _logBuffer = "";
+                    }
+                    ImGui.EndPopup();
+                }
+
                 ImGui.EndChild();
             }
             ImGui.End();
@@ -3471,6 +3526,38 @@ namespace Deep3DStudio
                 }
             }
             return depthMap;
+        }
+
+        private unsafe int OnLogCallback(ImGuiInputTextCallbackData* data)
+        {
+            _logSelectionStart = data->SelectionStart;
+            _logSelectionEnd = data->SelectionEnd;
+            return 0;
+        }
+
+        private void CopySelectedLogText()
+        {
+            try
+            {
+                int start = Math.Min(_logSelectionStart, _logSelectionEnd);
+                int length = Math.Abs(_logSelectionStart - _logSelectionEnd);
+
+                if (length > 0 && !string.IsNullOrEmpty(_logBuffer))
+                {
+                    // Convert to UTF-8 to handle indices correctly
+                    byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(_logBuffer);
+
+                    if (start >= 0 && start + length <= utf8.Length)
+                    {
+                        string selected = System.Text.Encoding.UTF8.GetString(utf8, start, length);
+                        ImGui.SetClipboardText(selected);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Exception(ex, "Failed to copy selected text");
+            }
         }
 
         private void OnAutoRig()
