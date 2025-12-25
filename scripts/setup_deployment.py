@@ -136,6 +136,31 @@ def setup_python_embed(target_dir, target_platform):
         if os.path.exists(python_exe):
             os.chmod(python_exe, 0o755)
 
+    # CRITICAL: Enable site module in ._pth file BEFORE installing pip
+    # Reference: https://dev.to/fpim/setting-up-python-s-windows-embeddable-distribution-properly-1081
+    # Without this, pip cannot find/use site-packages properly
+    print("Enabling site module in ._pth file...")
+    for item in os.listdir(python_root):
+        if item.endswith("._pth"):
+            pth_file = os.path.join(python_root, item)
+            print(f"  Found: {pth_file}")
+            with open(pth_file, "r") as f:
+                content = f.read()
+            # Uncomment 'import site' if it's commented
+            if "#import site" in content:
+                content = content.replace("#import site", "import site")
+                with open(pth_file, "w") as f:
+                    f.write(content)
+                print(f"  Enabled 'import site' in {item}")
+            elif "import site" not in content:
+                # Add import site if not present
+                content += "\nimport site\n"
+                with open(pth_file, "w") as f:
+                    f.write(content)
+                print(f"  Added 'import site' to {item}")
+            else:
+                print(f"  'import site' already enabled in {item}")
+
     # Determine site-packages path for this platform
     print(f"DEBUG: python_root = {python_root}")
     print(f"DEBUG: python_root exists = {os.path.exists(python_root)}")
@@ -206,10 +231,11 @@ def setup_python_embed(target_dir, target_platform):
         clean_env["PYTHONNOUSERSITE"] = "1"  # Prevent user site-packages
         clean_env["PYTHONDONTWRITEBYTECODE"] = "1"
 
-        print("Installing pip...")
+        print("Installing pip to embedded Python...")
         try:
-            # Use -I (isolated mode) to ignore any site-packages
-            subprocess.check_call([python_exe, "-I", get_pip_path], env=clean_env)
+            # Now that import site is enabled, get-pip.py will install pip properly
+            subprocess.check_call([python_exe, get_pip_path], env=clean_env)
+            print("Pip installed successfully")
         except Exception as e:
             print(f"Pip install failed: {e}")
             return False
@@ -217,47 +243,19 @@ def setup_python_embed(target_dir, target_platform):
         print(f"Installing libraries to {site_packages}...")
         print(f"Libraries: {', '.join(reqs_list)}")
         try:
-            # Use --target to install directly to site-packages (more reliable than --prefix)
-            # Combined with -I (isolated mode) to prevent system Python interference
+            # Now pip works because import site is enabled
+            # Use --target to ensure packages go to our site-packages
             pip_cmd = [
-                python_exe, "-I", "-m", "pip", "install",
+                python_exe, "-m", "pip", "install",
                 "--target", site_packages,
-                "--ignore-installed",
-                "--no-user",
+                "--upgrade",
                 "--no-warn-script-location",
             ]
 
-            # For macOS, use the official PyTorch index for proper ARM64 support
-            if "osx" in target_platform:
-                # PyTorch for macOS (CPU/MPS) - separate install with index URL
-                torch_pkgs = ["torch", "torchvision"]
-                other_pkgs = [p for p in reqs_list if p not in torch_pkgs]
-
-                # Install PyTorch first with proper index
-                print(f"Installing PyTorch for macOS...")
-                torch_cmd = pip_cmd + ["--index-url", "https://download.pytorch.org/whl/cpu"] + torch_pkgs
-                print(f"Running: {' '.join(torch_cmd)}")
-                # Use check_call to see output in real-time
-                subprocess.check_call(torch_cmd, env=clean_env)
-                print(f"DEBUG: After PyTorch install, site_packages contents: {os.listdir(site_packages) if os.path.exists(site_packages) else 'NOT FOUND'}")
-
-                # Install other packages
-                if other_pkgs:
-                    print(f"Installing other packages: {', '.join(other_pkgs)}")
-                    other_cmd = pip_cmd + other_pkgs
-                    print(f"Running: {' '.join(other_cmd)}")
-                    subprocess.check_call(other_cmd, env=clean_env)
-                    print(f"DEBUG: After other packages, site_packages contents: {os.listdir(site_packages)[:20] if os.path.exists(site_packages) else 'NOT FOUND'}")
-            else:
-                # Windows/Linux - standard install
-                full_cmd = pip_cmd + reqs_list
-                print(f"Running: {' '.join(full_cmd[:10])} ...")
-                print(f"Target directory: {site_packages}")
-                result = subprocess.run(full_cmd, env=clean_env, capture_output=True, text=True)
-                print(f"Pip output: {result.stdout[-2000:] if len(result.stdout) > 2000 else result.stdout}")
-                if result.returncode != 0:
-                    print(f"Pip errors: {result.stderr}")
-                    raise subprocess.CalledProcessError(result.returncode, full_cmd)
+            # Install all packages
+            full_cmd = pip_cmd + reqs_list
+            print(f"Running: {python_exe} -m pip install --target {site_packages} ...")
+            subprocess.check_call(full_cmd, env=clean_env)
 
         except subprocess.CalledProcessError as e:
             print(f"Lib install failed with return code {e.returncode}")
