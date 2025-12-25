@@ -288,25 +288,48 @@ namespace Deep3DStudio
 
         private void ImportFile(string file)
         {
+            Logger.Info($"ImportFile called: {file}");
             string ext = Path.GetExtension(file).ToLower();
 
             if (ext == ".jpg" || ext == ".png" || ext == ".jpeg" || ext == ".bmp" || ext == ".tif" || ext == ".tiff")
             {
+                Logger.Debug($"File is an image (ext: {ext})");
                 if (!_loadedImages.Contains(file))
                 {
                     _loadedImages.Add(file);
-                    // Create thumbnail asynchronously
-                    Task.Run(() => {
-                        var thumb = TextureLoader.CreateThumbnail(file, 64);
-                        if (thumb > 0)
+                    Logger.Info($"Image added to list: {Path.GetFileName(file)}");
+
+                    // Queue thumbnail creation on the main thread via pending actions
+                    // OpenGL calls MUST happen on the main thread to avoid segfault
+                    Logger.Debug("Queueing thumbnail creation on main thread...");
+                    EnqueueAction(() => {
+                        Logger.Debug($"Executing thumbnail creation for: {Path.GetFileName(file)}");
+                        try
                         {
-                            lock (_imageThumbnails)
+                            var thumb = TextureLoader.CreateThumbnail(file, 64);
+                            if (thumb > 0)
                             {
-                                _imageThumbnails[file] = thumb;
+                                lock (_imageThumbnails)
+                                {
+                                    _imageThumbnails[file] = thumb;
+                                }
+                                Logger.Info($"Thumbnail created successfully for: {Path.GetFileName(file)}");
                             }
+                            else
+                            {
+                                Logger.Warn($"Thumbnail creation returned invalid ID for: {Path.GetFileName(file)}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Exception(ex, $"Failed to create thumbnail for: {Path.GetFileName(file)}");
                         }
                     });
                     _logBuffer += $"Added image: {Path.GetFileName(file)}\n";
+                }
+                else
+                {
+                    Logger.Debug($"Image already loaded, skipping: {file}");
                 }
             }
             else if (ext == ".obj" || ext == ".ply" || ext == ".glb" || ext == ".stl")
@@ -2129,14 +2152,14 @@ namespace Deep3DStudio
                                     if (File.Exists(img))
                                     {
                                         // Just add to list, thumbnail generation is already async in ImportFile
-                                        // But ImportFile also calls TextureLoader for thumbnails which needs GL context?
-                                        // Actually TextureLoader uses SkiaSharp mostly, except for Upload.
-                                        // But ImportFile logic is:
+                                        // Thumbnail creation needs GL context - we're already on main thread via EnqueueAction
                                         if (!_loadedImages.Contains(img))
                                         {
                                             _loadedImages.Add(img);
-                                            // Trigger thumbnail gen
-                                            Task.Run(() => {
+                                            Logger.Info($"Project load: Adding image {Path.GetFileName(img)}");
+                                            // Create thumbnail directly (we're on main thread)
+                                            try
+                                            {
                                                 var thumb = TextureLoader.CreateThumbnail(img, 64);
                                                 if (thumb > 0)
                                                 {
@@ -2144,8 +2167,13 @@ namespace Deep3DStudio
                                                     {
                                                         _imageThumbnails[img] = thumb;
                                                     }
+                                                    Logger.Debug($"Project load: Thumbnail created for {Path.GetFileName(img)}");
                                                 }
-                                            });
+                                            }
+                                            catch (Exception thumbEx)
+                                            {
+                                                Logger.Exception(thumbEx, $"Project load: Failed to create thumbnail for {Path.GetFileName(img)}");
+                                            }
                                         }
                                     }
                                 }
@@ -2238,17 +2266,24 @@ namespace Deep3DStudio
 
         private void OnAddImages()
         {
+            Logger.Info("OnAddImages: Opening file dialog...");
             var result = Nfd.OpenDialogMultiple(out string[] paths, new Dictionary<string, string>
             {
                 { "Images", "jpg,jpeg,png,bmp,tif,tiff" }
             });
 
+            Logger.Debug($"OnAddImages: Dialog result: {result}");
             if (result == NfdStatus.Ok && paths != null)
             {
+                Logger.Info($"OnAddImages: {paths.Length} file(s) selected");
                 foreach (var path in paths)
                 {
                     ImportFile(path);
                 }
+            }
+            else
+            {
+                Logger.Debug("OnAddImages: Dialog cancelled or no files selected");
             }
         }
 

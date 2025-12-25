@@ -9,6 +9,7 @@ namespace Deep3DStudio.Viewport
 {
     public static class TextureLoader
     {
+        private static int _textureCreateCount = 0;
         /// <summary>
         /// Loads a texture from an embedded resource.
         /// </summary>
@@ -47,15 +48,26 @@ namespace Deep3DStudio.Viewport
         /// </summary>
         public static int LoadTextureFromFile(string filePath)
         {
+            Logger.Debug($"LoadTextureFromFile called for: {filePath}");
+
             if (!File.Exists(filePath))
             {
-                Console.WriteLine($"File not found: {filePath}");
+                Logger.Warn($"File not found: {filePath}");
                 return -1;
             }
 
-            using (var stream = File.OpenRead(filePath))
+            try
             {
-                return LoadTextureFromStream(stream);
+                using (var stream = File.OpenRead(filePath))
+                {
+                    Logger.Debug($"File opened successfully, size: {stream.Length} bytes");
+                    return LoadTextureFromStream(stream);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Exception(ex, $"Failed to load texture from file: {filePath}");
+                return -1;
             }
         }
 
@@ -64,29 +76,47 @@ namespace Deep3DStudio.Viewport
         /// </summary>
         public static int LoadTextureFromStream(Stream stream)
         {
-            using (var memoryStream = new MemoryStream())
+            Logger.Debug("LoadTextureFromStream called");
+
+            try
             {
-                stream.CopyTo(memoryStream);
-                memoryStream.Position = 0;
-
-                using (var bitmap = SKBitmap.Decode(memoryStream))
+                using (var memoryStream = new MemoryStream())
                 {
-                    if (bitmap == null)
-                    {
-                        Console.WriteLine("Failed to decode image");
-                        return -1;
-                    }
+                    stream.CopyTo(memoryStream);
+                    memoryStream.Position = 0;
+                    Logger.Debug($"Stream copied to memory, size: {memoryStream.Length} bytes");
 
-                    return CreateTextureFromBitmap(bitmap);
+                    using (var bitmap = SKBitmap.Decode(memoryStream))
+                    {
+                        if (bitmap == null)
+                        {
+                            Logger.Error("Failed to decode image - SKBitmap.Decode returned null");
+                            return -1;
+                        }
+
+                        Logger.Debug($"Image decoded: {bitmap.Width}x{bitmap.Height}, ColorType: {bitmap.ColorType}");
+                        return CreateTextureFromBitmap(bitmap);
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                Logger.Exception(ex, "Failed to load texture from stream");
+                return -1;
             }
         }
 
         /// <summary>
         /// Creates an OpenGL texture from an SKBitmap, handling platform-specific pixel format differences.
+        /// WARNING: This method MUST be called from the main/OpenGL thread!
         /// </summary>
         public static int CreateTextureFromBitmap(SKBitmap bitmap)
         {
+            _textureCreateCount++;
+            int callId = _textureCreateCount;
+
+            Logger.Debug($"[{callId}] CreateTextureFromBitmap called: {bitmap.Width}x{bitmap.Height}, ColorType: {bitmap.ColorType}");
+
             // Convert to a consistent BGRA format which is what most platforms expect
             // SkiaSharp internally uses BGRA on most platforms
             SKBitmap convertedBitmap;
@@ -94,6 +124,7 @@ namespace Deep3DStudio.Viewport
 
             if (bitmap.ColorType != SKColorType.Bgra8888)
             {
+                Logger.Debug($"[{callId}] Converting from {bitmap.ColorType} to Bgra8888");
                 var info = new SKImageInfo(bitmap.Width, bitmap.Height, SKColorType.Bgra8888, SKAlphaType.Premul);
                 convertedBitmap = new SKBitmap(info);
                 needsDispose = true;
@@ -102,6 +133,7 @@ namespace Deep3DStudio.Viewport
                 {
                     canvas.DrawBitmap(bitmap, 0, 0);
                 }
+                Logger.Debug($"[{callId}] Conversion complete");
             }
             else
             {
@@ -110,10 +142,15 @@ namespace Deep3DStudio.Viewport
 
             try
             {
+                Logger.Debug($"[{callId}] Calling GL.GenTextures...");
                 int tex;
                 GL.GenTextures(1, out tex);
+                Logger.Debug($"[{callId}] GL.GenTextures returned: {tex}");
+
+                Logger.Debug($"[{callId}] Calling GL.BindTexture...");
                 GL.BindTexture(TextureTarget.Texture2D, tex);
 
+                Logger.Debug($"[{callId}] Setting texture parameters...");
                 GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
                 GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
                 GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
@@ -123,6 +160,7 @@ namespace Deep3DStudio.Viewport
                 GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
                 GL.PixelStore(PixelStoreParameter.UnpackRowLength, 0);
 
+                Logger.Debug($"[{callId}] Calling GL.TexImage2D ({convertedBitmap.Width}x{convertedBitmap.Height})...");
                 // Use BGRA format which matches SkiaSharp's internal format
                 GL.TexImage2D(
                     TextureTarget.Texture2D,
@@ -134,13 +172,20 @@ namespace Deep3DStudio.Viewport
                     PixelFormat.Bgra,
                     PixelType.UnsignedByte,
                     convertedBitmap.GetPixels());
+                Logger.Debug($"[{callId}] GL.TexImage2D complete");
 
                 // Restore default alignment
                 GL.PixelStore(PixelStoreParameter.UnpackAlignment, 4);
 
                 GL.BindTexture(TextureTarget.Texture2D, 0);
 
+                Logger.Info($"[{callId}] Texture created successfully: ID={tex}, Size={convertedBitmap.Width}x{convertedBitmap.Height}");
                 return tex;
+            }
+            catch (Exception ex)
+            {
+                Logger.Exception(ex, $"[{callId}] OpenGL texture creation failed");
+                return -1;
             }
             finally
             {
@@ -186,39 +231,62 @@ namespace Deep3DStudio.Viewport
 
         /// <summary>
         /// Creates a thumbnail texture from an image file.
+        /// WARNING: This method calls OpenGL functions and MUST be called from the main/OpenGL thread!
+        /// Calling from a background thread will cause a crash (segfault/exit code 139).
         /// </summary>
         public static int CreateThumbnail(string filePath, int maxSize = 128)
         {
-            if (!File.Exists(filePath)) return -1;
+            Logger.Debug($"CreateThumbnail called for: {filePath}, maxSize: {maxSize}");
+
+            if (!File.Exists(filePath))
+            {
+                Logger.Warn($"CreateThumbnail: File not found: {filePath}");
+                return -1;
+            }
 
             try
             {
+                Logger.Debug($"CreateThumbnail: Opening file...");
                 using (var stream = File.OpenRead(filePath))
-                using (var bitmap = SKBitmap.Decode(stream))
                 {
-                    if (bitmap == null) return -1;
-
-                    // Calculate thumbnail size maintaining aspect ratio
-                    float scale = Math.Min((float)maxSize / bitmap.Width, (float)maxSize / bitmap.Height);
-                    int thumbWidth = (int)(bitmap.Width * scale);
-                    int thumbHeight = (int)(bitmap.Height * scale);
-
-                    // Create scaled bitmap
-                    var info = new SKImageInfo(thumbWidth, thumbHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
-                    using (var thumbnail = new SKBitmap(info))
-                    using (var canvas = new SKCanvas(thumbnail))
+                    Logger.Debug($"CreateThumbnail: Decoding image (size: {stream.Length} bytes)...");
+                    using (var bitmap = SKBitmap.Decode(stream))
                     {
-                        canvas.Clear(SKColors.Transparent);
-                        var destRect = new SKRect(0, 0, thumbWidth, thumbHeight);
-                        canvas.DrawBitmap(bitmap, destRect, new SKPaint { FilterQuality = SKFilterQuality.Medium });
+                        if (bitmap == null)
+                        {
+                            Logger.Error($"CreateThumbnail: Failed to decode image: {filePath}");
+                            return -1;
+                        }
 
-                        return CreateTextureFromBitmap(thumbnail);
+                        Logger.Debug($"CreateThumbnail: Original size: {bitmap.Width}x{bitmap.Height}");
+
+                        // Calculate thumbnail size maintaining aspect ratio
+                        float scale = Math.Min((float)maxSize / bitmap.Width, (float)maxSize / bitmap.Height);
+                        int thumbWidth = (int)(bitmap.Width * scale);
+                        int thumbHeight = (int)(bitmap.Height * scale);
+
+                        Logger.Debug($"CreateThumbnail: Thumbnail size: {thumbWidth}x{thumbHeight}");
+
+                        // Create scaled bitmap
+                        var info = new SKImageInfo(thumbWidth, thumbHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
+                        using (var thumbnail = new SKBitmap(info))
+                        using (var canvas = new SKCanvas(thumbnail))
+                        {
+                            canvas.Clear(SKColors.Transparent);
+                            var destRect = new SKRect(0, 0, thumbWidth, thumbHeight);
+                            canvas.DrawBitmap(bitmap, destRect, new SKPaint { FilterQuality = SKFilterQuality.Medium });
+
+                            Logger.Debug($"CreateThumbnail: About to create OpenGL texture (WARNING: must be on main thread!)");
+                            int result = CreateTextureFromBitmap(thumbnail);
+                            Logger.Debug($"CreateThumbnail: Texture creation result: {result}");
+                            return result;
+                        }
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error creating thumbnail for {filePath}: {ex.Message}");
+                Logger.Exception(ex, $"Error creating thumbnail for {filePath}");
                 return -1;
             }
         }

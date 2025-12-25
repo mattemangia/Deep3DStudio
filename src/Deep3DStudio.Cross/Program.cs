@@ -21,8 +21,29 @@ namespace Deep3DStudio
         [STAThread]
         public static void Main(string[] args)
         {
+            // Initialize logging first - clears log file on each run
+            Logger.Initialize();
+            Logger.Info("Application starting...");
+            Logger.Info($"Arguments: {string.Join(", ", args)}");
+
+            // Set up global exception handlers for crash logging
+            AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
+            {
+                Logger.Error("=== UNHANDLED EXCEPTION ===");
+                if (e.ExceptionObject is Exception ex)
+                {
+                    Logger.Exception(ex, "Fatal unhandled exception");
+                }
+                else
+                {
+                    Logger.Error($"Non-exception unhandled error: {e.ExceptionObject}");
+                }
+                Logger.Error($"IsTerminating: {e.IsTerminating}");
+            };
+
             // Force legacy OpenGL support for ThreeDView
             Environment.SetEnvironmentVariable("MESA_GL_VERSION_OVERRIDE", "3.3COMPAT");
+            Logger.Debug("Set MESA_GL_VERSION_OVERRIDE=3.3COMPAT");
 
             var nativeWindowSettings = new NativeWindowSettings()
             {
@@ -38,18 +59,32 @@ namespace Deep3DStudio
                 // Requesting 3.3 Compat causes a crash.
                 nativeWindowSettings.APIVersion = new Version(2, 1);
                 nativeWindowSettings.Profile = ContextProfile.Any;
+                Logger.Info("Platform: macOS - using OpenGL 2.1");
             }
             else
             {
                 // Windows/Linux support 3.3 Compatibility Profile
                 nativeWindowSettings.APIVersion = new Version(3, 3);
                 nativeWindowSettings.Profile = ContextProfile.Compatability;
+                Logger.Info($"Platform: {(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "Windows" : "Linux")} - using OpenGL 3.3 Compat");
             }
 
-            using (var window = new MainWindow(GameWindowSettings.Default, nativeWindowSettings))
+            Logger.Info("Creating MainWindow...");
+            try
             {
-                window.Run();
+                using (var window = new MainWindow(GameWindowSettings.Default, nativeWindowSettings))
+                {
+                    Logger.Info("MainWindow created successfully, starting run loop");
+                    window.Run();
+                    Logger.Info("MainWindow run loop ended normally");
+                }
             }
+            catch (Exception ex)
+            {
+                Logger.Exception(ex, "MainWindow crashed");
+                throw;
+            }
+            Logger.Info("Application exiting normally");
         }
 
         /// <summary>
