@@ -27,6 +27,9 @@ namespace Deep3DStudio
         private int _windowHeight;
         private System.Numerics.Vector2 _scaleFactor = System.Numerics.Vector2.One;
 
+        // Static cached keys to avoid Enum.GetValues allocation every frame
+        private static readonly Keys[] _allKeys = (Keys[])Enum.GetValues(typeof(Keys));
+
         public ImGuiController(int width, int height)
         {
             _windowWidth = width;
@@ -178,8 +181,9 @@ void main()
             io.KeySuper = keyboardState.IsKeyDown(Keys.LeftSuper) || keyboardState.IsKeyDown(Keys.RightSuper);
 
             // Map standard keys to ImGui keys
-            foreach (Keys key in Enum.GetValues(typeof(Keys)))
+            for (int i = 0; i < _allKeys.Length; i++)
             {
+                Keys key = _allKeys[i];
                 if (key == Keys.Unknown) continue;
 
                 ImGuiKey imKey = MapKey(key);
