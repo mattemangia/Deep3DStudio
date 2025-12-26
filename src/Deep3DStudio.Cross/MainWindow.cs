@@ -3528,7 +3528,7 @@ namespace Deep3DStudio
             }
 
             ProgressDialog.Instance.Start("Auto Rigging with UniRig...", OperationType.Processing);
-            Task.Run(async () => {
+            _ = Task.Run(async () => {
                 try
                 {
                     foreach (var mesh in meshes)
@@ -3545,26 +3545,9 @@ namespace Deep3DStudio
 
                         if (rigResult != null && rigResult.Success && rigResult.JointPositions?.Length > 0)
                         {
-                            // Use UniRig result
+                            // Use UniRig result - use the existing helper method
                             ProgressDialog.Instance.Log($"UniRig generated {rigResult.JointPositions.Length} joints.");
-
-                            skeleton = new SkeletonData();
-                            for (int i = 0; i < rigResult.JointPositions.Length; i++)
-                            {
-                                var joint = new Joint
-                                {
-                                    Name = rigResult.JointNames?[i] ?? $"Joint_{i}",
-                                    LocalPosition = rigResult.JointPositions[i],
-                                    ParentIndex = rigResult.ParentIndices?[i] ?? -1
-                                };
-                                skeleton.Joints.Add(joint);
-                            }
-
-                            // Copy skinning weights if available
-                            if (rigResult.SkinningWeights != null)
-                            {
-                                skeleton.SkinningWeights = rigResult.SkinningWeights;
-                            }
+                            skeleton = SkeletonData.FromRigResult(rigResult);
                         }
                         else
                         {
