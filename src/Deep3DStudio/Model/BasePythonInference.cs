@@ -87,13 +87,56 @@ namespace Deep3DStudio.Model
                     }
                     else
                     {
-                        var assembly = Assembly.GetExecutingAssembly();
-                        var resourceName = "Deep3DStudio.Embedded.Python.inference_bridge.py";
-                        string scriptContent;
-                        using (Stream stream = assembly.GetManifestResourceStream(resourceName))
-                        using (StreamReader reader = new StreamReader(stream))
+                        // Try to find the embedded resource from any loaded assembly
+                        string scriptContent = null;
+                        string[] possibleNames = new[]
                         {
-                            scriptContent = reader.ReadToEnd();
+                            "Deep3DStudio.Embedded.Python.inference_bridge.py",
+                            "Deep3DStudio.Cross.Embedded.Python.inference_bridge.py"
+                        };
+
+                        // Try executing assembly first, then entry assembly
+                        var assemblies = new[] { Assembly.GetExecutingAssembly(), Assembly.GetEntryAssembly() };
+
+                        foreach (var assembly in assemblies)
+                        {
+                            if (assembly == null) continue;
+
+                            // Try known names first
+                            foreach (var resourceName in possibleNames)
+                            {
+                                using (Stream stream = assembly.GetManifestResourceStream(resourceName))
+                                {
+                                    if (stream != null)
+                                    {
+                                        using (StreamReader reader = new StreamReader(stream))
+                                        {
+                                            scriptContent = reader.ReadToEnd();
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (scriptContent != null) break;
+
+                            // Fallback: search by filename
+                            var allResources = assembly.GetManifestResourceNames();
+                            var match = allResources.FirstOrDefault(r => r.EndsWith("inference_bridge.py"));
+                            if (match != null)
+                            {
+                                using (Stream stream = assembly.GetManifestResourceStream(match))
+                                using (StreamReader reader = new StreamReader(stream))
+                                {
+                                    scriptContent = reader.ReadToEnd();
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (string.IsNullOrEmpty(scriptContent))
+                        {
+                            throw new FileNotFoundException("Could not find embedded resource 'inference_bridge.py' in any assembly.");
                         }
 
                         dynamic types = Py.Import("types");
