@@ -279,6 +279,10 @@ namespace Deep3DStudio.Model.AIModels
                                 SceneResult? dust3rResult = null;
                                 try
                                 {
+                                    if (Dust3r != null)
+                                    {
+                                        Dust3r.LogCallback = (msg) => progressCallback?.Invoke(msg, progress);
+                                    }
                                     dust3rResult = Dust3r?.ReconstructScene(imagePaths);
                                 }
                                 catch (Exception ex)
