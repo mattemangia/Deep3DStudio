@@ -807,8 +807,7 @@ namespace Deep3DStudio.Model.SfM
 
                 // Use using statements to ensure proper disposal of temporary Mat objects
                 using Mat R_wc = view.R.T();
-                using Mat negR_wc_t = -R_wc * view.t;
-                using Mat C_wc = negR_wc_t.ToMat();
+                using Mat C_wc = -R_wc * view.t;
 
                 Vector3 pos = new Vector3((float)C_wc.At<double>(0), -(float)C_wc.At<double>(1), -(float)C_wc.At<double>(2));
 
