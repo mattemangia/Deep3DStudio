@@ -5,7 +5,9 @@ using System.Linq;
 using System.Threading.Tasks;
 using Deep3DStudio.Configuration;
 using Deep3DStudio.Model.SfM;
+using Deep3DStudio.Python;
 using OpenTK.Mathematics;
+using Python.Runtime;
 
 namespace Deep3DStudio.Model.AIModels
 {
@@ -301,6 +303,66 @@ namespace Deep3DStudio.Model.AIModels
                                 {
                                     // Fall back to SfM (Feature Matching)
                                     progressCallback?.Invoke("Dust3r not available or failed, trying Feature Matching SfM...", progress);
+
+                                    // Clean up any corrupted state from Dust3r before running SfM
+                                    // This is critical to prevent crashes when falling back from failed Python/native operations
+                                    try
+                                    {
+                                        progressCallback?.Invoke("Cleaning up resources before SfM fallback...", progress);
+
+                                        // Dispose and reset Dust3r instance if it failed
+                                        if (_dust3r != null)
+                                        {
+                                            _dust3r.Dispose();
+                                            _dust3r = null;
+                                        }
+
+                                        // Force Python cleanup if Python is initialized
+                                        // This releases PyTorch tensors and CUDA memory that could corrupt other native libraries
+                                        if (PythonService.Instance.IsInitialized)
+                                        {
+                                            try
+                                            {
+                                                progressCallback?.Invoke("Releasing Python/GPU resources...", progress);
+                                                using (Py.GIL())
+                                                {
+                                                    // Run aggressive Python cleanup
+                                                    string cleanupScript = @"
+import gc
+gc.collect()
+try:
+    import torch
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+except ImportError:
+    pass
+except Exception:
+    pass
+gc.collect()
+";
+                                                    PythonEngine.Exec(cleanupScript);
+                                                }
+                                            }
+                                            catch (Exception pyEx)
+                                            {
+                                                progressCallback?.Invoke($"Warning: Python cleanup had issues: {pyEx.Message}", progress);
+                                            }
+                                        }
+
+                                        // Force garbage collection to clean up any lingering native objects
+                                        GC.Collect();
+                                        GC.WaitForPendingFinalizers();
+                                        GC.Collect();
+
+                                        // Small delay to ensure native resources are fully released
+                                        System.Threading.Thread.Sleep(200);
+                                    }
+                                    catch (Exception cleanupEx)
+                                    {
+                                        progressCallback?.Invoke($"Warning: cleanup before SfM fallback had issues: {cleanupEx.Message}", progress);
+                                    }
+
                                     try
                                     {
                                         using (var sfm = new SfMInference())

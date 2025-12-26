@@ -236,7 +236,11 @@ namespace Deep3DStudio.Model
             }
             catch (Exception ex)
             {
-                Log($"Dust3r inference failed: {ex.Message}");
+                _lastError = $"Dust3r inference failed: {ex.Message}";
+                Log(_lastError);
+
+                // Log the full stack trace for debugging
+                Log($"Stack trace: {ex.StackTrace}");
             }
 
             return result;
@@ -247,7 +251,21 @@ namespace Deep3DStudio.Model
             if (!_disposed)
             {
                 _disposed = true;
-                // Cleanup logic if needed
+
+                try
+                {
+                    // Clear the module reference to allow Python cleanup
+                    _bridgeModule = null;
+                    _isLoaded = false;
+
+                    // Note: We don't unload the Python module from sys.modules
+                    // as that could cause issues if other code references it.
+                    // The GC will handle the rest.
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Dust3r] Dispose warning: {ex.Message}");
+                }
             }
         }
     }

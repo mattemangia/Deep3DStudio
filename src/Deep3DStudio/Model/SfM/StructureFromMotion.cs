@@ -715,11 +715,26 @@ namespace Deep3DStudio.Model.SfM
             Cv2.ProjectPoints(pts3D, rvec1, t1_part, K, _distCoef, proj1);
             Cv2.ProjectPoints(pts3D, rvec2, t2_part, K, _distCoef, proj2);
 
-            float minReprojError = 6.0f;
+            // Use a more lenient reprojection error threshold
+            float minReprojError = 20.0f;  // Increased from 6.0 to handle more noise
+            int totalPoints = pts3D.Rows;
+            int acceptedPoints = 0;
+            int behindCamera = 0;
+            double maxErr = 0;
+            double sumErr = 0;
+
+            Log($"[DEBUG] TriangulateViews: {totalPoints} candidate points");
 
             for(int i = 0; i < pts3D.Rows; i++)
             {
                 Point3d p3 = new Point3d(pts3D.At<double>(i, 0), pts3D.At<double>(i, 1), pts3D.At<double>(i, 2));
+
+                // Check if point is in front of both cameras (positive Z)
+                if (p3.Z <= 0)
+                {
+                    behindCamera++;
+                    continue;
+                }
 
                 Point2d p2_1 = proj1.At<Point2d>(i);
                 Point2d p2_2 = proj2.At<Point2d>(i);
@@ -727,8 +742,13 @@ namespace Deep3DStudio.Model.SfM
                 double err1 = Math.Sqrt(Math.Pow(p2_1.X - aligned1[i].X, 2) + Math.Pow(p2_1.Y - aligned1[i].Y, 2));
                 double err2 = Math.Sqrt(Math.Pow(p2_2.X - aligned2[i].X, 2) + Math.Pow(p2_2.Y - aligned2[i].Y, 2));
 
+                double maxErrPt = Math.Max(err1, err2);
+                maxErr = Math.Max(maxErr, maxErrPt);
+                sumErr += maxErrPt;
+
                 if (err1 > minReprojError || err2 > minReprojError) continue;
 
+                acceptedPoints++;
                 var pt = new Point3D
                 {
                     Pt = p3,
@@ -739,6 +759,10 @@ namespace Deep3DStudio.Model.SfM
 
                 pointcloud.Add(pt);
             }
+
+            double avgErr = totalPoints > 0 ? sumErr / totalPoints : 0;
+            Log($"[DEBUG] TriangulateViews: {acceptedPoints}/{totalPoints} accepted, {behindCamera} behind camera");
+            Log($"[DEBUG] TriangulateViews: avg reproj error={avgErr:F2}px, max={maxErr:F2}px, threshold={minReprojError}px");
 
             return pointcloud.Count > 0;
         }

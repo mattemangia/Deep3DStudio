@@ -353,6 +353,16 @@ def infer_dust3r(images_bytes_list):
     try:
         for i, img_bytes in enumerate(images_bytes_list):
             img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
+
+            # Pre-resize large images to prevent memory crashes
+            max_dim = 1024
+            w, h = img.size
+            if max(w, h) > max_dim:
+                scale = max_dim / max(w, h)
+                new_w, new_h = int(w * scale), int(h * scale)
+                print(f"Pre-resizing image {i} from {w}x{h} to {new_w}x{new_h}")
+                img = img.resize((new_w, new_h), Image.LANCZOS)
+
             pil_images.append(img)
             # Create temp file
             fd, path = tempfile.mkstemp(suffix='.png')
@@ -482,6 +492,17 @@ def infer_dust3r(images_bytes_list):
         print(f"Dust3r Inference Error: {e}")
         import traceback
         traceback.print_exc()
+
+        # Clean up GPU memory to prevent issues when falling back to other methods
+        try:
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+        except:
+            pass
+
         return []
     finally:
         # Clean up temp files
@@ -490,6 +511,13 @@ def infer_dust3r(images_bytes_list):
                 os.remove(path)
             except:
                 pass
+
+        # Clear any lingering tensors
+        try:
+            import gc
+            gc.collect()
+        except:
+            pass
 
     return results
 
