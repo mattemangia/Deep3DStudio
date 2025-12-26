@@ -29,7 +29,8 @@
   <!-- Include logic files from original project -->
   <!-- We MUST exclude ALL UI-related files that depend on GTK -->
   <ItemGroup>
-    <Compile Include="..\Deep3DStudio\**\*.cs" Exclude="..\Deep3DStudio\UI\**\*.cs;&#xA;                      ..\Deep3DStudio\Viewport\**\*.cs;&#xA;                      ..\Deep3DStudio\Configuration\SettingsDialog.cs;&#xA;                      ..\Deep3DStudio\Configuration\AIModelSettingsDialog.cs;&#xA;                      ..\Deep3DStudio\Icons\**\*.cs;&#xA;                      ..\Deep3DStudio\Program.cs;&#xA;                      ..\Deep3DStudio\AIModelSettingsDialog.cs;&#xA;                      ..\Deep3DStudio\MainWindow.cs;&#xA;                      ..\Deep3DStudio\obj\**;&#xA;                      ..\Deep3DStudio\bin\**" />
+    <Compile Include="..\Deep3DStudio\**\*.cs" Exclude="..\Deep3DStudio\UI\**\*.cs;&#xA;                      ..\Deep3DStudio\Viewport\**\*.cs;&#xA;                      ..\Deep3DStudio\Configuration\SettingsDialog.cs;&#xA;                      ..\Deep3DStudio\Configuration\AIModelSettingsDialog.cs;&#xA;                      ..\Deep3DStudio\Icons\**\*.cs;&#xA;                      ..\Deep3DStudio\Program.cs;&#xA;                      ..\Deep3DStudio\AIModelSettingsDialog.cs;&#xA;                      ..\Deep3DStudio\MainWindow.cs;&#xA;                      ..\Deep3DStudio\MainWindow.*.cs;&#xA;                      ..\Deep3DStudio\obj\**;&#xA;                      ..\Deep3DStudio\bin\**" />
+    <Compile Remove="..\Deep3DStudio\MainWindow*.cs" />
   </ItemGroup>
 
   <ItemGroup>
