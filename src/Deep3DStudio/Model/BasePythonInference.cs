@@ -95,17 +95,49 @@ namespace Deep3DStudio.Model
                             "Deep3DStudio.Cross.Embedded.Python.inference_bridge.py"
                         };
 
-                        // Try executing assembly first, then entry assembly
-                        var assemblies = new[] { Assembly.GetExecutingAssembly(), Assembly.GetEntryAssembly() };
+                        // Try all loaded assemblies, starting with entry and executing
+                        var assemblyList = new List<Assembly>();
+                        if (Assembly.GetEntryAssembly() != null) assemblyList.Add(Assembly.GetEntryAssembly());
+                        if (Assembly.GetExecutingAssembly() != null) assemblyList.Add(Assembly.GetExecutingAssembly());
+                        if (Assembly.GetCallingAssembly() != null) assemblyList.Add(Assembly.GetCallingAssembly());
+                        assemblyList.AddRange(AppDomain.CurrentDomain.GetAssemblies()
+                            .Where(a => a.FullName?.Contains("Deep3DStudio") == true));
 
-                        foreach (var assembly in assemblies)
+                        foreach (var assembly in assemblyList.Distinct())
                         {
                             if (assembly == null) continue;
+
+                            var allResources = assembly.GetManifestResourceNames();
+                            Console.WriteLine($"[{_modelName}] Checking assembly '{assembly.GetName().Name}' with {allResources.Length} resources");
 
                             // Try known names first
                             foreach (var resourceName in possibleNames)
                             {
-                                using (Stream stream = assembly.GetManifestResourceStream(resourceName))
+                                if (allResources.Contains(resourceName))
+                                {
+                                    Console.WriteLine($"[{_modelName}] Found exact match: {resourceName}");
+                                    using (Stream stream = assembly.GetManifestResourceStream(resourceName))
+                                    {
+                                        if (stream != null)
+                                        {
+                                            using (StreamReader reader = new StreamReader(stream))
+                                            {
+                                                scriptContent = reader.ReadToEnd();
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (scriptContent != null) break;
+
+                            // Fallback: search by filename
+                            var match = allResources.FirstOrDefault(r => r.EndsWith("inference_bridge.py"));
+                            if (match != null)
+                            {
+                                Console.WriteLine($"[{_modelName}] Found by suffix: {match}");
+                                using (Stream stream = assembly.GetManifestResourceStream(match))
                                 {
                                     if (stream != null)
                                     {
@@ -118,25 +150,16 @@ namespace Deep3DStudio.Model
                                 }
                             }
 
-                            if (scriptContent != null) break;
-
-                            // Fallback: search by filename
-                            var allResources = assembly.GetManifestResourceNames();
-                            var match = allResources.FirstOrDefault(r => r.EndsWith("inference_bridge.py"));
-                            if (match != null)
+                            // Log all resources for debugging
+                            if (allResources.Length > 0 && allResources.Length < 20)
                             {
-                                using (Stream stream = assembly.GetManifestResourceStream(match))
-                                using (StreamReader reader = new StreamReader(stream))
-                                {
-                                    scriptContent = reader.ReadToEnd();
-                                    break;
-                                }
+                                Console.WriteLine($"[{_modelName}] Available resources in {assembly.GetName().Name}: {string.Join(", ", allResources)}");
                             }
                         }
 
                         if (string.IsNullOrEmpty(scriptContent))
                         {
-                            throw new FileNotFoundException("Could not find embedded resource 'inference_bridge.py' in any assembly.");
+                            throw new FileNotFoundException("Could not find embedded resource 'inference_bridge.py' in any assembly. Check that it's included as EmbeddedResource in the .csproj file.");
                         }
 
                         dynamic types = Py.Import("types");
