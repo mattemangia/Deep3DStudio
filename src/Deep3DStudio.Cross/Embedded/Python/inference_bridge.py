@@ -336,6 +336,7 @@ def infer_dust3r(images_bytes_list):
 
     from dust3r.inference import inference
     from dust3r.image_pairs import make_pairs
+    from dust3r.utils.image import load_images
 
     # Try to import global_aligner (handles multi-image case)
     try:
@@ -345,23 +346,30 @@ def infer_dust3r(images_bytes_list):
         has_global_aligner = False
         print("Warning: global_aligner not available, using pairwise mode")
 
-    pil_images = [Image.open(io.BytesIO(b)).convert('RGB') for b in images_bytes_list]
-    processed_images = []
-    for img in pil_images:
-        w, h = img.size
-        w = (w // 16) * 16
-        h = (h // 16) * 16
-        if w != img.size[0] or h != img.size[1]:
-            img = img.resize((w, h), Image.LANCZOS)
-        processed_images.append(img)
-
+    # Save images to temp files for dust3r's load_images function
+    import tempfile
+    temp_files = []
+    pil_images = []
     try:
+        for i, img_bytes in enumerate(images_bytes_list):
+            img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
+            pil_images.append(img)
+            # Create temp file
+            fd, path = tempfile.mkstemp(suffix='.png')
+            os.close(fd)
+            img.save(path)
+            temp_files.append(path)
+
         device = next(model.parameters()).device
-        report_progress("inference", 0.1, f"Processing {len(processed_images)} images with Dust3r...")
+        report_progress("inference", 0.1, f"Processing {len(pil_images)} images with Dust3r...")
+
+        # Use dust3r's load_images to get properly formatted image dicts
+        # This handles resizing and tensor conversion
+        dust3r_images = load_images(temp_files, size=512)
+        report_progress("inference", 0.15, f"Loaded {len(dust3r_images)} images for Dust3r")
 
         # Create image pairs for processing
-        # For dust3r, we need to create pairs of images
-        pairs = make_pairs(processed_images, scene_graph='complete', prefilter=None, symmetrize=True)
+        pairs = make_pairs(dust3r_images, scene_graph='complete', prefilter=None, symmetrize=True)
         report_progress("inference", 0.2, f"Created {len(pairs)} image pairs")
 
         # Run inference on all pairs
@@ -370,7 +378,7 @@ def infer_dust3r(images_bytes_list):
 
         results = []
 
-        if has_global_aligner and len(processed_images) > 2:
+        if has_global_aligner and len(pil_images) > 2:
             # Use global aligner for multiple images
             try:
                 scene = global_aligner(output, device=device, mode=GlobalAlignerMode.PointCloudOptimizer)
@@ -382,7 +390,7 @@ def infer_dust3r(images_bytes_list):
                 pts3d = scene.get_pts3d()
                 masks = scene.get_masks()
 
-                for i, img in enumerate(processed_images):
+                for i, img in enumerate(pil_images):
                     pts = pts3d[i].detach().cpu().numpy()
                     mask = masks[i].detach().cpu().numpy()
                     img_np = np.array(img) / 255.0
@@ -423,8 +431,8 @@ def infer_dust3r(images_bytes_list):
                     conf2 = pair_output['conf'][1].detach().cpu().numpy() if len(pair_output['conf']) > 1 else None
 
                     # Get colors from the first image of the pair
-                    img_idx = pair_idx % len(processed_images)
-                    img_np = np.array(processed_images[img_idx]) / 255.0
+                    img_idx = pair_idx % len(pil_images)
+                    img_np = np.array(pil_images[img_idx]) / 255.0
 
                     # Filter by confidence
                     mask1 = conf1 > 1.2
@@ -437,8 +445,8 @@ def infer_dust3r(images_bytes_list):
 
                     if pts2 is not None and conf2 is not None:
                         mask2 = conf2 > 1.2
-                        img_idx2 = (pair_idx + 1) % len(processed_images)
-                        img_np2 = np.array(processed_images[img_idx2]) / 255.0
+                        img_idx2 = (pair_idx + 1) % len(pil_images)
+                        img_np2 = np.array(pil_images[img_idx2]) / 255.0
                         pts2_flat = pts2.reshape(-1, 3)
                         colors2_flat = img_np2.reshape(-1, 3)
                         mask2_flat = mask2.flatten()
@@ -475,6 +483,13 @@ def infer_dust3r(images_bytes_list):
         import traceback
         traceback.print_exc()
         return []
+    finally:
+        # Clean up temp files
+        for path in temp_files:
+            try:
+                os.remove(path)
+            except:
+                pass
 
     return results
 

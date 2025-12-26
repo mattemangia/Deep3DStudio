@@ -80,43 +80,81 @@ namespace Deep3DStudio.Model.SfM
         public SceneResult ReconstructScene(List<string> imagePaths)
         {
             var result = new SceneResult();
+            Log("[DEBUG] ReconstructScene called");
+
+            if (imagePaths == null)
+            {
+                Log("[DEBUG] imagePaths is null!");
+                return result;
+            }
+
+            Log($"[DEBUG] imagePaths.Count = {imagePaths.Count}");
             if (imagePaths.Count < 2) return result;
 
             Log("************************************************");
             Log("              3D MAPPING (C# Port)              ");
             Log("************************************************");
 
-            // Apply Computation Device Settings
-            ConfigureOpenCV();
-
-            _views.Clear();
-            _reconstructionCloud.Clear();
-            _featureToPointMap.Clear();
-            _doneViews.Clear();
-            _goodViews.Clear();
-
-            // 1. Load Images & Extract Features
-            if (!ImagesLoad(imagePaths)) return result;
-            ExtractFeatures();
-
-            // 2. Base Reconstruction
-            if (!BaseReconstruction())
+            try
             {
-                Log("Could not find a good pair for initial reconstruction");
+                // Apply Computation Device Settings
+                Log("[DEBUG] Calling ConfigureOpenCV...");
+                ConfigureOpenCV();
+                Log("[DEBUG] ConfigureOpenCV completed");
+
+                Log("[DEBUG] Clearing data structures...");
+                _views.Clear();
+                _reconstructionCloud.Clear();
+                _featureToPointMap.Clear();
+                _doneViews.Clear();
+                _goodViews.Clear();
+                Log("[DEBUG] Data structures cleared");
+
+                // 1. Load Images & Extract Features
+                Log("[DEBUG] Calling ImagesLoad...");
+                if (!ImagesLoad(imagePaths))
+                {
+                    Log("[DEBUG] ImagesLoad returned false");
+                    return result;
+                }
+                Log("[DEBUG] ImagesLoad completed, calling ExtractFeatures...");
+                ExtractFeatures();
+                Log("[DEBUG] ExtractFeatures completed");
+
+                // 2. Base Reconstruction
+                Log("[DEBUG] Calling BaseReconstruction...");
+                if (!BaseReconstruction())
+                {
+                    Log("Could not find a good pair for initial reconstruction");
+                    return result;
+                }
+                Log("[DEBUG] BaseReconstruction completed");
+
+                // 3. Add More Views
+                Log("[DEBUG] Calling AddMoreViews...");
+                if (!AddMoreViews())
+                {
+                    Log("Could not add more views");
+                }
+                Log("[DEBUG] AddMoreViews completed");
+
+                // 4. Final Global Bundle Adjustment
+                Log("[DEBUG] Calling PerformBundleAdjustment...");
+                PerformBundleAdjustment();
+                Log("[DEBUG] PerformBundleAdjustment completed");
+
+                // 5. Convert to SceneResult
+                Log("[DEBUG] Calling ConvertToSceneResult...");
+                var sceneResult = ConvertToSceneResult();
+                Log("[DEBUG] ConvertToSceneResult completed");
+                return sceneResult;
+            }
+            catch (Exception ex)
+            {
+                Log($"[DEBUG] EXCEPTION in ReconstructScene: {ex.Message}");
+                Console.Error.WriteLine($"[SfM] Exception in ReconstructScene: {ex}");
                 return result;
             }
-
-            // 3. Add More Views
-            if (!AddMoreViews())
-            {
-                Log("Could not add more views");
-            }
-
-            // 4. Final Global Bundle Adjustment
-            PerformBundleAdjustment();
-
-            // 5. Convert to SceneResult
-            return ConvertToSceneResult();
         }
 
         private void ConfigureOpenCV()
@@ -154,34 +192,54 @@ namespace Deep3DStudio.Model.SfM
         private bool ImagesLoad(List<string> paths)
         {
             Log("Getting images...");
+            Log($"[DEBUG] ImagesLoad called with {paths.Count} paths");
             _views.Clear();
 
             for (int i = 0; i < paths.Count; i++)
             {
-                // Use ImageDecoder if possible or fallback to standard Cv2 load
-                // The C++ code resizes large images.
-                Mat image = Cv2.ImRead(paths[i], ImreadModes.Color);
-                if (image.Empty()) continue;
-
-                if (image.Rows > 1200 || image.Cols > 1200)
+                try
                 {
-                    double scale = 1200.0 / Math.Max(image.Rows, image.Cols);
-                    Cv2.Resize(image, image, new Size(), scale, scale);
+                    Log($"[DEBUG] Loading image {i}: {paths[i]}");
+                    // Use ImageDecoder if possible or fallback to standard Cv2 load
+                    // The C++ code resizes large images.
+                    Mat image = Cv2.ImRead(paths[i], ImreadModes.Color);
+                    if (image == null || image.Empty())
+                    {
+                        Log($"[DEBUG] Image {i} is empty or null, skipping");
+                        continue;
+                    }
+
+                    Log($"[DEBUG] Image {i} loaded: {image.Cols}x{image.Rows}");
+
+                    if (image.Rows > 1200 || image.Cols > 1200)
+                    {
+                        double scale = 1200.0 / Math.Max(image.Rows, image.Cols);
+                        Log($"[DEBUG] Resizing image {i} with scale {scale}");
+                        Cv2.Resize(image, image, new Size(), scale, scale);
+                    }
+
+                    Log($"[DEBUG] Converting image {i} to grayscale");
+                    Mat gray = new Mat();
+                    Cv2.CvtColor(image, gray, ColorConversionCodes.BGR2GRAY);
+
+                    Log($"[DEBUG] Creating ViewInfo for image {i}");
+                    _views.Add(new ViewInfo
+                    {
+                        Index = i,
+                        Path = paths[i],
+                        Image = image,
+                        Gray = gray,
+                        Size = image.Size(),
+                        IsRegistered = false,
+                        P = Mat.Eye(3, 4, MatType.CV_64F)
+                    });
+                    Log($"[DEBUG] ViewInfo for image {i} created successfully");
                 }
-
-                Mat gray = new Mat();
-                Cv2.CvtColor(image, gray, ColorConversionCodes.BGR2GRAY);
-
-                _views.Add(new ViewInfo
+                catch (Exception ex)
                 {
-                    Index = i,
-                    Path = paths[i],
-                    Image = image,
-                    Gray = gray,
-                    Size = image.Size(),
-                    IsRegistered = false,
-                    P = Mat.Eye(3, 4, MatType.CV_64F)
-                });
+                    Log($"[DEBUG] Exception loading image {i}: {ex.Message}");
+                    Console.Error.WriteLine($"[SfM] Error loading image {i}: {ex}");
+                }
             }
 
             if (_views.Count < 2)
@@ -192,22 +250,35 @@ namespace Deep3DStudio.Model.SfM
 
             Log($"Loaded {_views.Count} images.");
 
-            // Initialize Intrinsics (Approximation)
-            var img = _views[0].Image;
-            double f = Math.Max(img.Width, img.Height) * 0.85;
-            double cx = img.Width / 2.0;
-            double cy = img.Height / 2.0;
+            try
+            {
+                // Initialize Intrinsics (Approximation)
+                Log("[DEBUG] Initializing intrinsics...");
+                var img = _views[0].Image;
+                double f = Math.Max(img.Width, img.Height) * 0.85;
+                double cx = img.Width / 2.0;
+                double cy = img.Height / 2.0;
 
-            _K = Mat.Eye(3, 3, MatType.CV_64F);
-            _K.Set(0, 0, f);
-            _K.Set(1, 1, f);
-            _K.Set(0, 2, cx);
-            _K.Set(1, 2, cy);
+                Log("[DEBUG] Creating K matrix...");
+                _K = Mat.Eye(3, 3, MatType.CV_64F);
+                _K.Set(0, 0, f);
+                _K.Set(1, 1, f);
+                _K.Set(0, 2, cx);
+                _K.Set(1, 2, cy);
 
-            // Initialize distortion coefficients (zeros = no distortion)
-            _distCoef = new Mat(1, 5, MatType.CV_64F, Scalar.All(0));
+                // Initialize distortion coefficients (zeros = no distortion)
+                Log("[DEBUG] Creating distCoef matrix...");
+                _distCoef = new Mat(1, 5, MatType.CV_64F, Scalar.All(0));
 
-            Log($"Estimated K:\n{_K.Dump()}");
+                Log($"Estimated K:\n{_K.Dump()}");
+                Log("[DEBUG] ImagesLoad completed successfully");
+            }
+            catch (Exception ex)
+            {
+                Log($"[DEBUG] Exception in intrinsics initialization: {ex.Message}");
+                Console.Error.WriteLine($"[SfM] Error initializing intrinsics: {ex}");
+                return false;
+            }
 
             return true;
         }
