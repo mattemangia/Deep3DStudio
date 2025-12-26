@@ -61,7 +61,7 @@ namespace Deep3DStudio.Model.SfM
 
         private void Log(string message)
         {
-            Log(message);
+            Console.WriteLine(message);
             _logCallback?.Invoke(message);
         }
 
