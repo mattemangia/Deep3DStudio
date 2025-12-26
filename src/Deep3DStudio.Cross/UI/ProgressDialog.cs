@@ -27,42 +27,68 @@ namespace Deep3DStudio.UI
         private static ProgressDialog? _instance;
         public static ProgressDialog Instance => _instance ??= new ProgressDialog();
 
-        // State
-        public bool IsVisible { get; private set; }
-        public string Title { get; private set; } = "Processing";
-        public float Progress { get; private set; }
-        public string StatusText { get; private set; } = "";
-        public OperationType OpType { get; private set; }
-        public ProgressState State { get; private set; } = ProgressState.Idle;
-        public CancellationTokenSource? CancellationTokenSource { get; private set; }
-
+        // State - use volatile/lock for thread safety as updates come from background threads
+        private readonly object _lock = new object();
+        private bool _isVisible;
+        private string _title = "Processing";
+        private float _progress;
+        private string _statusText = "";
+        private OperationType _opType;
+        private ProgressState _state = ProgressState.Idle;
         private StringBuilder _logBuffer = new StringBuilder();
         private bool _verboseExpanded = false;
         private string _errorMessage = "";
 
+        public bool IsVisible { get { lock (_lock) return _isVisible; } private set { lock (_lock) _isVisible = value; } }
+        public string Title { get { lock (_lock) return _title; } private set { lock (_lock) _title = value; } }
+        public float Progress { get { lock (_lock) return _progress; } private set { lock (_lock) _progress = value; } }
+        public string StatusText { get { lock (_lock) return _statusText; } private set { lock (_lock) _statusText = value; } }
+        public OperationType OpType { get { lock (_lock) return _opType; } private set { lock (_lock) _opType = value; } }
+        public ProgressState State { get { lock (_lock) return _state; } private set { lock (_lock) _state = value; } }
+        public CancellationTokenSource? CancellationTokenSource { get; private set; }
+
         public void Start(string title, OperationType type)
         {
-            Title = title;
-            OpType = type;
-            State = ProgressState.Running;
-            Progress = 0.0f;
-            StatusText = "Starting...";
-            _logBuffer.Clear();
-            _errorMessage = "";
-            IsVisible = true;
-            _verboseExpanded = false;
+            lock (_lock)
+            {
+                _title = title;
+                _opType = type;
+                _state = ProgressState.Running;
+                _progress = 0.0f;
+                _statusText = "Starting...";
+                _logBuffer.Clear();
+                _errorMessage = "";
+                _isVisible = true;
+                _verboseExpanded = false;
+            }
             CancellationTokenSource = new CancellationTokenSource();
         }
 
         public void Update(float progress, string status)
         {
-            Progress = progress;
-            StatusText = status;
+            lock (_lock)
+            {
+                _progress = progress;
+                _statusText = status;
+                // Also log for verbose output
+                _logBuffer.AppendLine(status);
+            }
         }
 
         public void Log(string message)
         {
-            _logBuffer.AppendLine(message);
+            lock (_lock)
+            {
+                _logBuffer.AppendLine(message);
+            }
+        }
+
+        private string GetLogText()
+        {
+            lock (_lock)
+            {
+                return _logBuffer.ToString();
+            }
         }
 
         public void Complete()
@@ -79,12 +105,15 @@ namespace Deep3DStudio.UI
 
         public void Fail(Exception ex)
         {
-            State = ProgressState.Error;
-            _errorMessage = ex.Message;
-            StatusText = "Error occurred";
-            Log($"ERROR: {ex.Message}");
-            Log(ex.StackTrace ?? "");
-            _verboseExpanded = true; // Auto expand on error
+            lock (_lock)
+            {
+                _state = ProgressState.Error;
+                _errorMessage = ex.Message;
+                _statusText = "Error occurred";
+                _logBuffer.AppendLine($"ERROR: {ex.Message}");
+                _logBuffer.AppendLine(ex.StackTrace ?? "");
+                _verboseExpanded = true; // Auto expand on error
+            }
         }
 
         public void Close()
@@ -178,15 +207,16 @@ namespace Deep3DStudio.UI
                     ImGui.Separator();
                     ImGui.BeginChild("LogRegion", new Vector2(0, -1), ImGuiChildFlags.Borders);
 
+                    string logText = GetLogText();
                     if (State == ProgressState.Error)
                     {
                         ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.4f, 0.4f, 1.0f)); // Red text
-                        ImGui.TextUnformatted(_logBuffer.ToString());
+                        ImGui.TextUnformatted(logText);
                         ImGui.PopStyleColor();
                     }
                     else
                     {
-                        ImGui.TextUnformatted(_logBuffer.ToString());
+                        ImGui.TextUnformatted(logText);
                     }
 
                     // Auto scroll

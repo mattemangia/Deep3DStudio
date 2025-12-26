@@ -52,7 +52,7 @@ namespace Deep3DStudio.Model.SfM
         private HashSet<int> _goodViews = new HashSet<int>();
 
         private Mat _K; // Shared K
-        private Mat _distCoef = new Mat(1, 5, MatType.CV_64F, Scalar.All(0));
+        private Mat _distCoef; // Lazy initialized to avoid native object issues
 
         private const float NN_MATCH_RATIO = 0.8f;
 
@@ -203,6 +203,9 @@ namespace Deep3DStudio.Model.SfM
             _K.Set(1, 1, f);
             _K.Set(0, 2, cx);
             _K.Set(1, 2, cy);
+
+            // Initialize distortion coefficients (zeros = no distortion)
+            _distCoef = new Mat(1, 5, MatType.CV_64F, Scalar.All(0));
 
             Log($"Estimated K:\n{_K.Dump()}");
 
@@ -443,9 +446,14 @@ namespace Deep3DStudio.Model.SfM
                 {
                     // Update projection matrix P = [R|t] (Extrinsics 3x4)
                     // P is used in TriangulateViews with normalized coordinates (UndistortPoints).
+                    view.P?.Dispose();
                     view.P = new Mat(3, 4, MatType.CV_64F);
-                    view.R.CopyTo(view.P.ColRange(0, 3));
-                    view.t.CopyTo(view.P.ColRange(3, 4));
+                    using (var Pcol03 = view.P.ColRange(0, 3))
+                    using (var Pcol34 = view.P.ColRange(3, 4))
+                    {
+                        view.R.CopyTo(Pcol03);
+                        view.t.CopyTo(Pcol34);
+                    }
                 }
             }
 
@@ -488,10 +496,10 @@ namespace Deep3DStudio.Model.SfM
                         pts2.Add(_views[t].Points2D[m.TrainIdx]);
                     }
 
-                    Mat mask = new Mat();
+                    using var mask = new Mat();
                     using var m1 = CreateMatFromPoint2d(pts1);
                     using var m2 = CreateMatFromPoint2d(pts2);
-                    Cv2.FindEssentialMat(m1, m2, _K, EssentialMatMethod.Ransac, 0.999, 1.0, mask);
+                    using var E = Cv2.FindEssentialMat(m1, m2, _K, EssentialMatMethod.Ransac, 0.999, 1.0, mask);
 
                     int eInliers = Cv2.CountNonZero(mask);
                     float ratio = (float)eInliers / matches.Length;
@@ -528,10 +536,10 @@ namespace Deep3DStudio.Model.SfM
             var pts1 = matches.Select(m => _views[q].Points2D[m.QueryIdx]).ToList();
             var pts2 = matches.Select(m => _views[t].Points2D[m.TrainIdx]).ToList();
 
-            Mat mask = new Mat();
+            using var mask = new Mat();
             using var m1 = CreateMatFromPoint2d(pts1);
             using var m2 = CreateMatFromPoint2d(pts2);
-            Cv2.FindHomography((InputArray)m1, (InputArray)m2, HomographyMethods.Ransac, 3.0, mask);
+            using var H = Cv2.FindHomography((InputArray)m1, (InputArray)m2, HomographyMethods.Ransac, 3.0, mask);
             return Cv2.CountNonZero(mask);
         }
 
@@ -547,28 +555,36 @@ namespace Deep3DStudio.Model.SfM
 
             if (aligned1.Count <= 5) return false;
 
-            Mat mask = new Mat();
-
+            using var mask = new Mat();
             using var m1 = CreateMatFromPoint2d(aligned1);
             using var m2 = CreateMatFromPoint2d(aligned2);
 
-            Mat E = Cv2.FindEssentialMat((InputArray)m1, (InputArray)m2, K, EssentialMatMethod.Ransac, 0.999, 1.0, mask);
+            using var E = Cv2.FindEssentialMat((InputArray)m1, (InputArray)m2, K, EssentialMatMethod.Ransac, 0.999, 1.0, mask);
 
             if (E.Rows != 3 || E.Cols != 3) return false;
 
-            Mat R = new Mat();
-            Mat T = new Mat();
+            using var R = new Mat();
+            using var T = new Mat();
 
             int valid = Cv2.RecoverPose((InputArray)E, (InputArray)m1, (InputArray)m2, K, R, T, mask);
 
             if (valid < 5) return false;
 
-            if (R.Type() != MatType.CV_64F) R.ConvertTo(R, MatType.CV_64F);
-            if (T.Type() != MatType.CV_64F) T.ConvertTo(T, MatType.CV_64F);
+            using var R_conv = R.Type() != MatType.CV_64F ? R.Clone() : null;
+            using var T_conv = T.Type() != MatType.CV_64F ? T.Clone() : null;
+
+            Mat R_use = R;
+            Mat T_use = T;
+            if (R.Type() != MatType.CV_64F) { R.ConvertTo(R_conv, MatType.CV_64F); R_use = R_conv; }
+            if (T.Type() != MatType.CV_64F) { T.ConvertTo(T_conv, MatType.CV_64F); T_use = T_conv; }
 
             Pright = new Mat(3, 4, MatType.CV_64F);
-            R.CopyTo(Pright.ColRange(0, 3));
-            T.CopyTo(Pright.ColRange(3, 4));
+            using (var Pcol03 = Pright.ColRange(0, 3))
+            using (var Pcol34 = Pright.ColRange(3, 4))
+            {
+                R_use.CopyTo(Pcol03);
+                T_use.CopyTo(Pcol34);
+            }
 
             Pleft = Mat.Eye(3, 4, MatType.CV_64F);
 
@@ -589,10 +605,6 @@ namespace Deep3DStudio.Model.SfM
 
             if (aligned1.Count == 0) return false;
 
-            // Undistort / Normalize
-            Mat norm1 = new Mat();
-            Mat norm2 = new Mat();
-
             // Convert to Point2f for UndistortPoints
             var aligned1f = aligned1.Select(p => new Point2f((float)p.X, (float)p.Y)).ToList();
             var aligned2f = aligned2.Select(p => new Point2f((float)p.X, (float)p.Y)).ToList();
@@ -600,27 +612,37 @@ namespace Deep3DStudio.Model.SfM
             using var m1 = CreateMatFromPoint2f(aligned1f);
             using var m2 = CreateMatFromPoint2f(aligned2f);
 
+            // Undistort / Normalize
+            using var norm1 = new Mat();
+            using var norm2 = new Mat();
             Cv2.UndistortPoints((InputArray)m1, norm1, K, _distCoef);
             Cv2.UndistortPoints((InputArray)m2, norm2, K, _distCoef);
 
-            Mat pts4D = new Mat();
+            using var pts4D = new Mat();
             Cv2.TriangulatePoints(P1, P2, norm1, norm2, pts4D);
-            if (pts4D.Type() != MatType.CV_64F) pts4D.ConvertTo(pts4D, MatType.CV_64F);
 
-            Mat pts3D = new Mat();
-            Cv2.ConvertPointsFromHomogeneous(pts4D.T(), pts3D);
+            using var pts4D_transposed = pts4D.T();
+            using var pts4D_64F = pts4D.Type() != MatType.CV_64F ? new Mat() : null;
+            if (pts4D.Type() != MatType.CV_64F) pts4D.ConvertTo(pts4D_64F, MatType.CV_64F);
 
-            // Reprojection check
-            Mat rvec1 = new Mat(); Mat tvec1 = P1.ColRange(3, 4);
-            Cv2.Rodrigues(P1.ColRange(0, 3), rvec1);
+            using var pts3D = new Mat();
+            Cv2.ConvertPointsFromHomogeneous(pts4D_transposed, pts3D);
 
-            Mat rvec2 = new Mat(); Mat tvec2 = P2.ColRange(3, 4);
-            Cv2.Rodrigues(P2.ColRange(0, 3), rvec2);
+            // Reprojection check - extract rotation and translation parts
+            using var R1_part = P1.ColRange(0, 3);
+            using var t1_part = P1.ColRange(3, 4);
+            using var R2_part = P2.ColRange(0, 3);
+            using var t2_part = P2.ColRange(3, 4);
 
-            Mat proj1 = new Mat();
-            Mat proj2 = new Mat();
-            Cv2.ProjectPoints(pts3D, rvec1, tvec1, K, _distCoef, proj1);
-            Cv2.ProjectPoints(pts3D, rvec2, tvec2, K, _distCoef, proj2);
+            using var rvec1 = new Mat();
+            using var rvec2 = new Mat();
+            Cv2.Rodrigues(R1_part, rvec1);
+            Cv2.Rodrigues(R2_part, rvec2);
+
+            using var proj1 = new Mat();
+            using var proj2 = new Mat();
+            Cv2.ProjectPoints(pts3D, rvec1, t1_part, K, _distCoef, proj1);
+            Cv2.ProjectPoints(pts3D, rvec2, t2_part, K, _distCoef, proj2);
 
             float minReprojError = 6.0f;
 
@@ -694,9 +716,9 @@ namespace Deep3DStudio.Model.SfM
             P = null;
             if (pts3D.Count < 6) return false;
 
-            Mat rvec = new Mat();
-            Mat tvec = new Mat();
-            Mat inliers = new Mat();
+            using var rvec = new Mat();
+            using var tvec = new Mat();
+            using var inliers = new Mat();
 
             // SolvePnPRansac can take double (CV_64F)
             using var m3d = CreateMatFromPoint3d(pts3D);
@@ -709,17 +731,29 @@ namespace Deep3DStudio.Model.SfM
 
             if (Cv2.Norm(tvec) > 500.0) return false;
 
-            Mat R = new Mat();
+            using var R = new Mat();
             Cv2.Rodrigues(rvec, R);
 
             if (Math.Abs(Cv2.Determinant(R) - 1.0) > 1e-5) return false;
 
             P = new Mat(3, 4, MatType.CV_64F);
-            if(R.Type() != MatType.CV_64F) R.ConvertTo(R, MatType.CV_64F);
-            if(tvec.Type() != MatType.CV_64F) tvec.ConvertTo(tvec, MatType.CV_64F);
 
-            R.CopyTo(P.ColRange(0, 3));
-            tvec.CopyTo(P.ColRange(3, 4));
+            // Handle type conversion with proper disposal
+            using var R_64F = R.Type() != MatType.CV_64F ? new Mat() : null;
+            using var tvec_64F = tvec.Type() != MatType.CV_64F ? new Mat() : null;
+
+            Mat R_use = R;
+            Mat tvec_use = tvec;
+
+            if (R.Type() != MatType.CV_64F) { R.ConvertTo(R_64F, MatType.CV_64F); R_use = R_64F; }
+            if (tvec.Type() != MatType.CV_64F) { tvec.ConvertTo(tvec_64F, MatType.CV_64F); tvec_use = tvec_64F; }
+
+            using (var Pcol03 = P.ColRange(0, 3))
+            using (var Pcol34 = P.ColRange(3, 4))
+            {
+                R_use.CopyTo(Pcol03);
+                tvec_use.CopyTo(Pcol34);
+            }
 
             return true;
         }
@@ -766,8 +800,12 @@ namespace Deep3DStudio.Model.SfM
 
         private void DecomposeP(Mat P, out Mat R, out Mat t)
         {
-            R = P.ColRange(0, 3).Clone();
-            t = P.ColRange(3, 4).Clone();
+            using (var Rcol = P.ColRange(0, 3))
+            using (var tcol = P.ColRange(3, 4))
+            {
+                R = Rcol.Clone();
+                t = tcol.Clone();
+            }
         }
 
         private Scalar GetColor(Mat img, Point2d pt)
@@ -871,25 +909,32 @@ namespace Deep3DStudio.Model.SfM
 
         private void CleanupResources()
         {
-            // Dispose all Mat objects in views
-            foreach (var view in _views)
+            try
             {
-                view.Image?.Dispose();
-                view.Gray?.Dispose();
-                view.Descriptors?.Dispose();
-                view.P?.Dispose();
-                view.R?.Dispose();
-                view.t?.Dispose();
+                // Dispose all Mat objects in views
+                foreach (var view in _views)
+                {
+                    try { view.Image?.Dispose(); } catch { }
+                    try { view.Gray?.Dispose(); } catch { }
+                    try { view.Descriptors?.Dispose(); } catch { }
+                    try { view.P?.Dispose(); } catch { }
+                    try { view.R?.Dispose(); } catch { }
+                    try { view.t?.Dispose(); } catch { }
+                }
+                _views.Clear();
+
+                // Dispose shared matrices and set to null to prevent double-free
+                try { _K?.Dispose(); } catch { }
+                _K = null;
+                try { _distCoef?.Dispose(); } catch { }
+                _distCoef = null;
+
+                Log("[SfM] Resources cleaned up.");
             }
-            _views.Clear();
-
-            // Dispose shared matrices and set to null to prevent double-free
-            _K?.Dispose();
-            _K = null;
-            _distCoef?.Dispose();
-            _distCoef = null;
-
-            Log("[SfM] Resources cleaned up.");
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[SfM] Error during cleanup: {ex.Message}");
+            }
         }
 
         public void Dispose()
@@ -902,17 +947,19 @@ namespace Deep3DStudio.Model.SfM
         {
             if (!_disposed)
             {
+                _disposed = true;  // Set first to prevent re-entry
                 if (disposing)
                 {
                     CleanupResources();
                 }
-                _disposed = true;
             }
         }
 
         ~SfMInference()
         {
-            Dispose(false);
+            // Suppress finalization - don't clean up native resources from finalizer
+            // as the native library may already be unloaded
+            // The proper disposal should happen through the using block
         }
     }
 }
