@@ -805,23 +805,25 @@ namespace Deep3DStudio.Model.SfM
             {
                 if (!view.IsRegistered) continue;
 
-                Mat R_wc = view.R.T();
-                Mat C_wc = (-R_wc * view.t).ToMat();
+                // Use using statements to ensure proper disposal of temporary Mat objects
+                using Mat R_wc = view.R.T();
+                using Mat negR_wc_t = -R_wc * view.t;
+                using Mat C_wc = negR_wc_t.ToMat();
 
                 Vector3 pos = new Vector3((float)C_wc.At<double>(0), -(float)C_wc.At<double>(1), -(float)C_wc.At<double>(2));
 
-                Mat R_gl = new Mat(3, 3, MatType.CV_64F);
-                R_gl.Set(0, 0, view.R.At<double>(0, 0));
-                R_gl.Set(0, 1, -view.R.At<double>(0, 1));
-                R_gl.Set(0, 2, -view.R.At<double>(0, 2));
-                R_gl.Set(1, 0, -view.R.At<double>(1, 0));
-                R_gl.Set(1, 1, view.R.At<double>(1, 1));
-                R_gl.Set(1, 2, view.R.At<double>(1, 2));
-                R_gl.Set(2, 0, -view.R.At<double>(2, 0));
-                R_gl.Set(2, 1, view.R.At<double>(2, 1));
-                R_gl.Set(2, 2, view.R.At<double>(2, 2));
+                using Mat R_gl_temp = new Mat(3, 3, MatType.CV_64F);
+                R_gl_temp.Set(0, 0, view.R.At<double>(0, 0));
+                R_gl_temp.Set(0, 1, -view.R.At<double>(0, 1));
+                R_gl_temp.Set(0, 2, -view.R.At<double>(0, 2));
+                R_gl_temp.Set(1, 0, -view.R.At<double>(1, 0));
+                R_gl_temp.Set(1, 1, view.R.At<double>(1, 1));
+                R_gl_temp.Set(1, 2, view.R.At<double>(1, 2));
+                R_gl_temp.Set(2, 0, -view.R.At<double>(2, 0));
+                R_gl_temp.Set(2, 1, view.R.At<double>(2, 1));
+                R_gl_temp.Set(2, 2, view.R.At<double>(2, 2));
 
-                R_gl = R_gl.T();
+                using Mat R_gl = R_gl_temp.T();
 
                 var m4 = Matrix4.Identity;
                 m4.M11 = (float)R_gl.At<double>(0, 0); m4.M12 = (float)R_gl.At<double>(0, 1); m4.M13 = (float)R_gl.At<double>(0, 2);
