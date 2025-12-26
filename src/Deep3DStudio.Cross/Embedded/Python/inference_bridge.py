@@ -178,6 +178,33 @@ def load_model(model_name, weights_path, device=None):
     try:
         if model_name == 'dust3r':
             report_progress("load", 0.2, "Importing Dust3r module...")
+
+            # Check and fix croco dependency before importing dust3r
+            try:
+                import dust3r
+                dust3r_path = os.path.dirname(dust3r.__file__)
+                croco_path = os.path.join(os.path.dirname(dust3r_path), 'croco')
+                croco_models_path = os.path.join(croco_path, 'models')
+
+                # Create croco stub if missing
+                if not os.path.exists(croco_models_path):
+                    report_progress("load", 0.15, "Creating croco dependency...")
+                    os.makedirs(croco_models_path, exist_ok=True)
+
+                    # Create __init__.py files
+                    with open(os.path.join(croco_path, '__init__.py'), 'w') as f:
+                        f.write('# CroCo stub for dust3r\n')
+                    with open(os.path.join(croco_models_path, '__init__.py'), 'w') as f:
+                        f.write('# CroCo models stub\n')
+
+                    # Add to path
+                    if croco_path not in sys.path:
+                        sys.path.insert(0, os.path.dirname(croco_path))
+
+                    print(f"Created croco stub at {croco_path}")
+            except Exception as e:
+                print(f"Warning: Could not setup croco: {e}")
+
             from dust3r.model import AsymmetricCroCo3DStereo
             report_progress("load", 0.4, "Loading Dust3r weights...")
             model = AsymmetricCroCo3DStereo.from_pretrained(weights_path)

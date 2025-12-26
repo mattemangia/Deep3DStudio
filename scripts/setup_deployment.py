@@ -27,7 +27,7 @@ MODELS = {
     "dust3r": {
         "repo": "https://github.com/naver/dust3r.git",
         "weights": "https://download.europe.naverlabs.com/ComputerVision/DUSt3R/DUSt3R_ViTLarge_BaseDecoder_512_dpt.pth",
-        "files": ["dust3r/"],
+        "files": ["dust3r/", "croco/"],  # Include croco submodule required by dust3r
         "requirements": ["torch", "torchvision", "einops", "opencv-python", "kornia", "trimesh"]
     },
     "triposr": {
@@ -592,7 +592,8 @@ def setup_models(models_dir, python_dir, target_platform):
 
         try:
             print(f"Cloning {config['repo']}...")
-            subprocess.check_call(["git", "clone", "--depth", "1", config["repo"], temp_repo])
+            # Use --recursive to get submodules (e.g., croco for dust3r)
+            subprocess.check_call(["git", "clone", "--depth", "1", "--recursive", config["repo"], temp_repo])
 
             # 3. Copy specified packages to site-packages
             for file_pattern in config["files"]:
