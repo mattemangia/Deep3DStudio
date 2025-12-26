@@ -276,7 +276,15 @@ namespace Deep3DStudio.Model.AIModels
                                 progressCallback?.Invoke("Attempting Dust3r reconstruction...", progress);
 
                                 // Try Dust3r first - it will attempt to initialize internally
-                                var dust3rResult = Dust3r?.ReconstructScene(imagePaths);
+                                SceneResult? dust3rResult = null;
+                                try
+                                {
+                                    dust3rResult = Dust3r?.ReconstructScene(imagePaths);
+                                }
+                                catch (Exception ex)
+                                {
+                                    progressCallback?.Invoke($"Dust3r failed: {ex.Message}", progress);
+                                }
 
                                 // Check if Dust3r succeeded (has actual mesh data)
                                 if (dust3rResult != null && dust3rResult.Meshes.Count > 0 &&
@@ -288,17 +296,28 @@ namespace Deep3DStudio.Model.AIModels
                                 else
                                 {
                                     // Fall back to SfM (Feature Matching)
-                                    progressCallback?.Invoke("Dust3r not available or failed, using Feature Matching SfM...", progress);
-                                    var sfm = new SfMInference();
-                                    currentResult = sfm.ReconstructScene(imagePaths);
+                                    progressCallback?.Invoke("Dust3r not available or failed, trying Feature Matching SfM...", progress);
+                                    try
+                                    {
+                                        var sfm = new SfMInference();
+                                        currentResult = sfm.ReconstructScene(imagePaths);
 
-                                    if (currentResult.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
-                                    {
-                                        progressCallback?.Invoke($"SfM reconstruction complete. {currentResult.Meshes[0].Vertices.Count} points.", progress + 0.1f);
+                                        if (currentResult.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
+                                        {
+                                            progressCallback?.Invoke($"SfM reconstruction complete. {currentResult.Meshes[0].Vertices.Count} points.", progress + 0.1f);
+                                        }
+                                        else
+                                        {
+                                            progressCallback?.Invoke("SfM reconstruction failed - no points generated.", progress);
+                                        }
                                     }
-                                    else
+                                    catch (TypeInitializationException ex)
                                     {
-                                        progressCallback?.Invoke("SfM reconstruction failed - no points generated.", progress);
+                                        progressCallback?.Invoke($"SfM unavailable (OpenCV native libraries not found): {ex.InnerException?.Message ?? ex.Message}", progress);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        progressCallback?.Invoke($"SfM failed: {ex.Message}", progress);
                                     }
                                 }
                             }
@@ -308,16 +327,27 @@ namespace Deep3DStudio.Model.AIModels
                             if (imagePaths != null && imagePaths.Count >= 2)
                             {
                                 progressCallback?.Invoke($"Running Feature Matching SfM with {imagePaths.Count} images...", progress);
-                                var sfm = new SfMInference();
-                                currentResult = sfm.ReconstructScene(imagePaths);
+                                try
+                                {
+                                    var sfm = new SfMInference();
+                                    currentResult = sfm.ReconstructScene(imagePaths);
 
-                                if (currentResult.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
-                                {
-                                    progressCallback?.Invoke($"SfM complete. Generated {currentResult.Meshes[0].Vertices.Count} points from {currentResult.Poses.Count} cameras.", progress + 0.1f);
+                                    if (currentResult.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
+                                    {
+                                        progressCallback?.Invoke($"SfM complete. Generated {currentResult.Meshes[0].Vertices.Count} points from {currentResult.Poses.Count} cameras.", progress + 0.1f);
+                                    }
+                                    else
+                                    {
+                                        progressCallback?.Invoke("SfM reconstruction failed - insufficient feature matches or images.", progress);
+                                    }
                                 }
-                                else
+                                catch (TypeInitializationException ex)
                                 {
-                                    progressCallback?.Invoke("SfM reconstruction failed - insufficient feature matches or images.", progress);
+                                    progressCallback?.Invoke($"SfM unavailable - OpenCV native libraries not found. Please install OpenCV or use Dust3r instead. Error: {ex.InnerException?.Message ?? ex.Message}", progress);
+                                }
+                                catch (Exception ex)
+                                {
+                                    progressCallback?.Invoke($"SfM failed: {ex.Message}", progress);
                                 }
                             }
                             else if (imagePaths != null && imagePaths.Count < 2)
