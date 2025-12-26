@@ -108,6 +108,14 @@ namespace Deep3DStudio.Model.SfM
                 _featureToPointMap.Clear();
                 _doneViews.Clear();
                 _goodViews.Clear();
+
+                // Dispose any existing Mat objects to ensure clean state
+                // This is important when falling back from other methods that may have corrupted memory
+                try { _K?.Dispose(); } catch { }
+                _K = null;
+                try { _distCoef?.Dispose(); } catch { }
+                _distCoef = null;
+
                 Log("[DEBUG] Data structures cleared");
 
                 // 1. Load Images & Extract Features

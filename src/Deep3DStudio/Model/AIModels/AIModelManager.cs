@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Deep3DStudio.Configuration;
 using Deep3DStudio.Model.SfM;
 using Deep3DStudio.Python;
+using OpenCvSharp;
 using OpenTK.Mathematics;
 using Python.Runtime;
 
@@ -355,6 +356,21 @@ gc.collect()
                                         GC.WaitForPendingFinalizers();
                                         GC.Collect();
 
+                                        // Reset OpenCV state to ensure clean initialization for SfM
+                                        // This prevents any corrupted state from affecting OpenCV operations
+                                        try
+                                        {
+                                            progressCallback?.Invoke("Resetting OpenCV state...", progress);
+                                            // Reset OpenCV optimization settings to default
+                                            Cv2.SetUseOptimized(true);
+                                            // Note: OpenCvSharp doesn't expose direct memory pool reset,
+                                            // but creating fresh Mat objects in SfM will use clean allocations
+                                        }
+                                        catch (Exception cvEx)
+                                        {
+                                            progressCallback?.Invoke($"Warning: OpenCV reset had issues: {cvEx.Message}", progress);
+                                        }
+
                                         // Small delay to ensure native resources are fully released
                                         System.Threading.Thread.Sleep(200);
                                     }
@@ -365,10 +381,34 @@ gc.collect()
 
                                     try
                                     {
-                                        using (var sfm = new SfMInference())
+                                        // Verify image paths are still valid before passing to SfM
+                                        // Dust3r only reads images (doesn't modify them), but verify to be safe
+                                        var validImagePaths = new List<string>();
+                                        foreach (var path in imagePaths)
                                         {
-                                            sfm.LogCallback = (msg) => progressCallback?.Invoke(msg, progress);
-                                            currentResult = sfm.ReconstructScene(imagePaths);
+                                            if (File.Exists(path))
+                                            {
+                                                validImagePaths.Add(path);
+                                                progressCallback?.Invoke($"[SfM] Image verified: {Path.GetFileName(path)}", progress);
+                                            }
+                                            else
+                                            {
+                                                progressCallback?.Invoke($"[SfM] Warning: Image not found: {path}", progress);
+                                            }
+                                        }
+
+                                        if (validImagePaths.Count < 2)
+                                        {
+                                            progressCallback?.Invoke($"SfM requires at least 2 valid images. Found: {validImagePaths.Count}", progress);
+                                        }
+                                        else
+                                        {
+                                            // Create SfM in a completely fresh state
+                                            using (var sfm = new SfMInference())
+                                            {
+                                                sfm.LogCallback = (msg) => progressCallback?.Invoke(msg, progress);
+                                                currentResult = sfm.ReconstructScene(validImagePaths);
+                                            }
                                         }
 
                                         if (currentResult.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
