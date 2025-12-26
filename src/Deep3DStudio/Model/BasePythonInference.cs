@@ -164,7 +164,9 @@ namespace Deep3DStudio.Model
 
                         dynamic types = Py.Import("types");
                         _bridgeModule = types.ModuleType("deep3dstudio_bridge");
-                        PythonEngine.Exec(scriptContent, _bridgeModule.__dict__);
+                        // Use Python's built-in exec instead of PythonEngine.Exec to avoid protection level issues
+                        dynamic builtins = Py.Import("builtins");
+                        builtins.exec(scriptContent, _bridgeModule.__dict__);
                         sys.modules["deep3dstudio_bridge"] = _bridgeModule;
                     }
 
