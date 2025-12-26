@@ -81,7 +81,7 @@ namespace Deep3DStudio.Model
                 {
                     ReportProgress("init", 0.05f, "Loading inference bridge...");
                     dynamic sys = Py.Import("sys");
-                    if (sys.modules.Contains("deep3dstudio_bridge"))
+                    if (sys.modules.__contains__("deep3dstudio_bridge"))
                     {
                         _bridgeModule = sys.modules["deep3dstudio_bridge"];
                     }

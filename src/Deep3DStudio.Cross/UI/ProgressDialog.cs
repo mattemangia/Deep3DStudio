@@ -99,16 +99,19 @@ namespace Deep3DStudio.UI
         {
             if (!IsVisible) return;
 
-            // Flags: NoTitleBar, NoResize, NoCollapse, NoSavedSettings
-            // We use Begin to make it a window on top.
-            ImGui.SetNextWindowSize(new Vector2(500, _verboseExpanded ? 400 : 180), ImGuiCond.Always);
+            // Make the dialog resizable, bigger on error, with minimum size constraints
+            float defaultWidth = State == ProgressState.Error ? 700 : 500;
+            float defaultHeight = _verboseExpanded ? (State == ProgressState.Error ? 500 : 400) : 180;
 
-            // Center
+            ImGui.SetNextWindowSizeConstraints(new Vector2(400, 150), new Vector2(1200, 800));
+            ImGui.SetNextWindowSize(new Vector2(defaultWidth, defaultHeight), ImGuiCond.Appearing);
+
+            // Center only on first appearance
             var viewport = ImGui.GetMainViewport();
             var center = viewport.GetCenter();
-            ImGui.SetNextWindowPos(center, ImGuiCond.Always, new Vector2(0.5f, 0.5f));
+            ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
 
-            if (ImGui.Begin(Title, ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoResize))
+            if (ImGui.Begin(Title, ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoSavedSettings))
             {
                 // 1. Progress Bar
                 Vector4 barColor;
