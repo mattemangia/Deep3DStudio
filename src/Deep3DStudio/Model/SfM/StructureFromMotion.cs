@@ -844,7 +844,31 @@ namespace Deep3DStudio.Model.SfM
                 });
             }
 
+            // Clean up OpenCV Mat objects to prevent crashes during garbage collection
+            CleanupResources();
+
             return result;
+        }
+
+        private void CleanupResources()
+        {
+            // Dispose all Mat objects in views
+            foreach (var view in _views)
+            {
+                view.Image?.Dispose();
+                view.Gray?.Dispose();
+                view.Descriptors?.Dispose();
+                view.P?.Dispose();
+                view.R?.Dispose();
+                view.t?.Dispose();
+            }
+            _views.Clear();
+
+            // Dispose shared matrices
+            _K?.Dispose();
+            _distCoef?.Dispose();
+
+            Console.WriteLine("[SfM] Resources cleaned up.");
         }
 
     }

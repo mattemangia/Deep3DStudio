@@ -54,13 +54,79 @@ namespace Deep3DStudio.Model
                     }
                     else
                     {
-                        var assembly = Assembly.GetExecutingAssembly();
-                        var resourceName = "Deep3DStudio.Embedded.Python.inference_bridge.py";
-                        string scriptContent;
-                        using (Stream stream = assembly.GetManifestResourceStream(resourceName))
-                        using (StreamReader reader = new StreamReader(stream))
+                        // Try to find the embedded resource from any loaded assembly
+                        string scriptContent = null;
+                        string[] possibleNames = new[]
                         {
-                            scriptContent = reader.ReadToEnd();
+                            "Deep3DStudio.Embedded.Python.inference_bridge.py",
+                            "Deep3DStudio.Cross.Embedded.Python.inference_bridge.py"
+                        };
+
+                        // Try all loaded assemblies, starting with entry and executing
+                        var assemblyList = new List<Assembly>();
+                        if (Assembly.GetEntryAssembly() != null) assemblyList.Add(Assembly.GetEntryAssembly());
+                        if (Assembly.GetExecutingAssembly() != null) assemblyList.Add(Assembly.GetExecutingAssembly());
+                        if (Assembly.GetCallingAssembly() != null) assemblyList.Add(Assembly.GetCallingAssembly());
+                        assemblyList.AddRange(AppDomain.CurrentDomain.GetAssemblies()
+                            .Where(a => a.FullName?.Contains("Deep3DStudio") == true));
+
+                        foreach (var assembly in assemblyList.Distinct())
+                        {
+                            if (assembly == null) continue;
+
+                            var allResources = assembly.GetManifestResourceNames();
+                            Console.WriteLine($"[Dust3r] Checking assembly '{assembly.GetName().Name}' with {allResources.Length} resources");
+
+                            // Try known names first
+                            foreach (var resourceName in possibleNames)
+                            {
+                                if (allResources.Contains(resourceName))
+                                {
+                                    Console.WriteLine($"[Dust3r] Found exact match: {resourceName}");
+                                    using (Stream stream = assembly.GetManifestResourceStream(resourceName))
+                                    {
+                                        if (stream != null)
+                                        {
+                                            using (StreamReader reader = new StreamReader(stream))
+                                            {
+                                                scriptContent = reader.ReadToEnd();
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (scriptContent != null) break;
+
+                            // Fallback: search by filename
+                            var match = allResources.FirstOrDefault(r => r.EndsWith("inference_bridge.py"));
+                            if (match != null)
+                            {
+                                Console.WriteLine($"[Dust3r] Found by suffix: {match}");
+                                using (Stream stream = assembly.GetManifestResourceStream(match))
+                                {
+                                    if (stream != null)
+                                    {
+                                        using (StreamReader reader = new StreamReader(stream))
+                                        {
+                                            scriptContent = reader.ReadToEnd();
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Log all resources for debugging
+                            if (allResources.Length > 0 && allResources.Length < 20)
+                            {
+                                Console.WriteLine($"[Dust3r] Available resources in {assembly.GetName().Name}: {string.Join(", ", allResources)}");
+                            }
+                        }
+
+                        if (string.IsNullOrEmpty(scriptContent))
+                        {
+                            throw new FileNotFoundException("Could not find embedded resource 'inference_bridge.py' in any assembly. Check that it's included as EmbeddedResource in the .csproj file.");
                         }
 
                         dynamic types = Py.Import("types");
