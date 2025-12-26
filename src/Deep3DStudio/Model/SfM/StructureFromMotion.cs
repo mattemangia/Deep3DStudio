@@ -9,8 +9,9 @@ using Deep3DStudio.Model;
 
 namespace Deep3DStudio.Model.SfM
 {
-    public class SfMInference
+    public class SfMInference : IDisposable
     {
+        private bool _disposed = false;
         // -----------------------------------------------------------------------
         // Internal Data Structures matching the C++ logic
         // -----------------------------------------------------------------------
@@ -55,18 +56,35 @@ namespace Deep3DStudio.Model.SfM
 
         private const float NN_MATCH_RATIO = 0.8f;
 
+        // Log callback - logs to both console and callback (for progress dialog)
+        private Action<string>? _logCallback;
+
+        private void Log(string message)
+        {
+            Log(message);
+            _logCallback?.Invoke(message);
+        }
+
         // -----------------------------------------------------------------------
         // Public Interface
         // -----------------------------------------------------------------------
+
+        /// <summary>
+        /// Sets a callback for log messages. Messages will be sent to both console and this callback.
+        /// </summary>
+        public Action<string>? LogCallback
+        {
+            set => _logCallback = value;
+        }
 
         public SceneResult ReconstructScene(List<string> imagePaths)
         {
             var result = new SceneResult();
             if (imagePaths.Count < 2) return result;
 
-            Console.WriteLine("************************************************");
-            Console.WriteLine("              3D MAPPING (C# Port)              ");
-            Console.WriteLine("************************************************");
+            Log("************************************************");
+            Log("              3D MAPPING (C# Port)              ");
+            Log("************************************************");
 
             // Apply Computation Device Settings
             ConfigureOpenCV();
@@ -113,11 +131,11 @@ namespace Deep3DStudio.Model.SfM
                 // Cv2.Ocl class was removed/moved in newer OpenCVSharp or usage is different.
                 // Assuming default optimization is sufficient or Ocl is not directly accessible.
                 // Just use SetUseOptimized.
-                Console.WriteLine("SfM: Optimization enabled.");
+                Log("SfM: Optimization enabled.");
                 }
                 catch (Exception ex)
                 {
-                Console.WriteLine($"SfM: Failed to enable optimizations: {ex.Message}.");
+                Log($"SfM: Failed to enable optimizations: {ex.Message}.");
                 }
             }
             else
@@ -125,7 +143,7 @@ namespace Deep3DStudio.Model.SfM
                 // Force CPU
                 Cv2.SetUseOptimized(true);
             // Cv2.Ocl.SetUseOpenCL(false); // Removed
-                Console.WriteLine("SfM: CPU mode enforced.");
+                Log("SfM: CPU mode enforced.");
             }
         }
 
@@ -135,7 +153,7 @@ namespace Deep3DStudio.Model.SfM
 
         private bool ImagesLoad(List<string> paths)
         {
-            Console.WriteLine("Getting images...");
+            Log("Getting images...");
             _views.Clear();
 
             for (int i = 0; i < paths.Count; i++)
@@ -172,7 +190,7 @@ namespace Deep3DStudio.Model.SfM
                 return false;
             }
 
-            Console.WriteLine($"Loaded {_views.Count} images.");
+            Log($"Loaded {_views.Count} images.");
 
             // Initialize Intrinsics (Approximation)
             var img = _views[0].Image;
@@ -186,14 +204,14 @@ namespace Deep3DStudio.Model.SfM
             _K.Set(0, 2, cx);
             _K.Set(1, 2, cy);
 
-            Console.WriteLine($"Estimated K:\n{_K.Dump()}");
+            Log($"Estimated K:\n{_K.Dump()}");
 
             return true;
         }
 
         private void ExtractFeatures()
         {
-            Console.WriteLine("Extracting features from all images (ORB)...");
+            Log("Extracting features from all images (ORB)...");
             using var detector = ORB.Create(nFeatures: 5000);
 
             foreach (var view in _views)
@@ -206,7 +224,7 @@ namespace Deep3DStudio.Model.SfM
                 view.Descriptors = desc;
                 view.Points2D = kps.Select(k => new Point2d(k.Pt.X, k.Pt.Y)).ToList();
 
-                Console.WriteLine($"Image {view.Index} --> {kps.Length} kps");
+                Log($"Image {view.Index} --> {kps.Length} kps");
             }
         }
 
@@ -215,7 +233,7 @@ namespace Deep3DStudio.Model.SfM
             var bestViews = FindBestPair();
             if (bestViews.Count == 0)
             {
-                Console.WriteLine("Could not obtain a good pair for baseline reconstruction.");
+                Log("Could not obtain a good pair for baseline reconstruction.");
                 return false;
             }
 
@@ -225,14 +243,14 @@ namespace Deep3DStudio.Model.SfM
             int queryIdx = pair.Key;
             int trainIdx = pair.Value;
 
-            Console.WriteLine($"Best pair: [{queryIdx}, {trainIdx}] Score: {score}");
+            Log($"Best pair: [{queryIdx}, {trainIdx}] Score: {score}");
 
             var matches = GetMatching(queryIdx, trainIdx);
 
             Mat Pleft = Mat.Eye(3, 4, MatType.CV_64F);
             Mat Pright = new Mat();
 
-            Console.WriteLine("Estimating camera pose with Essential Matrix...");
+            Log("Estimating camera pose with Essential Matrix...");
             if (!GetCameraPose(_K, queryIdx, trainIdx, matches, _views[queryIdx].Points2D, _views[trainIdx].Points2D, ref Pleft, ref Pright))
             {
                 Console.Error.WriteLine("Failed to get camera pose.");
@@ -290,8 +308,8 @@ namespace Deep3DStudio.Model.SfM
                 {
                     if (_doneViews.Contains(newViewIdx)) continue;
 
-                    Console.WriteLine("\n====================================");
-                    Console.WriteLine($"Processing view {newViewIdx}...");
+                    Log("\n====================================");
+                    Log($"Processing view {newViewIdx}...");
 
                     List<Point3d> points3D = new List<Point3d>();
                     List<Point2d> points2D = new List<Point2d>();
@@ -300,12 +318,12 @@ namespace Deep3DStudio.Model.SfM
 
                     Find2D3DMatches(newViewIdx, out points3D, out points2D, out bestMatches, out doneViewRef);
 
-                    Console.WriteLine($"Found {points3D.Count} 2D-3D correspondences.");
+                    Log($"Found {points3D.Count} 2D-3D correspondences.");
 
                     Mat Pnew = new Mat();
                     if (!FindCameraPosePNP(_K, points3D, points2D, out Pnew))
                     {
-                        Console.WriteLine("PNP failed or not enough inliers. Skipping view.");
+                        Log("PNP failed or not enough inliers. Skipping view.");
                         continue;
                     }
 
@@ -339,8 +357,8 @@ namespace Deep3DStudio.Model.SfM
                 if (!anyAdded) break;
             }
 
-            Console.WriteLine($"\nImages processed: {_doneViews.Count}/{_views.Count}");
-            Console.WriteLine($"PointCloud size: {_reconstructionCloud.Count}");
+            Log($"\nImages processed: {_doneViews.Count}/{_views.Count}");
+            Log($"PointCloud size: {_reconstructionCloud.Count}");
             return true;
         }
 
@@ -348,7 +366,7 @@ namespace Deep3DStudio.Model.SfM
         {
             if (_reconstructionCloud.Count < 10) return;
 
-            Console.WriteLine("Performing Bundle Adjustment...");
+            Log("Performing Bundle Adjustment...");
             var ba = new BundleAdjustment();
 
             // Add registered cameras
@@ -447,7 +465,7 @@ namespace Deep3DStudio.Model.SfM
 
         private SortedDictionary<float, KeyValuePair<int, int>> FindBestPair()
         {
-            Console.WriteLine("Getting best two views for baseline...");
+            Log("Getting best two views for baseline...");
             var numInliers = new SortedDictionary<float, KeyValuePair<int, int>>();
 
             int numImg = _views.Count;
@@ -478,7 +496,7 @@ namespace Deep3DStudio.Model.SfM
                     int eInliers = Cv2.CountNonZero(mask);
                     float ratio = (float)eInliers / matches.Length;
 
-                    Console.WriteLine($"Pair [{q},{t}] Matches: {matches.Length}, H-Inliers: {hInliers}, E-Inliers: {eInliers} ({ratio:P})");
+                    Log($"Pair [{q},{t}] Matches: {matches.Length}, H-Inliers: {hInliers}, E-Inliers: {eInliers} ({ratio:P})");
 
                     while (numInliers.ContainsKey(ratio)) ratio += 0.00001f;
                     numInliers.Add(ratio, new KeyValuePair<int, int>(q, t));
@@ -865,12 +883,36 @@ namespace Deep3DStudio.Model.SfM
             }
             _views.Clear();
 
-            // Dispose shared matrices
+            // Dispose shared matrices and set to null to prevent double-free
             _K?.Dispose();
+            _K = null;
             _distCoef?.Dispose();
+            _distCoef = null;
 
-            Console.WriteLine("[SfM] Resources cleaned up.");
+            Log("[SfM] Resources cleaned up.");
         }
 
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!_disposed)
+            {
+                if (disposing)
+                {
+                    CleanupResources();
+                }
+                _disposed = true;
+            }
+        }
+
+        ~SfMInference()
+        {
+            Dispose(false);
+        }
     }
 }
