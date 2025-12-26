@@ -33,7 +33,7 @@ namespace Deep3DStudio
         // State
         private int _selectedWorkflow = 0;
         private int _selectedQuality = 1;
-        private string[] _workflows = { "Dust3r (Multi-View)", "TripoSR (Single Image)", "LGM (Gaussian)", "Wonder3D" };
+        private string[] _workflows = { "Dust3r (Multi-View)", "Feature Matching (SfM)", "TripoSR (Single Image)", "LGM (Gaussian)", "Wonder3D" };
         private string[] _qualities = { "Fast", "Balanced", "High" };
         private string _logBuffer = "";
         private bool _autoScroll = true;
@@ -3306,7 +3306,9 @@ namespace Deep3DStudio
                 {
                     WorkflowPipeline pipeline = WorkflowPipeline.ImageToDust3rToMesh;
 
-                    if (_workflows[_selectedWorkflow].Contains("TripoSR"))
+                    if (_workflows[_selectedWorkflow].Contains("Feature Matching") || _workflows[_selectedWorkflow].Contains("SfM"))
+                        pipeline = WorkflowPipeline.ImageToSfM;
+                    else if (_workflows[_selectedWorkflow].Contains("TripoSR"))
                         pipeline = WorkflowPipeline.ImageToTripoSR;
                     else if (_workflows[_selectedWorkflow].Contains("LGM"))
                         pipeline = WorkflowPipeline.ImageToLGM;
@@ -3525,41 +3527,78 @@ namespace Deep3DStudio
                 return;
             }
 
-            ProgressDialog.Instance.Start("Auto Rigging...", OperationType.Processing);
-            Task.Run(() => {
+            ProgressDialog.Instance.Start("Auto Rigging with UniRig...", OperationType.Processing);
+            Task.Run(async () => {
                 try
                 {
                     foreach (var mesh in meshes)
                     {
-                        // Calculate mesh bounds to size and position the skeleton
-                        var (min, max) = mesh.GetWorldBounds();
-                        var center = (min + max) * 0.5f;
-                        var size = max - min;
-                        float height = Math.Max(size.Y, 0.1f);
-                        float scale = height; // Scale skeleton to match mesh height
+                        ProgressDialog.Instance.Update(0.1f, $"Rigging {mesh.Name}...");
 
-                        // Position root at the center-bottom of the mesh
-                        var rootPosition = new Vector3(center.X, min.Y + height * 0.5f, center.Z);
+                        // Try to use UniRig AI model first
+                        var rigResult = await AIModelManager.Instance.RigMeshAsync(
+                            mesh.MeshData.Vertices.ToArray(),
+                            mesh.MeshData.Indices.ToArray(),
+                            msg => EnqueueAction(() => ProgressDialog.Instance.Log(msg)));
 
-                        // Create humanoid skeleton template scaled to mesh size
-                        var skeleton = SkeletonData.CreateHumanoidTemplate(rootPosition, scale);
+                        SkeletonData skeleton;
+
+                        if (rigResult != null && rigResult.Success && rigResult.JointPositions?.Length > 0)
+                        {
+                            // Use UniRig result
+                            ProgressDialog.Instance.Log($"UniRig generated {rigResult.JointPositions.Length} joints.");
+
+                            skeleton = new SkeletonData();
+                            for (int i = 0; i < rigResult.JointPositions.Length; i++)
+                            {
+                                var joint = new Joint
+                                {
+                                    Name = rigResult.JointNames?[i] ?? $"Joint_{i}",
+                                    LocalPosition = rigResult.JointPositions[i],
+                                    ParentIndex = rigResult.ParentIndices?[i] ?? -1
+                                };
+                                skeleton.Joints.Add(joint);
+                            }
+
+                            // Copy skinning weights if available
+                            if (rigResult.SkinningWeights != null)
+                            {
+                                skeleton.SkinningWeights = rigResult.SkinningWeights;
+                            }
+                        }
+                        else
+                        {
+                            // Fall back to humanoid template
+                            ProgressDialog.Instance.Log("UniRig not available, using humanoid template...");
+
+                            var (min, max) = mesh.GetWorldBounds();
+                            var center = (min + max) * 0.5f;
+                            var size = max - min;
+                            float height = Math.Max(size.Y, 0.1f);
+                            float scale = height;
+                            var rootPosition = new Vector3(center.X, min.Y + height * 0.5f, center.Z);
+                            skeleton = SkeletonData.CreateHumanoidTemplate(rootPosition, scale);
+                        }
 
                         // Create skeleton object and add to scene
                         var skelObj = new SkeletonObject($"Rig_{mesh.Name}", skeleton);
                         skelObj.TargetMesh = mesh;
                         skelObj.Position = Vector3.Zero;
 
-                        lock (_sceneGraph)
+                        EnqueueAction(() =>
                         {
-                            _sceneGraph.AddObject(skelObj);
-                        }
-                        ProgressDialog.Instance.Log($"Created humanoid skeleton for '{mesh.Name}' with {skeleton.Joints.Count} joints.");
+                            lock (_sceneGraph)
+                            {
+                                _sceneGraph.AddObject(skelObj);
+                            }
+                            ProgressDialog.Instance.Log($"Created skeleton for '{mesh.Name}' with {skeleton.Joints.Count} joints.");
+                        });
                     }
-                    ProgressDialog.Instance.Complete();
+                    EnqueueAction(() => ProgressDialog.Instance.Complete());
                 }
                 catch (Exception ex)
                 {
-                    ProgressDialog.Instance.Fail(ex);
+                    EnqueueAction(() => ProgressDialog.Instance.Fail(ex));
                 }
             });
         }

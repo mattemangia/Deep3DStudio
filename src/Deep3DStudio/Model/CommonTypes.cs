@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using OpenTK.Mathematics;
+using Deep3DStudio.Model.AIModels;
 
 namespace Deep3DStudio.Model
 {
@@ -31,5 +32,6 @@ namespace Deep3DStudio.Model
     {
         public List<MeshData> Meshes { get; set; } = new List<MeshData>();
         public List<CameraPose> Poses { get; set; } = new List<CameraPose>();
+        public RigResult? RigResult { get; set; } = null;
     }
 }
