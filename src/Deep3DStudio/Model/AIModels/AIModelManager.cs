@@ -279,6 +279,10 @@ namespace Deep3DStudio.Model.AIModels
                                 SceneResult? dust3rResult = null;
                                 try
                                 {
+                                    if (Dust3r != null)
+                                    {
+                                        Dust3r.LogCallback = (msg) => progressCallback?.Invoke(msg, progress);
+                                    }
                                     dust3rResult = Dust3r?.ReconstructScene(imagePaths);
                                 }
                                 catch (Exception ex)
@@ -299,8 +303,11 @@ namespace Deep3DStudio.Model.AIModels
                                     progressCallback?.Invoke("Dust3r not available or failed, trying Feature Matching SfM...", progress);
                                     try
                                     {
-                                        var sfm = new SfMInference();
-                                        currentResult = sfm.ReconstructScene(imagePaths);
+                                        using (var sfm = new SfMInference())
+                                        {
+                                            sfm.LogCallback = (msg) => progressCallback?.Invoke(msg, progress);
+                                            currentResult = sfm.ReconstructScene(imagePaths);
+                                        }
 
                                         if (currentResult.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
                                         {
@@ -329,8 +336,11 @@ namespace Deep3DStudio.Model.AIModels
                                 progressCallback?.Invoke($"Running Feature Matching SfM with {imagePaths.Count} images...", progress);
                                 try
                                 {
-                                    var sfm = new SfMInference();
-                                    currentResult = sfm.ReconstructScene(imagePaths);
+                                    using (var sfm = new SfMInference())
+                                    {
+                                        sfm.LogCallback = (msg) => progressCallback?.Invoke(msg, progress);
+                                        currentResult = sfm.ReconstructScene(imagePaths);
+                                    }
 
                                     if (currentResult.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
                                     {

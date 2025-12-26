@@ -16,6 +16,8 @@ namespace Deep3DStudio.Model
         private bool _isLoaded = false;
         private dynamic _bridgeModule;
         private bool _disposed = false;
+        private Action<string>? _logCallback;
+        private string? _lastError;
 
         public Dust3rInference()
         {
@@ -23,6 +25,25 @@ namespace Deep3DStudio.Model
         }
 
         public bool IsLoaded => _isLoaded;
+
+        /// <summary>
+        /// Gets the last error message if initialization failed.
+        /// </summary>
+        public string? LastError => _lastError;
+
+        /// <summary>
+        /// Sets a callback for log messages. Messages will be sent to both console and this callback.
+        /// </summary>
+        public Action<string>? LogCallback
+        {
+            set => _logCallback = value;
+        }
+
+        private void Log(string message)
+        {
+            Console.WriteLine(message);
+            _logCallback?.Invoke(message);
+        }
 
         private string GetDeviceString()
         {
@@ -149,7 +170,8 @@ namespace Deep3DStudio.Model
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error initializing Dust3r: {ex.Message}");
+                _lastError = $"Error initializing Dust3r: {ex.Message}";
+                Log(_lastError);
             }
         }
 
@@ -158,7 +180,15 @@ namespace Deep3DStudio.Model
             Initialize();
             var result = new SceneResult();
 
-            if (!_isLoaded) return result;
+            if (!_isLoaded)
+            {
+                // Log the last error if we have one
+                if (_lastError != null)
+                {
+                    Log($"Dust3r not loaded. {_lastError}");
+                }
+                return result;
+            }
 
             try
             {
@@ -206,7 +236,7 @@ namespace Deep3DStudio.Model
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Inference failed: {ex.Message}");
+                Log($"Dust3r inference failed: {ex.Message}");
             }
 
             return result;
