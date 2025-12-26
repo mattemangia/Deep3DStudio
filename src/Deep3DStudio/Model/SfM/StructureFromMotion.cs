@@ -61,7 +61,7 @@ namespace Deep3DStudio.Model.SfM
 
         private void Log(string message)
         {
-            Log(message);
+            Console.WriteLine(message);
             _logCallback?.Invoke(message);
         }
 
@@ -102,14 +102,14 @@ namespace Deep3DStudio.Model.SfM
             // 2. Base Reconstruction
             if (!BaseReconstruction())
             {
-                Console.Error.WriteLine("Could not find a good pair for initial reconstruction");
+                Log("Could not find a good pair for initial reconstruction");
                 return result;
             }
 
             // 3. Add More Views
             if (!AddMoreViews())
             {
-                Console.Error.WriteLine("Could not add more views");
+                Log("Could not add more views");
             }
 
             // 4. Final Global Bundle Adjustment
@@ -186,7 +186,7 @@ namespace Deep3DStudio.Model.SfM
 
             if (_views.Count < 2)
             {
-                Console.Error.WriteLine("Not enough images.");
+                Log("Not enough images.");
                 return false;
             }
 
@@ -253,14 +253,14 @@ namespace Deep3DStudio.Model.SfM
             Log("Estimating camera pose with Essential Matrix...");
             if (!GetCameraPose(_K, queryIdx, trainIdx, matches, _views[queryIdx].Points2D, _views[trainIdx].Points2D, ref Pleft, ref Pright))
             {
-                Console.Error.WriteLine("Failed to get camera pose.");
+                Log("Failed to get camera pose.");
                 return false;
             }
 
             List<Point3D> pointcloud = new List<Point3D>();
             if (!TriangulateViews(_views[queryIdx].Points2D, _views[trainIdx].Points2D, Pleft, Pright, matches, _K, new KeyValuePair<int, int>(queryIdx, trainIdx), out pointcloud))
             {
-                Console.Error.WriteLine("Could not triangulate initial pair.");
+                Log("Could not triangulate initial pair.");
                 return false;
             }
 
