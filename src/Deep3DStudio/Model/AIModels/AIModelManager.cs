@@ -5,7 +5,10 @@ using System.Linq;
 using System.Threading.Tasks;
 using Deep3DStudio.Configuration;
 using Deep3DStudio.Model.SfM;
+using Deep3DStudio.Python;
+using OpenCvSharp;
 using OpenTK.Mathematics;
+using Python.Runtime;
 
 namespace Deep3DStudio.Model.AIModels
 {
@@ -301,12 +304,111 @@ namespace Deep3DStudio.Model.AIModels
                                 {
                                     // Fall back to SfM (Feature Matching)
                                     progressCallback?.Invoke("Dust3r not available or failed, trying Feature Matching SfM...", progress);
+
+                                    // Clean up any corrupted state from Dust3r before running SfM
+                                    // This is critical to prevent crashes when falling back from failed Python/native operations
                                     try
                                     {
-                                        using (var sfm = new SfMInference())
+                                        progressCallback?.Invoke("Cleaning up resources before SfM fallback...", progress);
+
+                                        // Dispose and reset Dust3r instance if it failed
+                                        if (_dust3r != null)
                                         {
-                                            sfm.LogCallback = (msg) => progressCallback?.Invoke(msg, progress);
-                                            currentResult = sfm.ReconstructScene(imagePaths);
+                                            _dust3r.Dispose();
+                                            _dust3r = null;
+                                        }
+
+                                        // Force Python cleanup if Python is initialized
+                                        // This releases PyTorch tensors and CUDA memory that could corrupt other native libraries
+                                        if (PythonService.Instance.IsInitialized)
+                                        {
+                                            try
+                                            {
+                                                progressCallback?.Invoke("Releasing Python/GPU resources...", progress);
+                                                using (Py.GIL())
+                                                {
+                                                    // Run aggressive Python cleanup
+                                                    string cleanupScript = @"
+import gc
+gc.collect()
+try:
+    import torch
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+except ImportError:
+    pass
+except Exception:
+    pass
+gc.collect()
+";
+                                                    PythonEngine.Exec(cleanupScript);
+                                                }
+                                            }
+                                            catch (Exception pyEx)
+                                            {
+                                                progressCallback?.Invoke($"Warning: Python cleanup had issues: {pyEx.Message}", progress);
+                                            }
+                                        }
+
+                                        // Force garbage collection to clean up any lingering native objects
+                                        GC.Collect();
+                                        GC.WaitForPendingFinalizers();
+                                        GC.Collect();
+
+                                        // Reset OpenCV state to ensure clean initialization for SfM
+                                        // This prevents any corrupted state from affecting OpenCV operations
+                                        try
+                                        {
+                                            progressCallback?.Invoke("Resetting OpenCV state...", progress);
+                                            // Reset OpenCV optimization settings to default
+                                            Cv2.SetUseOptimized(true);
+                                            // Note: OpenCvSharp doesn't expose direct memory pool reset,
+                                            // but creating fresh Mat objects in SfM will use clean allocations
+                                        }
+                                        catch (Exception cvEx)
+                                        {
+                                            progressCallback?.Invoke($"Warning: OpenCV reset had issues: {cvEx.Message}", progress);
+                                        }
+
+                                        // Small delay to ensure native resources are fully released
+                                        System.Threading.Thread.Sleep(200);
+                                    }
+                                    catch (Exception cleanupEx)
+                                    {
+                                        progressCallback?.Invoke($"Warning: cleanup before SfM fallback had issues: {cleanupEx.Message}", progress);
+                                    }
+
+                                    try
+                                    {
+                                        // Verify image paths are still valid before passing to SfM
+                                        // Dust3r only reads images (doesn't modify them), but verify to be safe
+                                        var validImagePaths = new List<string>();
+                                        foreach (var path in imagePaths)
+                                        {
+                                            if (File.Exists(path))
+                                            {
+                                                validImagePaths.Add(path);
+                                                progressCallback?.Invoke($"[SfM] Image verified: {Path.GetFileName(path)}", progress);
+                                            }
+                                            else
+                                            {
+                                                progressCallback?.Invoke($"[SfM] Warning: Image not found: {path}", progress);
+                                            }
+                                        }
+
+                                        if (validImagePaths.Count < 2)
+                                        {
+                                            progressCallback?.Invoke($"SfM requires at least 2 valid images. Found: {validImagePaths.Count}", progress);
+                                        }
+                                        else
+                                        {
+                                            // Create SfM in a completely fresh state
+                                            using (var sfm = new SfMInference())
+                                            {
+                                                sfm.LogCallback = (msg) => progressCallback?.Invoke(msg, progress);
+                                                currentResult = sfm.ReconstructScene(validImagePaths);
+                                            }
                                         }
 
                                         if (currentResult.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
