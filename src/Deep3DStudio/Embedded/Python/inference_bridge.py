@@ -207,7 +207,80 @@ def load_model(model_name, weights_path, device=None):
 
             from dust3r.model import AsymmetricCroCo3DStereo
             report_progress("load", 0.4, "Loading Dust3r weights...")
-            model = AsymmetricCroCo3DStereo.from_pretrained(weights_path)
+
+            # Only support local files - no automatic downloads
+            is_local_pth = weights_path.endswith('.pth') and os.path.isfile(weights_path)
+            is_local_safetensors = weights_path.endswith('.safetensors') and os.path.isfile(weights_path)
+
+            if not is_local_pth and not is_local_safetensors:
+                # Check if it might be a directory containing the weights
+                if os.path.isdir(weights_path):
+                    pth_file = os.path.join(weights_path, 'dust3r_weights.pth')
+                    safetensors_file = os.path.join(weights_path, 'model.safetensors')
+                    if os.path.isfile(pth_file):
+                        weights_path = pth_file
+                        is_local_pth = True
+                    elif os.path.isfile(safetensors_file):
+                        weights_path = safetensors_file
+                        is_local_safetensors = True
+
+            if not is_local_pth and not is_local_safetensors:
+                raise FileNotFoundError(
+                    f"Dust3r model weights not found at: {weights_path}\n"
+                    f"Please ensure dust3r_weights.pth exists in the models directory.\n"
+                    f"Expected location: <app_dir>/models/dust3r_weights.pth"
+                )
+
+            report_progress("load", 0.5, f"Loading local weights from {os.path.basename(weights_path)}...")
+            print(f"Loading Dust3r from local file: {weights_path}")
+
+            # Load the checkpoint
+            if is_local_safetensors:
+                try:
+                    from safetensors.torch import load_file
+                    ckpt = load_file(weights_path)
+                except ImportError:
+                    raise RuntimeError("safetensors package required for .safetensors files")
+            else:
+                ckpt = torch.load(weights_path, map_location='cpu')
+
+            # Extract model args if present (for checkpoint files from HuggingFace)
+            if 'args' in ckpt:
+                model_args = ckpt['args']
+                if hasattr(model_args, '__dict__'):
+                    model_args = vars(model_args)
+            elif 'model_args' in ckpt:
+                model_args = ckpt['model_args']
+            else:
+                # Default args for DUSt3R_ViTLarge_BaseDecoder_512_dpt
+                model_args = {
+                    'enc_embed_dim': 1024,
+                    'enc_depth': 24,
+                    'enc_num_heads': 16,
+                    'dec_embed_dim': 768,
+                    'dec_depth': 12,
+                    'dec_num_heads': 12,
+                    'output_mode': 'pts3d',
+                    'head_type': 'dpt',
+                }
+
+            # Create model with args
+            model = AsymmetricCroCo3DStereo(**model_args)
+
+            # Load state dict
+            if 'model' in ckpt:
+                state_dict = ckpt['model']
+            elif 'state_dict' in ckpt:
+                state_dict = ckpt['state_dict']
+            else:
+                state_dict = ckpt
+
+            # Remove 'module.' prefix if present (from DataParallel)
+            state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+
+            model.load_state_dict(state_dict, strict=False)
+            print(f"Loaded Dust3r weights from local file")
+
             report_progress("load", 0.7, "Moving Dust3r to device...")
             model.to(device_obj)
             model.eval()

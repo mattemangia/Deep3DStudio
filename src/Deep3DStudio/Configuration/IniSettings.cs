@@ -168,7 +168,9 @@ namespace Deep3DStudio.Configuration
         public int TripoSFResolution { get; set; } = 512;
         public int TripoSFSparseDilation { get; set; } = 1;
 
-        // AI Model Paths (relative to app directory or absolute)
+        // AI Model Paths (relative to app directory or absolute, or HuggingFace Hub identifiers)
+        // For Dust3r: can be a local path like "models/dust3r" or HuggingFace Hub ID like "naver/DUSt3R_ViTLarge_BaseDecoder_512_dpt"
+        public string Dust3rModelPath { get; set; } = "models";
         public string TripoSRModelPath { get; set; } = "models/triposr";
         public string LGMModelPath { get; set; } = "models/lgm";
         public string Wonder3DModelPath { get; set; } = "models/wonder3d";
@@ -389,6 +391,11 @@ namespace Deep3DStudio.Configuration
                     writer.WriteLine($"ComputeDevice={AIDevice}");
                     writer.WriteLine();
 
+                    // [Dust3r] section
+                    writer.WriteLine("[Dust3r]");
+                    writer.WriteLine($"ModelPath={Dust3rModelPath}");
+                    writer.WriteLine();
+
                     // [TripoSR] section
                     writer.WriteLine("[TripoSR]");
                     writer.WriteLine($"Resolution={TripoSRResolution}");
@@ -570,6 +577,10 @@ namespace Deep3DStudio.Configuration
             if (TryGetValue("Wonder3D", "ModelPath", out string? w3dPath))
                 Wonder3DModelPath = w3dPath ?? Wonder3DModelPath;
 
+            // [Dust3r]
+            if (TryGetValue("Dust3r", "ModelPath", out string? dust3rPath))
+                Dust3rModelPath = dust3rPath ?? Dust3rModelPath;
+
             // [UniRig]
             if (TryGetValue("UniRig", "MaxJoints", out string? urJointsStr) && int.TryParse(urJointsStr, out var urJoints))
                 UniRigMaxJoints = Math.Clamp(urJoints, 16, 256);
@@ -721,6 +732,9 @@ namespace Deep3DStudio.Configuration
             RiggingModel = RiggingMethod.None;
             MeshExtraction = MeshExtractionMethod.MarchingCubes;
             MeshRefinement = MeshRefinementMethod.None;
+
+            // Dust3r
+            Dust3rModelPath = "models/dust3r";
 
             // TripoSR
             TripoSRResolution = 256;

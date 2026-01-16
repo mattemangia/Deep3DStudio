@@ -158,9 +158,49 @@ namespace Deep3DStudio.Model
                         sys.modules["deep3dstudio_bridge"] = _bridgeModule;
                     }
 
-                    string modelsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models");
-                    string weightsPath = Path.Combine(modelsDir, "dust3r_weights.pth");
+                    var settings = IniSettings.Instance;
+                    string configuredPath = settings.Dust3rModelPath;
+                    string weightsPath;
+
+                    // Check if it's a relative path, absolute path, or HuggingFace Hub identifier
+                    if (configuredPath.Contains("/") && !Path.IsPathRooted(configuredPath) && !configuredPath.StartsWith("models"))
+                    {
+                        // Looks like a HuggingFace Hub identifier (e.g., "naver/DUSt3R_ViTLarge_BaseDecoder_512_dpt")
+                        weightsPath = configuredPath;
+                    }
+                    else if (Path.IsPathRooted(configuredPath))
+                    {
+                        // Absolute path
+                        weightsPath = configuredPath;
+                    }
+                    else
+                    {
+                        // Relative path - resolve from app directory
+                        string basePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, configuredPath);
+
+                        // Check if it's a directory containing dust3r_weights.pth
+                        if (Directory.Exists(basePath))
+                        {
+                            string pthFile = Path.Combine(basePath, "dust3r_weights.pth");
+                            if (File.Exists(pthFile))
+                                weightsPath = pthFile;
+                            else
+                                weightsPath = basePath; // Maybe it's a HF-style directory
+                        }
+                        else if (File.Exists(basePath))
+                        {
+                            // It's a direct file path
+                            weightsPath = basePath;
+                        }
+                        else
+                        {
+                            // Fallback: try models/dust3r_weights.pth
+                            weightsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "dust3r_weights.pth");
+                        }
+                    }
+
                     string device = GetDeviceString();
+                    Log($"[Dust3r] Loading model from: {weightsPath}");
 
                     // Load the model with configured device
                     _bridgeModule.load_model("dust3r", weightsPath, device);

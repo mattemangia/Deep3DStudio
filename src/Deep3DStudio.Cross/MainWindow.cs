@@ -1890,9 +1890,12 @@ namespace Deep3DStudio
 
                         if (ImGui.CollapsingHeader("Dust3r (Multi-View)"))
                         {
-                            // Dust3r doesn't have many exposed parameters in IniSettings,
-                            // but usually runs based on reconstruction method.
                             ImGui.TextWrapped("Dust3r is the default multi-view reconstruction engine. It requires a GPU with significant VRAM for best performance.");
+                            ImGui.Spacing();
+
+                            string dust3rPath = s.Dust3rModelPath;
+                            if (ImGui.InputText("Model Path##Dust3r", ref dust3rPath, 256)) s.Dust3rModelPath = dust3rPath;
+                            ImGui.TextDisabled("Path to models/dust3r or dust3r_weights.pth file");
                         }
 
                         if (ImGui.CollapsingHeader("TripoSR (Single Image)"))
