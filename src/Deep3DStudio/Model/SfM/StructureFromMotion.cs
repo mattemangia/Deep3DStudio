@@ -54,7 +54,9 @@ namespace Deep3DStudio.Model.SfM
         private Mat _K; // Shared K
         private Mat _distCoef; // Lazy initialized to avoid native object issues
 
-        private const float NN_MATCH_RATIO = 0.8f;
+        // Lowe's ratio test threshold - 0.85 is more lenient for cross-view matching
+        // (0.8 is stricter, 0.9 allows more matches but with more outliers)
+        private const float NN_MATCH_RATIO = 0.85f;
 
         // Log callback - logs to both console and callback (for progress dialog)
         private Action<string>? _logCallback;
@@ -562,10 +564,28 @@ namespace Deep3DStudio.Model.SfM
                 for (int t = q + 1; t < numImg; t++)
                 {
                     var matches = GetMatching(q, t);
-                    if (matches.Length < 100) continue;
+                    Log($"[DEBUG] Pair [{q},{t}] raw matches: {matches.Length}");
 
+                    // Lower threshold for turntable/object captures - 30 matches is enough with good geometry
+                    if (matches.Length < 30)
+                    {
+                        Log($"[DEBUG] Pair [{q},{t}] skipped: only {matches.Length} matches (need 30)");
+                        continue;
+                    }
+
+                    // For non-planar scenes (objects), homography won't fit well
+                    // Use a relative threshold based on match count instead of absolute
                     int hInliers = FindHomographyInliers(q, t, matches);
-                    if (hInliers < 40) continue;
+                    float hRatio = (float)hInliers / matches.Length;
+
+                    // Skip only if homography fits TOO well (>80%) - indicates degenerate motion or planar scene
+                    // For 3D objects, homography should NOT fit well (low inlier ratio is expected)
+                    // But we still need some geometric consistency, so require at least 15 inliers
+                    if (hInliers < 15)
+                    {
+                        Log($"[DEBUG] Pair [{q},{t}] skipped: only {hInliers} H-inliers (need 15)");
+                        continue;
+                    }
 
                     var pts1 = new List<Point2d>();
                     var pts2 = new List<Point2d>();
@@ -578,15 +598,25 @@ namespace Deep3DStudio.Model.SfM
                     using var mask = new Mat();
                     using var m1 = CreateMatFromPoint2d(pts1);
                     using var m2 = CreateMatFromPoint2d(pts2);
-                    using var E = Cv2.FindEssentialMat(m1, m2, _K, EssentialMatMethod.Ransac, 0.999, 1.0, mask);
+
+                    // Use larger threshold (3.0 pixels) for robustness with high-res images
+                    using var E = Cv2.FindEssentialMat(m1, m2, _K, EssentialMatMethod.Ransac, 0.999, 3.0, mask);
 
                     int eInliers = Cv2.CountNonZero(mask);
-                    float ratio = (float)eInliers / matches.Length;
+                    float eRatio = (float)eInliers / matches.Length;
 
-                    Log($"Pair [{q},{t}] Matches: {matches.Length}, H-Inliers: {hInliers}, E-Inliers: {eInliers} ({ratio:P})");
+                    // Need at least 20 essential matrix inliers for reliable pose
+                    if (eInliers < 20)
+                    {
+                        Log($"[DEBUG] Pair [{q},{t}] skipped: only {eInliers} E-inliers (need 20)");
+                        continue;
+                    }
 
-                    while (numInliers.ContainsKey(ratio)) ratio += 0.00001f;
-                    numInliers.Add(ratio, new KeyValuePair<int, int>(q, t));
+                    Log($"Pair [{q},{t}] Matches: {matches.Length}, H-Inliers: {hInliers} ({hRatio:P}), E-Inliers: {eInliers} ({eRatio:P})");
+
+                    // Score by essential matrix inlier ratio (higher is better)
+                    while (numInliers.ContainsKey(eRatio)) eRatio += 0.00001f;
+                    numInliers.Add(eRatio, new KeyValuePair<int, int>(q, t));
                 }
             }
 
@@ -638,7 +668,8 @@ namespace Deep3DStudio.Model.SfM
             using var m1 = CreateMatFromPoint2d(aligned1);
             using var m2 = CreateMatFromPoint2d(aligned2);
 
-            using var E = Cv2.FindEssentialMat((InputArray)m1, (InputArray)m2, K, EssentialMatMethod.Ransac, 0.999, 1.0, mask);
+            // Use 3.0 pixel threshold for robustness with high-res images
+            using var E = Cv2.FindEssentialMat((InputArray)m1, (InputArray)m2, K, EssentialMatMethod.Ransac, 0.999, 3.0, mask);
 
             if (E.Rows != 3 || E.Cols != 3) return false;
 

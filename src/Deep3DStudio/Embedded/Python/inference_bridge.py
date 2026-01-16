@@ -7,6 +7,23 @@ import torch
 import numpy as np
 from PIL import Image
 import torchvision.transforms as transforms
+import argparse
+
+# Fix for PyTorch 2.6+ weights_only default change
+# Add safe globals needed by dust3r model checkpoints
+try:
+    torch.serialization.add_safe_globals([argparse.Namespace])
+except AttributeError:
+    pass  # Older PyTorch version
+
+# Monkey-patch torch.load to use weights_only=False for model loading
+_original_torch_load = torch.load
+def _patched_torch_load(*args, **kwargs):
+    # Default to weights_only=False for model checkpoints
+    if 'weights_only' not in kwargs:
+        kwargs['weights_only'] = False
+    return _original_torch_load(*args, **kwargs)
+torch.load = _patched_torch_load
 
 # Try importing torch_directml safely
 try:
@@ -264,8 +281,20 @@ def load_model(model_name, weights_path, device=None):
                     'head_type': 'dpt',
                 }
 
-            # Create model with args
-            model = AsymmetricCroCo3DStereo(**model_args)
+            # Filter model_args to only include valid AsymmetricCroCo3DStereo constructor parameters
+            # The checkpoint 'args' from argparse.Namespace may contain extra keys like 'model', 'device', 'lr', etc.
+            valid_model_keys = {
+                'enc_embed_dim', 'enc_depth', 'enc_num_heads',
+                'dec_embed_dim', 'dec_depth', 'dec_num_heads',
+                'output_mode', 'head_type', 'landscape_only',
+                'patch_embed_cls', 'img_size', 'pos_embed', 'depth_mode',
+                'conf_mode', 'freeze'
+            }
+            filtered_model_args = {k: v for k, v in model_args.items() if k in valid_model_keys}
+            print(f"Filtered model args: {list(filtered_model_args.keys())}")
+
+            # Create model with filtered args
+            model = AsymmetricCroCo3DStereo(**filtered_model_args)
 
             # Load state dict
             if 'model' in ckpt:
