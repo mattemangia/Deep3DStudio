@@ -566,25 +566,24 @@ namespace Deep3DStudio.Model.SfM
                     var matches = GetMatching(q, t);
                     Log($"[DEBUG] Pair [{q},{t}] raw matches: {matches.Length}");
 
-                    // Lower threshold for turntable/object captures - 30 matches is enough with good geometry
+                    // Need at least 30 matches for reliable geometry estimation
                     if (matches.Length < 30)
                     {
                         Log($"[DEBUG] Pair [{q},{t}] skipped: only {matches.Length} matches (need 30)");
                         continue;
                     }
 
-                    // For non-planar scenes (objects), homography won't fit well
-                    // Use a relative threshold based on match count instead of absolute
+                    // Compute homography ratio for diagnostics (NOT for filtering)
+                    // For 3D objects, low homography inliers is EXPECTED (scene has depth variation)
                     int hInliers = FindHomographyInliers(q, t, matches);
                     float hRatio = (float)hInliers / matches.Length;
 
-                    // Skip only if homography fits TOO well (>80%) - indicates degenerate motion or planar scene
-                    // For 3D objects, homography should NOT fit well (low inlier ratio is expected)
-                    // But we still need some geometric consistency, so require at least 15 inliers
-                    if (hInliers < 15)
+                    // WARNING: Only skip if homography fits TOO well (>85%) - indicates pure rotation or planar scene
+                    // which causes degenerate Essential matrix estimation
+                    if (hRatio > 0.85f)
                     {
-                        Log($"[DEBUG] Pair [{q},{t}] skipped: only {hInliers} H-inliers (need 15)");
-                        continue;
+                        Log($"[DEBUG] Pair [{q},{t}] WARNING: High homography ratio ({hRatio:P}) may indicate planar scene or pure rotation");
+                        // Don't skip, but warn - Essential matrix may still work
                     }
 
                     var pts1 = new List<Point2d>();
@@ -601,6 +600,12 @@ namespace Deep3DStudio.Model.SfM
 
                     // Use larger threshold (3.0 pixels) for robustness with high-res images
                     using var E = Cv2.FindEssentialMat(m1, m2, _K, EssentialMatMethod.Ransac, 0.999, 3.0, mask);
+
+                    if (E.Empty() || E.Rows != 3 || E.Cols != 3)
+                    {
+                        Log($"[DEBUG] Pair [{q},{t}] skipped: Invalid Essential matrix");
+                        continue;
+                    }
 
                     int eInliers = Cv2.CountNonZero(mask);
                     float eRatio = (float)eInliers / matches.Length;
