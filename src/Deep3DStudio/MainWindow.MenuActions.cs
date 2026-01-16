@@ -508,7 +508,7 @@ namespace Deep3DStudio
             authorLabel2.ModifyFg(StateType.Normal, new Gdk.Color(200, 200, 200));
             vbox.PackStart(authorLabel2, false, false, 0);
 
-            var authorLabel3 = new Label("2025");
+            var authorLabel3 = new Label("2026");
             authorLabel3.Justify = Justification.Center;
             authorLabel3.ModifyFg(StateType.Normal, new Gdk.Color(200, 200, 200));
             vbox.PackStart(authorLabel3, false, false, 0);
