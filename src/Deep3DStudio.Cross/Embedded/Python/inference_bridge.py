@@ -291,10 +291,35 @@ def load_model(model_name, weights_path, device=None):
                 'conf_mode', 'freeze'
             }
             filtered_model_args = {k: v for k, v in model_args.items() if k in valid_model_keys}
-            print(f"Filtered model args: {list(filtered_model_args.keys())}")
+            print(f"Filtered model args from checkpoint: {list(filtered_model_args.keys())}")
 
-            # Create model with filtered args
-            model = AsymmetricCroCo3DStereo(**filtered_model_args)
+            # Default args for DUSt3R_ViTLarge_BaseDecoder_512_dpt - use these if checkpoint args are incomplete
+            default_args = {
+                'enc_embed_dim': 1024,
+                'enc_depth': 24,
+                'enc_num_heads': 16,
+                'dec_embed_dim': 768,
+                'dec_depth': 12,
+                'dec_num_heads': 12,
+                'output_mode': 'pts3d',
+                'head_type': 'dpt',
+            }
+
+            # Merge: use checkpoint args where available, defaults for missing
+            final_model_args = {**default_args, **filtered_model_args}
+
+            # Fix img_size: dust3r expects a tuple (H, W), but some checkpoints store it as int
+            if 'img_size' in final_model_args:
+                img_size = final_model_args['img_size']
+                if isinstance(img_size, int):
+                    final_model_args['img_size'] = (img_size, img_size)
+                elif isinstance(img_size, (list, tuple)) and len(img_size) == 1:
+                    final_model_args['img_size'] = (img_size[0], img_size[0])
+
+            print(f"Final model args: {list(final_model_args.keys())}")
+
+            # Create model with args
+            model = AsymmetricCroCo3DStereo(**final_model_args)
 
             # Load state dict
             if 'model' in ckpt:
