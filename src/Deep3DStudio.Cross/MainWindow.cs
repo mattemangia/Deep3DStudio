@@ -618,7 +618,7 @@ namespace Deep3DStudio
 
             string authorLine1 = "Matteo Mangiagalli - m.mangiagalli@campus.uniurb.it";
             string authorLine2 = "Università degli Studi di Urbino - Carlo Bo";
-            string authorLine3 = "2025";
+            string authorLine3 = "2026";
             var authorSize1 = ImGui.CalcTextSize(authorLine1);
             ImGui.SetCursorPos(new System.Numerics.Vector2(center.X - authorSize1.X * 0.5f, center.Y + 100));
             ImGui.TextDisabled(authorLine1);
@@ -2119,7 +2119,7 @@ namespace Deep3DStudio
                 ImGui.Text("Author:");
                 ImGui.TextWrapped("Matteo Mangiagalli - m.mangiagalli@campus.uniurb.it");
                 ImGui.TextWrapped("Università degli Studi di Urbino - Carlo Bo");
-                ImGui.Text("2025");
+                ImGui.Text("2026");
 
                 ImGui.Separator();
 

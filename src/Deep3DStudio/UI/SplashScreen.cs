@@ -65,7 +65,7 @@ namespace Deep3DStudio.UI
             authorLabel2.Justify = Justification.Center;
             vbox.PackStart(authorLabel2, false, false, 0);
 
-            var authorLabel3 = new Label("2025");
+            var authorLabel3 = new Label("2026");
             authorLabel3.ModifyFg(StateType.Normal, new Gdk.Color(180, 180, 180));
             authorLabel3.Justify = Justification.Center;
             vbox.PackStart(authorLabel3, false, false, 10);
