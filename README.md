@@ -418,6 +418,7 @@ This project incorporates or builds upon the following open-source projects:
 
 - [Dust3r](https://github.com/naver/dust3r) - Multi-view reconstruction
 - [TripoSR](https://github.com/VAST-AI-Research/TripoSR) - Single-image 3D generation
+- [TripoSF](https://github.com/VAST-AI-Research/TripoSF) - High-resolution 3D mesh generation
 - [LGM](https://github.com/3DTopia/LGM) - Large Multi-View Gaussian Model
 - [Wonder3D](https://github.com/xxlong0/Wonder3D) - Multi-view generation
 - [UniRig](https://github.com/VAST-AI-Research/UniRig) - Automatic rigging
