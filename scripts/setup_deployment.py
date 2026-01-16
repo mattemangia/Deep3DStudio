@@ -40,14 +40,12 @@ MODELS = {
         "requirements": ["torch", "rembg", "omegaconf", "einops", "transformers"]
     },
     "triposf": {
-        # TripoSF (SparseFormer / Refinement)
-        "repo": "https://github.com/VAST-AI-Research/TripoSR.git",
-        "weights": "https://huggingface.co/stabilityai/TripoSR/resolve/main/model.ckpt",
-        "configs": {
-            "triposf_config.yaml": "https://huggingface.co/stabilityai/TripoSR/resolve/main/config.yaml"
-        },
-        "files": ["tsr/"],
-        "requirements": []
+        # TripoSF (SparseFlex) - High-Resolution 3D Shape Modeling
+        "repo": "https://github.com/VAST-AI-Research/TripoSF.git",
+        "weights": "https://huggingface.co/VAST-AI/TripoSF/resolve/main/vae/pretrained_TripoSFVAE_256i1024o.safetensors",
+        "configs": {},
+        "files": ["triposf/"],
+        "requirements": ["torch", "numpy", "trimesh", "safetensors"]
     },
     "lgm": {
         # LGM (Large Multi-View Gaussian Model) for Gaussian Splatting
