@@ -32,6 +32,7 @@ The application is developed as part of research at the **Università degli Stud
 | Model | Description |
 |-------|-------------|
 | **TripoSR** | Fast single-image to 3D generation |
+| **TripoSF** | High-resolution 3D mesh generation |
 | **LGM** | Large Multi-View Gaussian Model for high-quality reconstruction |
 | **Wonder3D** | Multi-view image generation and reconstruction |
 | **Dust3r** | Multi-view reconstruction with AI enhancement |
