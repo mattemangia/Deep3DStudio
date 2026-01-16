@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src/Deep3DStudio/logo.png" alt="Deep3D Studio Logo" width="200"/>
+  <img src="src/Deep3DStudio/logo.png" alt="Deep3D Studio Logo" width="400"/>
 </p>
 
 <h1 align="center">Deep3D Studio</h1>
