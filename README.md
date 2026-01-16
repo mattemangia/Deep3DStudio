@@ -286,7 +286,7 @@ python scripts/setup_deployment.py --platform [win_amd64|linux_x64|osx_arm64]
 
 This will download:
 - Standalone Python 3.10.11
-- AI model repositories (Dust3r, TripoSR, LGM, Wonder3D, UniRig)
+- AI model repositories (Dust3r, TripoSR, TripoSF, LGM, Wonder3D, UniRig)
 - Pre-trained model weights
 - Required Python dependencies
 
