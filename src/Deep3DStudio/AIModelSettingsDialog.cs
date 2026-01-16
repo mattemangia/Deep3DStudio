@@ -22,6 +22,9 @@ namespace Deep3DStudio
         // Compute Device (for all models)
         private ComboBoxText _computeDeviceCombo;
 
+        // Dust3r
+        private Entry _dust3rModelPath;
+
         // TripoSR
         private SpinButton _tripoSRResolution;
         private Entry _tripoSRModelPath;
@@ -68,6 +71,7 @@ namespace Deep3DStudio
 
             // Add tabs
             notebook.AppendPage(CreateGeneralTab(), new Label("General"));
+            notebook.AppendPage(CreateDust3rTab(), new Label("Dust3r"));
             notebook.AppendPage(CreateTripoSRTab(), new Label("TripoSR"));
             notebook.AppendPage(CreateLGMTab(), new Label("LGM"));
             notebook.AppendPage(CreateWonder3DTab(), new Label("Wonder3D"));
@@ -164,6 +168,50 @@ namespace Deep3DStudio
                 MaxWidthChars = 50
             };
             grid.Attach(infoLabel, 0, row, 2, 1);
+
+            return grid;
+        }
+
+        private Widget CreateDust3rTab()
+        {
+            var grid = new Grid
+            {
+                ColumnSpacing = 10,
+                RowSpacing = 10,
+                MarginStart = 10,
+                MarginEnd = 10,
+                MarginTop = 10
+            };
+
+            int row = 0;
+
+            // Header
+            var header = new Label("<b>Dust3r - Multi-View 3D Reconstruction</b>") { UseMarkup = true, Halign = Align.Start };
+            grid.Attach(header, 0, row++, 2, 1);
+
+            grid.Attach(new Label("Model Path:") { Halign = Align.Start }, 0, row, 1, 1);
+            var pathBox = new Box(Orientation.Horizontal, 5);
+            _dust3rModelPath = new Entry { WidthChars = 40 };
+            var browseBtn = new Button("...");
+            browseBtn.Clicked += (s, e) => BrowseFolder(_dust3rModelPath);
+            pathBox.PackStart(_dust3rModelPath, true, true, 0);
+            pathBox.PackStart(browseBtn, false, false, 0);
+            grid.Attach(pathBox, 1, row++, 1, 1);
+
+            // Info
+            row++;
+            var info = new Label(
+                "Dust3r performs dense 3D reconstruction from\n" +
+                "multiple images using neural network matching.\n\n" +
+                "Model Path: Directory containing dust3r_weights.pth\n" +
+                "or direct path to .pth/.safetensors file.\n\n" +
+                "Requires: 6-8GB VRAM for 512px images.")
+            {
+                Halign = Align.Start,
+                Wrap = true,
+                MaxWidthChars = 50
+            };
+            grid.Attach(info, 0, row, 2, 1);
 
             return grid;
         }
@@ -526,6 +574,9 @@ namespace Deep3DStudio
             _riggingCombo.Active = (int)_settings.RiggingModel;
             _computeDeviceCombo.Active = (int)_settings.AIDevice;
 
+            // Dust3r
+            _dust3rModelPath.Text = _settings.Dust3rModelPath;
+
             // TripoSR
             _tripoSRResolution.Value = _settings.TripoSRResolution;
             _tripoSRModelPath.Text = _settings.TripoSRModelPath;
@@ -575,6 +626,9 @@ namespace Deep3DStudio
             };
             _settings.RiggingModel = (RiggingMethod)_riggingCombo.Active;
             _settings.AIDevice = (AIComputeDevice)_computeDeviceCombo.Active;
+
+            // Dust3r
+            _settings.Dust3rModelPath = _dust3rModelPath.Text;
 
             // TripoSR
             _settings.TripoSRResolution = (int)_tripoSRResolution.Value;

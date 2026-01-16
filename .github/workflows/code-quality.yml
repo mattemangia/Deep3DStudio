@@ -1,0 +1,80 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  format-check:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Install GTK dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgtk-3-dev libglib2.0-dev
+
+    - name: Restore
+      run: dotnet restore Deep3DStudio.sln
+
+    - name: Check formatting
+      run: dotnet format Deep3DStudio.sln --verify-no-changes --verbosity diagnostic || true
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Install GTK dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgtk-3-dev libglib2.0-dev
+
+    - name: Restore
+      run: dotnet restore Deep3DStudio.sln
+
+    - name: Run security audit
+      run: |
+        dotnet list Deep3DStudio.sln package --vulnerable --include-transitive 2>&1 || true
+
+  python-lint:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Python linters
+      run: pip install flake8 black
+
+    - name: Check Python formatting with Black
+      run: |
+        find . -name "*.py" -type f | xargs black --check --diff || true
+
+    - name: Lint Python with Flake8
+      run: |
+        find . -name "*.py" -type f | xargs flake8 --max-line-length=120 --ignore=E501,W503 || true
