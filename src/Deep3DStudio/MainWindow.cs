@@ -142,8 +142,6 @@ namespace Deep3DStudio
 
             // Initialize inference engine
             _inference = new Model.Dust3rInference();
-            if (_inference.IsLoaded) _statusLabel.Text = "Model Loaded";
-            else _statusLabel.Text = "Model Not Found - Check dust3r.onnx";
 
             // Hook up AI model loading progress to status bar
             AIModels.AIModelManager.Instance.ModelLoadProgress += (stage, progress, message) => {
