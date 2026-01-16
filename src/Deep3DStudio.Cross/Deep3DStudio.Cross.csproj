@@ -17,7 +17,7 @@
     <PackageReference Include="NativeFileDialogs.Net" Version="1.2.1" />
     <PackageReference Include="OpenCvSharp4.runtime.osx_arm64" Version="4.8.1-rc" />
     <PackageReference Include="OpenTK" Version="4.8.2" />
-    <PackageReference Include="pythonnet" Version="3.0.3" />
+    <PackageReference Include="pythonnet" Version="3.0.5" />
     <PackageReference Include="MathNet.Numerics" Version="5.0.0" />
     <PackageReference Include="SkiaSharp" Version="2.88.6" />
     <PackageReference Include="OpenCvSharp4" Version="4.6.0.20220608" />
