@@ -1,0 +1,129 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            name: Linux-x64
+          - os: windows-latest
+            rid: win-x64
+            name: Windows-x64
+          - os: macos-latest
+            rid: osx-arm64
+            name: macOS-ARM64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    # Linux dependencies
+    - name: Install dependencies (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgtk-3-dev libglib2.0-dev
+
+    # macOS dependencies
+    - name: Install dependencies (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        brew install gtk+3 || true
+
+    # Build Deep3DStudio.Cross (cross-platform ImGui version)
+    - name: Publish Deep3DStudio.Cross
+      run: |
+        dotnet publish src/Deep3DStudio.Cross/Deep3DStudio.Cross.csproj \
+          --configuration Release \
+          --runtime ${{ matrix.rid }} \
+          --self-contained true \
+          -p:PublishSingleFile=true \
+          -p:EnableCompressionInSingleFile=true \
+          -o ./publish/Deep3DStudio.Cross-${{ matrix.name }}
+
+    # Build Deep3DStudio GTK (skip on Windows if GTK not available)
+    - name: Publish Deep3DStudio GTK
+      if: runner.os != 'Windows'
+      run: |
+        dotnet publish src/Deep3DStudio/Deep3DStudio.csproj \
+          --configuration Release \
+          --runtime ${{ matrix.rid }} \
+          --self-contained true \
+          -p:PublishSingleFile=true \
+          -p:EnableCompressionInSingleFile=true \
+          -o ./publish/Deep3DStudio-${{ matrix.name }} || echo "GTK build failed, continuing..."
+
+    - name: Create archive (Unix)
+      if: runner.os != 'Windows'
+      run: |
+        cd publish
+        for dir in */; do
+          tar -czvf "${dir%/}.tar.gz" "$dir"
+        done
+
+    - name: Create archive (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        cd publish
+        Get-ChildItem -Directory | ForEach-Object {
+          Compress-Archive -Path $_.FullName -DestinationPath "$($_.Name).zip"
+        }
+
+    - name: Upload Release Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-${{ matrix.name }}
+        path: |
+          publish/*.tar.gz
+          publish/*.zip
+        retention-days: 30
+
+  create-release:
+    needs: build-release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+        pattern: release-*
+        merge-multiple: true
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: artifacts/*
+        draft: false
+        prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

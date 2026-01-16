@@ -1,0 +1,87 @@
+name: Build
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  workflow_dispatch:
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        project: [Deep3DStudio, Deep3DStudio.Cross]
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: windows-latest
+            rid: win-x64
+          - os: macos-latest
+            rid: osx-arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    # Linux dependencies for GTK
+    - name: Install GTK dependencies (Linux)
+      if: runner.os == 'Linux' && matrix.project == 'Deep3DStudio'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgtk-3-dev libglib2.0-dev
+
+    # macOS dependencies for GTK
+    - name: Install GTK dependencies (macOS)
+      if: runner.os == 'macOS' && matrix.project == 'Deep3DStudio'
+      run: |
+        brew install gtk+3 || true
+
+    - name: Restore dependencies
+      run: dotnet restore src/${{ matrix.project }}/${{ matrix.project }}.csproj
+
+    - name: Build
+      run: dotnet build src/${{ matrix.project }}/${{ matrix.project }}.csproj --configuration Release --no-restore
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.project }}-${{ matrix.rid }}
+        path: src/${{ matrix.project }}/bin/Release/net8.0/
+        retention-days: 7
+
+  build-solution:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Install GTK dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgtk-3-dev libglib2.0-dev
+
+    - name: Restore solution
+      run: dotnet restore Deep3DStudio.sln
+
+    - name: Build solution
+      run: dotnet build Deep3DStudio.sln --configuration Release --no-restore
