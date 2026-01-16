@@ -281,8 +281,20 @@ def load_model(model_name, weights_path, device=None):
                     'head_type': 'dpt',
                 }
 
-            # Create model with args
-            model = AsymmetricCroCo3DStereo(**model_args)
+            # Filter model_args to only include valid AsymmetricCroCo3DStereo constructor parameters
+            # The checkpoint 'args' from argparse.Namespace may contain extra keys like 'model', 'device', 'lr', etc.
+            valid_model_keys = {
+                'enc_embed_dim', 'enc_depth', 'enc_num_heads',
+                'dec_embed_dim', 'dec_depth', 'dec_num_heads',
+                'output_mode', 'head_type', 'landscape_only',
+                'patch_embed_cls', 'img_size', 'pos_embed', 'depth_mode',
+                'conf_mode', 'freeze'
+            }
+            filtered_model_args = {k: v for k, v in model_args.items() if k in valid_model_keys}
+            print(f"Filtered model args: {list(filtered_model_args.keys())}")
+
+            # Create model with filtered args
+            model = AsymmetricCroCo3DStereo(**filtered_model_args)
 
             # Load state dict
             if 'model' in ckpt:
