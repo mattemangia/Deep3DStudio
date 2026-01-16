@@ -361,14 +361,39 @@ def load_model(model_name, weights_path, device=None):
 
         elif model_name == 'triposf':
             report_progress("load", 0.2, "Importing TripoSF module...")
-            from tsr.system import TSR
-            model_dir = os.path.dirname(weights_path)
-            report_progress("load", 0.4, "Loading TripoSF weights...")
-            model = TSR.from_pretrained(model_dir, config_name="triposf_config.yaml", weight_name="triposf_weights.pth")
-            report_progress("load", 0.7, "Moving TripoSF to device...")
-            model.to(device_obj)
-            model.eval()
-            loaded_models[model_name] = model
+            # TripoSF (SparseFlex) uses a different module structure than TripoSR
+            try:
+                from triposf.vae import TripoSFVAE
+                from safetensors.torch import load_file
+
+                report_progress("load", 0.4, "Loading TripoSF VAE weights...")
+
+                # Load the safetensors weights
+                if weights_path.endswith('.safetensors') and os.path.isfile(weights_path):
+                    state_dict = load_file(weights_path)
+                else:
+                    raise FileNotFoundError(f"TripoSF weights not found at: {weights_path}")
+
+                # Create the VAE model
+                model = TripoSFVAE()
+                model.load_state_dict(state_dict, strict=False)
+
+                report_progress("load", 0.7, "Moving TripoSF to device...")
+                model.to(device_obj)
+                model.eval()
+                loaded_models[model_name] = model
+
+            except ImportError as e:
+                # Fallback: Try loading as TSR if triposf module not available
+                print(f"TripoSF module not found ({e}), trying TSR fallback...")
+                from tsr.system import TSR
+                model_dir = os.path.dirname(weights_path)
+                report_progress("load", 0.4, "Loading TripoSF weights (TSR fallback)...")
+                model = TSR.from_pretrained(model_dir, config_name="triposf_config.yaml", weight_name="triposf_weights.pth")
+                report_progress("load", 0.7, "Moving TripoSF to device...")
+                model.to(device_obj)
+                model.eval()
+                loaded_models[model_name] = model
 
         elif model_name == 'lgm':
              report_progress("load", 0.2, "Importing LGM module...")
