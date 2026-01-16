@@ -335,14 +335,20 @@ namespace Deep3DStudio.Model.SfM
             Mat Pright = new Mat();
 
             Log("Estimating camera pose with Essential Matrix...");
-            if (!GetCameraPose(_K, queryIdx, trainIdx, matches, _views[queryIdx].Points2D, _views[trainIdx].Points2D, ref Pleft, ref Pright))
+            if (!GetCameraPose(_K, queryIdx, trainIdx, matches, _views[queryIdx].Points2D, _views[trainIdx].Points2D, ref Pleft, ref Pright, out var inlierMatches))
             {
                 Log("Failed to get camera pose.");
                 return false;
             }
 
             List<Point3D> pointcloud = new List<Point3D>();
-            if (!TriangulateViews(_views[queryIdx].Points2D, _views[trainIdx].Points2D, Pleft, Pright, matches, _K, new KeyValuePair<int, int>(queryIdx, trainIdx), out pointcloud))
+            if (inlierMatches.Length == 0)
+            {
+                Log("Failed to get inlier matches for triangulation.");
+                return false;
+            }
+
+            if (!TriangulateViews(_views[queryIdx].Points2D, _views[trainIdx].Points2D, Pleft, Pright, inlierMatches, _K, new KeyValuePair<int, int>(queryIdx, trainIdx), out pointcloud))
             {
                 Log("Could not triangulate initial pair.");
                 return false;
@@ -558,71 +564,99 @@ namespace Deep3DStudio.Model.SfM
             var numInliers = new SortedDictionary<float, KeyValuePair<int, int>>();
 
             int numImg = _views.Count;
-
-            for (int q = 0; q < numImg - 1; q++)
+            var candidatePairs = new HashSet<(int, int)>();
+            if (numImg > 30)
             {
-                for (int t = q + 1; t < numImg; t++)
+                int window = numImg > 80 ? 6 : 8;
+                int farStride = Math.Max(2, numImg / 6);
+                for (int q = 0; q < numImg - 1; q++)
                 {
-                    var matches = GetMatching(q, t);
-                    Log($"[DEBUG] Pair [{q},{t}] raw matches: {matches.Length}");
-
-                    // Need at least 30 matches for reliable geometry estimation
-                    if (matches.Length < 30)
+                    int maxT = Math.Min(numImg, q + 1 + window);
+                    for (int t = q + 1; t < maxT; t++)
                     {
-                        Log($"[DEBUG] Pair [{q},{t}] skipped: only {matches.Length} matches (need 30)");
-                        continue;
+                        candidatePairs.Add((q, t));
                     }
 
-                    // Compute homography ratio for diagnostics (NOT for filtering)
-                    // For 3D objects, low homography inliers is EXPECTED (scene has depth variation)
-                    int hInliers = FindHomographyInliers(q, t, matches);
-                    float hRatio = (float)hInliers / matches.Length;
-
-                    // WARNING: Only skip if homography fits TOO well (>85%) - indicates pure rotation or planar scene
-                    // which causes degenerate Essential matrix estimation
-                    if (hRatio > 0.85f)
+                    int farT = q + farStride;
+                    if (farT < numImg)
                     {
-                        Log($"[DEBUG] Pair [{q},{t}] WARNING: High homography ratio ({hRatio:P}) may indicate planar scene or pure rotation");
-                        // Don't skip, but warn - Essential matrix may still work
+                        candidatePairs.Add((q, farT));
                     }
-
-                    var pts1 = new List<Point2d>();
-                    var pts2 = new List<Point2d>();
-                    foreach(var m in matches)
-                    {
-                        pts1.Add(_views[q].Points2D[m.QueryIdx]);
-                        pts2.Add(_views[t].Points2D[m.TrainIdx]);
-                    }
-
-                    using var mask = new Mat();
-                    using var m1 = CreateMatFromPoint2d(pts1);
-                    using var m2 = CreateMatFromPoint2d(pts2);
-
-                    // Use larger threshold (3.0 pixels) for robustness with high-res images
-                    using var E = Cv2.FindEssentialMat(m1, m2, _K, EssentialMatMethod.Ransac, 0.999, 3.0, mask);
-
-                    if (E.Empty() || E.Rows != 3 || E.Cols != 3)
-                    {
-                        Log($"[DEBUG] Pair [{q},{t}] skipped: Invalid Essential matrix");
-                        continue;
-                    }
-
-                    int eInliers = Cv2.CountNonZero(mask);
-                    float eRatio = (float)eInliers / matches.Length;
-
-                    // Need at least 20 essential matrix inliers for reliable pose
-                    if (eInliers < 20)
-                    {
-                        Log($"[DEBUG] Pair [{q},{t}] skipped: only {eInliers} E-inliers (need 20)");
-                        continue;
-                    }
-
-                    Log($"Pair [{q},{t}] Matches: {matches.Length}, H-Inliers: {hInliers} ({hRatio:P}), E-Inliers: {eInliers} ({eRatio:P})");
-
-                    // Score by essential matrix inlier ratio (higher is better)
-                    while (numInliers.ContainsKey(eRatio)) eRatio += 0.00001f;
-                    numInliers.Add(eRatio, new KeyValuePair<int, int>(q, t));
                 }
+            }
+            else
+            {
+                for (int q = 0; q < numImg - 1; q++)
+                {
+                    for (int t = q + 1; t < numImg; t++)
+                    {
+                        candidatePairs.Add((q, t));
+                    }
+                }
+            }
+
+            Log($"Evaluating {candidatePairs.Count} candidate pairs.");
+            foreach (var (q, t) in candidatePairs)
+            {
+                var matches = GetMatching(q, t);
+                Log($"[DEBUG] Pair [{q},{t}] raw matches: {matches.Length}");
+
+                // Need at least 30 matches for reliable geometry estimation
+                if (matches.Length < 30)
+                {
+                    Log($"[DEBUG] Pair [{q},{t}] skipped: only {matches.Length} matches (need 30)");
+                    continue;
+                }
+
+                // Compute homography ratio for diagnostics (NOT for filtering)
+                // For 3D objects, low homography inliers is EXPECTED (scene has depth variation)
+                int hInliers = FindHomographyInliers(q, t, matches);
+                float hRatio = (float)hInliers / matches.Length;
+
+                // WARNING: Only skip if homography fits TOO well (>85%) - indicates pure rotation or planar scene
+                // which causes degenerate Essential matrix estimation
+                if (hRatio > 0.85f)
+                {
+                    Log($"[DEBUG] Pair [{q},{t}] WARNING: High homography ratio ({hRatio:P}) may indicate planar scene or pure rotation");
+                    // Don't skip, but warn - Essential matrix may still work
+                }
+
+                var pts1 = new List<Point2d>();
+                var pts2 = new List<Point2d>();
+                foreach (var m in matches)
+                {
+                    pts1.Add(_views[q].Points2D[m.QueryIdx]);
+                    pts2.Add(_views[t].Points2D[m.TrainIdx]);
+                }
+
+                using var mask = new Mat();
+                using var m1 = CreateMatFromPoint2d(pts1);
+                using var m2 = CreateMatFromPoint2d(pts2);
+
+                // Use larger threshold (3.0 pixels) for robustness with high-res images
+                using var E = Cv2.FindEssentialMat(m1, m2, _K, EssentialMatMethod.Ransac, 0.999, 3.0, mask);
+
+                if (E.Empty() || E.Rows != 3 || E.Cols != 3)
+                {
+                    Log($"[DEBUG] Pair [{q},{t}] skipped: Invalid Essential matrix");
+                    continue;
+                }
+
+                int eInliers = Cv2.CountNonZero(mask);
+                float eRatio = (float)eInliers / matches.Length;
+
+                // Need at least 20 essential matrix inliers for reliable pose
+                if (eInliers < 20)
+                {
+                    Log($"[DEBUG] Pair [{q},{t}] skipped: only {eInliers} E-inliers (need 20)");
+                    continue;
+                }
+
+                Log($"Pair [{q},{t}] Matches: {matches.Length}, H-Inliers: {hInliers} ({hRatio:P}), E-Inliers: {eInliers} ({eRatio:P})");
+
+                // Score by essential matrix inlier ratio (higher is better)
+                while (numInliers.ContainsKey(eRatio)) eRatio += 0.00001f;
+                numInliers.Add(eRatio, new KeyValuePair<int, int>(q, t));
             }
 
             return numInliers;
@@ -657,8 +691,9 @@ namespace Deep3DStudio.Model.SfM
             return Cv2.CountNonZero(mask);
         }
 
-        private bool GetCameraPose(Mat K, int q, int t, DMatch[] matches, List<Point2d> pts1, List<Point2d> pts2, ref Mat Pleft, ref Mat Pright)
+        private bool GetCameraPose(Mat K, int q, int t, DMatch[] matches, List<Point2d> pts1, List<Point2d> pts2, ref Mat Pleft, ref Mat Pright, out DMatch[] inlierMatches)
         {
+            inlierMatches = Array.Empty<DMatch>();
             var aligned1 = new List<Point2d>();
             var aligned2 = new List<Point2d>();
             foreach(var m in matches)
@@ -684,6 +719,20 @@ namespace Deep3DStudio.Model.SfM
             int valid = Cv2.RecoverPose((InputArray)E, (InputArray)m1, (InputArray)m2, K, R, T, mask);
 
             if (valid < 5) return false;
+
+            var inliers = new List<DMatch>();
+            bool rowVector = mask.Rows == 1 && mask.Cols >= aligned1.Count;
+            for (int i = 0; i < aligned1.Count; i++)
+            {
+                byte value = rowVector ? mask.At<byte>(0, i) : mask.At<byte>(i, 0);
+                if (value != 0)
+                {
+                    inliers.Add(matches[i]);
+                }
+            }
+
+            inlierMatches = inliers.ToArray();
+            if (inlierMatches.Length < 5) return false;
 
             using var R_conv = R.Type() != MatType.CV_64F ? R.Clone() : null;
             using var T_conv = T.Type() != MatType.CV_64F ? T.Clone() : null;
@@ -773,8 +822,17 @@ namespace Deep3DStudio.Model.SfM
             {
                 Point3d p3 = new Point3d(pts3D.At<double>(i, 0), pts3D.At<double>(i, 1), pts3D.At<double>(i, 2));
 
-                // Check if point is in front of both cameras (positive Z)
-                if (p3.Z <= 0)
+                if (double.IsNaN(p3.X) || double.IsNaN(p3.Y) || double.IsNaN(p3.Z) ||
+                    double.IsInfinity(p3.X) || double.IsInfinity(p3.Y) || double.IsInfinity(p3.Z))
+                {
+                    continue;
+                }
+
+                double z1 = R1_part.At<double>(2, 0) * p3.X + R1_part.At<double>(2, 1) * p3.Y + R1_part.At<double>(2, 2) * p3.Z + t1_part.At<double>(2);
+                double z2 = R2_part.At<double>(2, 0) * p3.X + R2_part.At<double>(2, 1) * p3.Y + R2_part.At<double>(2, 2) * p3.Z + t2_part.At<double>(2);
+
+                // Check if point is in front of both cameras (positive Z in each camera frame)
+                if (z1 <= 0 || z2 <= 0)
                 {
                     behindCamera++;
                     continue;

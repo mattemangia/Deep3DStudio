@@ -8,6 +8,7 @@ import numpy as np
 from PIL import Image
 import torchvision.transforms as transforms
 import argparse
+import numbers
 
 # Fix for PyTorch 2.6+ weights_only default change
 # Add safe globals needed by dust3r model checkpoints
@@ -303,6 +304,8 @@ def load_model(model_name, weights_path, device=None):
                 'dec_num_heads': 12,
                 'output_mode': 'pts3d',
                 'head_type': 'dpt',
+                'img_size': (512, 512),
+                'pos_embed': 'RoPE100',
             }
 
             # Merge: use checkpoint args where available, defaults for missing
@@ -311,10 +314,14 @@ def load_model(model_name, weights_path, device=None):
             # Fix img_size: dust3r expects a tuple (H, W), but some checkpoints store it as int
             if 'img_size' in final_model_args:
                 img_size = final_model_args['img_size']
-                if isinstance(img_size, int):
+                if isinstance(img_size, numbers.Integral):
                     final_model_args['img_size'] = (img_size, img_size)
                 elif isinstance(img_size, (list, tuple)) and len(img_size) == 1:
                     final_model_args['img_size'] = (img_size[0], img_size[0])
+            else:
+                final_model_args['img_size'] = (512, 512)
+            if 'pos_embed' not in final_model_args:
+                final_model_args['pos_embed'] = 'RoPE100'
 
             print(f"Final model args: {list(final_model_args.keys())}")
 
@@ -436,6 +443,48 @@ def load_model(model_name, weights_path, device=None):
         traceback.print_exc()
         return False
 
+def _merge_point_clouds(results, max_points=500000):
+    if not results:
+        return None
+
+    vertices_list = []
+    colors_list = []
+    confidences_list = []
+    for item in results:
+        vertices = item.get('vertices')
+        colors = item.get('colors')
+        confidence = item.get('confidence')
+        if vertices is None or colors is None:
+            continue
+        vertices_list.append(vertices)
+        colors_list.append(colors)
+        if confidence is not None:
+            confidences_list.append(confidence)
+
+    if not vertices_list:
+        return None
+
+    merged_vertices = np.concatenate(vertices_list, axis=0)
+    merged_colors = np.concatenate(colors_list, axis=0)
+    merged_confidence = None
+    if confidences_list:
+        merged_confidence = np.concatenate(confidences_list, axis=0)
+
+    if len(merged_vertices) > max_points:
+        idx = np.random.choice(len(merged_vertices), max_points, replace=False)
+        merged_vertices = merged_vertices[idx]
+        merged_colors = merged_colors[idx]
+        if merged_confidence is not None:
+            merged_confidence = merged_confidence[idx]
+
+    return {
+        'vertices': merged_vertices.astype(np.float32),
+        'colors': merged_colors.astype(np.float32),
+        'faces': np.array([], dtype=np.int32),
+        'confidence': merged_confidence.astype(np.float32) if merged_confidence is not None else np.ones(len(merged_vertices), dtype=np.float32),
+        'image_index': -1
+    }
+
 def infer_dust3r(images_bytes_list):
     """
     Infer 3D point clouds from multiple images using Dust3r.
@@ -461,6 +510,28 @@ def infer_dust3r(images_bytes_list):
     temp_files = []
     pil_images = []
     try:
+        def _fit_mask(mask, target_shape):
+            mask = np.asarray(mask)
+            if mask.shape == target_shape:
+                return mask
+            if mask.shape == target_shape[::-1]:
+                return mask.T
+            try:
+                mask_img = Image.fromarray(mask.astype(np.uint8) * 255)
+                resized = mask_img.resize((target_shape[1], target_shape[0]), Image.NEAREST)
+                resized = np.array(resized) > 0
+                if resized.shape == target_shape:
+                    return resized
+            except Exception:
+                pass
+            return np.ones(target_shape, dtype=bool)
+
+        def _fit_image(img, target_shape):
+            h, w = target_shape
+            if img.size != (w, h):
+                img = img.resize((w, h), Image.LANCZOS)
+            return np.array(img) / 255.0
+
         for i, img_bytes in enumerate(images_bytes_list):
             img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
 
@@ -489,8 +560,14 @@ def infer_dust3r(images_bytes_list):
         report_progress("inference", 0.15, f"Loaded {len(dust3r_images)} images for Dust3r")
 
         # Create image pairs for processing
-        pairs = make_pairs(dust3r_images, scene_graph='complete', prefilter=None, symmetrize=True)
-        report_progress("inference", 0.2, f"Created {len(pairs)} image pairs")
+        image_count = len(dust3r_images)
+        scene_graph = 'complete' if image_count <= 8 else 'sparse'
+        pairs = make_pairs(dust3r_images, scene_graph=scene_graph, prefilter=None, symmetrize=True)
+        if image_count > 8:
+            max_pairs = image_count * 6
+            if len(pairs) > max_pairs:
+                pairs = pairs[:max_pairs]
+        report_progress("inference", 0.2, f"Created {len(pairs)} image pairs (scene_graph={scene_graph})")
 
         # Run inference on all pairs
         output = inference(pairs, model, device, batch_size=1)
@@ -498,25 +575,25 @@ def infer_dust3r(images_bytes_list):
 
         results = []
 
-        if has_global_aligner and len(pil_images) > 2:
-            # Use global aligner for multiple images
+        if has_global_aligner:
             try:
-                scene = global_aligner(output, device=device, mode=GlobalAlignerMode.PointCloudOptimizer)
-                # Optimize the scene
-                loss = scene.compute_global_alignment(init="mst", niter=300, schedule='cosine', lr=0.01)
-                report_progress("inference", 0.8, f"Global alignment complete (loss: {loss:.4f})")
+                mode = GlobalAlignerMode.PointCloudOptimizer if len(pil_images) > 2 else GlobalAlignerMode.PairViewer
+                scene = global_aligner(output, device=device, mode=mode)
+                if mode == GlobalAlignerMode.PointCloudOptimizer:
+                    loss = scene.compute_global_alignment(init="mst", niter=300, schedule='cosine', lr=0.01)
+                    report_progress("inference", 0.8, f"Global alignment complete (loss: {loss:.4f})")
+                else:
+                    report_progress("inference", 0.8, "Pairwise alignment complete")
 
-                # Get the aligned 3D points
                 pts3d = scene.get_pts3d()
                 masks = scene.get_masks()
 
                 for i, img in enumerate(pil_images):
                     pts = pts3d[i].detach().cpu().numpy()
                     mask = masks[i].detach().cpu().numpy()
-                    img_np = np.array(img) / 255.0
+                    img_np = _fit_image(img, pts.shape[:2])
 
-                    # Reshape for indexing
-                    h, w = pts.shape[:2]
+                    mask = _fit_mask(mask, pts.shape[:2])
                     pts_flat = pts.reshape(-1, 3)
                     mask_flat = mask.flatten()
                     colors_flat = img_np.reshape(-1, 3)
@@ -528,73 +605,51 @@ def infer_dust3r(images_bytes_list):
                         'vertices': valid_pts.astype(np.float32),
                         'colors': valid_colors.astype(np.float32),
                         'faces': np.array([], dtype=np.int32),
-                        'confidence': np.ones(len(valid_pts), dtype=np.float32)
+                        'confidence': np.ones(len(valid_pts), dtype=np.float32),
+                        'image_index': i
                     })
             except Exception as e:
                 print(f"Global aligner failed: {e}, falling back to pairwise")
                 import traceback
                 traceback.print_exc()
-                results = []  # Reset to trigger fallback
+                results = []
 
-        # Fallback: process pair by pair and merge
-        if len(results) == 0:
+        if len(results) == 0 and isinstance(output, dict):
             report_progress("inference", 0.6, "Using pairwise point cloud fusion...")
-            all_pts = []
-            all_colors = []
+            from dust3r.inference import get_pred_pts3d
 
-            # Process each pair
-            for pair_idx, pair_output in enumerate(output):
-                try:
-                    pts1 = pair_output['pts3d'][0].detach().cpu().numpy()
-                    pts2 = pair_output['pts3d'][1].detach().cpu().numpy() if len(pair_output['pts3d']) > 1 else None
-                    conf1 = pair_output['conf'][0].detach().cpu().numpy()
-                    conf2 = pair_output['conf'][1].detach().cpu().numpy() if len(pair_output['conf']) > 1 else None
+            pred1 = output.get('pred1', {})
+            view1 = output.get('view1', {})
 
-                    # Get colors from the first image of the pair
-                    img_idx = pair_idx % len(pil_images)
-                    img_np = np.array(pil_images[img_idx]) / 255.0
+            pts = pred1.get('pts3d')
+            conf = pred1.get('conf')
+            if pts is None:
+                pts = get_pred_pts3d(view1, pred1, use_pose=False)
+            if conf is None:
+                conf = torch.ones_like(pts[..., 0])
 
-                    # Filter by confidence
-                    mask1 = conf1 > 1.2
-                    pts1_flat = pts1.reshape(-1, 3)
-                    colors1_flat = img_np.reshape(-1, 3)
-                    mask1_flat = mask1.flatten()
+            pts = pts[0].detach().cpu().numpy()
+            conf = conf[0].detach().cpu().numpy()
+            img_np = _fit_image(pil_images[0], pts.shape[:2])
 
-                    all_pts.append(pts1_flat[mask1_flat])
-                    all_colors.append(colors1_flat[mask1_flat])
+            mask = conf > 1.2
+            mask = _fit_mask(mask, pts.shape[:2])
+            pts_flat = pts.reshape(-1, 3)
+            colors_flat = img_np.reshape(-1, 3)
+            mask_flat = mask.flatten()
 
-                    if pts2 is not None and conf2 is not None:
-                        mask2 = conf2 > 1.2
-                        img_idx2 = (pair_idx + 1) % len(pil_images)
-                        img_np2 = np.array(pil_images[img_idx2]) / 255.0
-                        pts2_flat = pts2.reshape(-1, 3)
-                        colors2_flat = img_np2.reshape(-1, 3)
-                        mask2_flat = mask2.flatten()
+            results.append({
+                'vertices': pts_flat[mask_flat].astype(np.float32),
+                'colors': colors_flat[mask_flat].astype(np.float32),
+                'faces': np.array([], dtype=np.int32),
+                'confidence': conf[mask].flatten().astype(np.float32),
+                'image_index': 0
+            })
 
-                        all_pts.append(pts2_flat[mask2_flat])
-                        all_colors.append(colors2_flat[mask2_flat])
-                except Exception as e:
-                    print(f"Error processing pair {pair_idx}: {e}")
-                    continue
-
-            # Merge all points (simple concatenation - could add deduplication)
-            if all_pts:
-                merged_pts = np.concatenate(all_pts, axis=0)
-                merged_colors = np.concatenate(all_colors, axis=0)
-
-                # Subsample if too many points
-                max_points = 500000
-                if len(merged_pts) > max_points:
-                    idx = np.random.choice(len(merged_pts), max_points, replace=False)
-                    merged_pts = merged_pts[idx]
-                    merged_colors = merged_colors[idx]
-
-                results.append({
-                    'vertices': merged_pts.astype(np.float32),
-                    'colors': merged_colors.astype(np.float32),
-                    'faces': np.array([], dtype=np.int32),
-                    'confidence': np.ones(len(merged_pts), dtype=np.float32)
-                })
+        if len(pil_images) > 2:
+            merged = _merge_point_clouds(results)
+            if merged is not None:
+                results.append(merged)
 
         report_progress("inference", 1.0, f"Dust3r complete: {sum(len(r['vertices']) for r in results)} points")
 
