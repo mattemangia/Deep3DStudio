@@ -254,6 +254,18 @@ namespace Deep3DStudio.Model
                             dynamic vertices = item["vertices"];
                             dynamic colors = item["colors"];
                             dynamic faces = item["faces"];
+                            int imageIndex = i;
+                            try
+                            {
+                                if (item.__contains__("image_index"))
+                                {
+                                    imageIndex = (int)item["image_index"];
+                                }
+                            }
+                            catch (Exception)
+                            {
+                                imageIndex = i;
+                            }
 
                             long vCount = (long)vertices.shape[0];
                             long fCount = (long)faces.shape[0];
@@ -269,7 +281,10 @@ namespace Deep3DStudio.Model
                             }
 
                             result.Meshes.Add(mesh);
-                            result.Poses.Add(new CameraPose { ImageIndex = i, ImagePath = imagePaths[i] });
+                            if (imageIndex >= 0 && imageIndex < imagePaths.Count)
+                            {
+                                result.Poses.Add(new CameraPose { ImageIndex = imageIndex, ImagePath = imagePaths[imageIndex] });
+                            }
                         }
                     }
                 });
