@@ -35,6 +35,10 @@ namespace Deep3DStudio
         private int _selectedQuality = 1;
         private string[] _workflows = { "Dust3r (Multi-View)", "Feature Matching (SfM)", "TripoSR (Single Image)", "LGM (Gaussian)", "Wonder3D" };
         private string[] _qualities = { "Fast", "Balanced", "High" };
+
+        // Auto Workflow Toggle - when enabled, Play button runs the full selected workflow
+        // When disabled, user can manually trigger each step (e.g., Dust3R -> then LGM -> then UniRig)
+        private bool _autoWorkflowEnabled = true;
         private string _logBuffer = "";
         private bool _autoScroll = true;
         private int _lastLogLength = 0;
@@ -942,12 +946,22 @@ namespace Deep3DStudio
                 ImGui.Combo("##Quality", ref _selectedQuality, _qualities, _qualities.Length);
                 ImGui.SameLine();
 
-                // Run Button
-                DrawToolbarButton("##Run", IconType.Run, false, () => RunReconstruction(), "Run Reconstruction", size);
+                // Auto Workflow Toggle
+                DrawToggleBtn("##AutoWF", IconType.Link, _autoWorkflowEnabled, v => _autoWorkflowEnabled = v,
+                    _autoWorkflowEnabled ? "Auto Workflow: ON (Play runs full pipeline)" : "Auto Workflow: OFF (Manual step-by-step)", size);
                 ImGui.SameLine();
-                DrawToolbarButton("##Points", IconType.Cloud, false, () => RunReconstruction(false, true), "Generate Point Cloud", size);
+
+                // Run Button - behavior depends on _autoWorkflowEnabled
+                DrawToolbarButton("##Run", IconType.Run, false, () => {
+                    if (_autoWorkflowEnabled)
+                        RunReconstruction(); // Run full workflow
+                    else
+                        RunSingleStep(WorkflowStep.Dust3rReconstruction); // Just run the selected workflow's first step
+                }, _autoWorkflowEnabled ? "Run Full Workflow" : "Run Selected Step", size);
                 ImGui.SameLine();
-                DrawToolbarButton("##Mesh", IconType.Mesh, false, () => RunReconstruction(true, false), "Generate Mesh from Points", size);
+                DrawToolbarButton("##Points", IconType.Cloud, false, () => RunSingleStep(WorkflowStep.Dust3rReconstruction), "Generate Point Cloud (Dust3R/SfM)", size);
+                ImGui.SameLine();
+                DrawToolbarButton("##Mesh", IconType.Mesh, false, () => RunSingleStep(WorkflowStep.PoissonReconstruction), "Generate Mesh from Points", size);
 
                 ImGui.SameLine();
                 ImGui.Text("|");
@@ -1052,20 +1066,56 @@ namespace Deep3DStudio
                 ImGui.Separator();
                 ImGui.Spacing();
 
-                // Processing Operations Section
-                ImGui.TextDisabled("AI");
+                // Standalone AI Actions - each can be run independently
+                ImGui.TextDisabled("AI Steps");
 
-                if (ImGui.ImageButton("##GenCloud", _iconFactory.GetIcon(IconType.PointCloudGen), size))
-                    RunReconstruction(false, true);
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Generate Point Cloud");
+                // Point Cloud Generation (Dust3R or SfM depending on workflow)
+                if (ImGui.ImageButton("##Dust3R", _iconFactory.GetIcon(IconType.PointCloudGen), size))
+                    RunSingleStep(WorkflowStep.Dust3rReconstruction);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Dust3R Point Cloud");
 
-                if (ImGui.ImageButton("##GenMesh", _iconFactory.GetIcon(IconType.MeshGen), size))
-                    RunReconstruction(true, false);
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Generate Mesh");
+                // Single-image 3D generation models
+                if (ImGui.ImageButton("##TripoSR", _iconFactory.GetIcon(IconType.TripoSR), size))
+                    RunSingleStep(WorkflowStep.TripoSRGeneration);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("TripoSR (Single Image)");
+
+                if (ImGui.ImageButton("##LGM", _iconFactory.GetIcon(IconType.LGM), size))
+                    RunSingleStep(WorkflowStep.LGMGeneration);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("LGM Gaussian (Single Image)");
+
+                if (ImGui.ImageButton("##Wonder3D", _iconFactory.GetIcon(IconType.Wonder3D), size))
+                    RunSingleStep(WorkflowStep.Wonder3DGeneration);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Wonder3D (Multi-View)");
+
+                ImGui.Spacing();
+
+                // Refinement models
+                ImGui.TextDisabled("Refine");
+
+                if (ImGui.ImageButton("##NeRF", _iconFactory.GetIcon(IconType.NeRF), size))
+                    RunSingleStep(WorkflowStep.NeRFRefinement);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("NeRF Refinement");
+
+                if (ImGui.ImageButton("##DeepMeshPrior", _iconFactory.GetIcon(IconType.Refine), size))
+                    RunSingleStep(WorkflowStep.DeepMeshPriorRefinement);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("DeepMeshPrior Refinement");
+
+                if (ImGui.ImageButton("##TripoSF", _iconFactory.GetIcon(IconType.Optimize), size))
+                    RunSingleStep(WorkflowStep.TripoSFRefinement);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("TripoSF Refinement");
+
+                ImGui.Spacing();
+
+                // Meshing
+                ImGui.TextDisabled("Mesh Gen");
+
+                if (ImGui.ImageButton("##Poisson", _iconFactory.GetIcon(IconType.MeshGen), size))
+                    RunSingleStep(WorkflowStep.PoissonReconstruction);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Poisson Mesh Reconstruction");
 
                 if (ImGui.ImageButton("##AutoRig", _iconFactory.GetIcon(IconType.Rig), size))
-                    OnAutoRig();
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Auto Rig (UniRig)");
+                    RunSingleStep(WorkflowStep.UniRigAutoRig);
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("UniRig Auto-Rig");
 
                 ImGui.Spacing();
                 ImGui.Separator();
@@ -3358,6 +3408,144 @@ namespace Deep3DStudio
             {
                 ProgressDialog.Instance.Fail(ex);
             }
+        }
+
+        /// <summary>
+        /// Run a single workflow step standalone (without running the full workflow).
+        /// This allows users to manually control each step of the pipeline.
+        /// </summary>
+        private async void RunSingleStep(WorkflowStep step)
+        {
+            // Validate prerequisites for each step
+            switch (step)
+            {
+                case WorkflowStep.Dust3rReconstruction:
+                case WorkflowStep.SfMReconstruction:
+                    if (_loadedImages.Count < 2)
+                    {
+                        ShowError("Need More Images", "Please load at least 2 images for reconstruction.");
+                        return;
+                    }
+                    break;
+
+                case WorkflowStep.TripoSRGeneration:
+                case WorkflowStep.LGMGeneration:
+                case WorkflowStep.Wonder3DGeneration:
+                    if (_loadedImages.Count == 0)
+                    {
+                        ShowError("No Images", "Please load at least one image.");
+                        return;
+                    }
+                    break;
+
+                case WorkflowStep.NeRFRefinement:
+                case WorkflowStep.DeepMeshPriorRefinement:
+                case WorkflowStep.TripoSFRefinement:
+                case WorkflowStep.GaussianSDFRefinement:
+                case WorkflowStep.PoissonReconstruction:
+                case WorkflowStep.MeshSmoothing:
+                case WorkflowStep.MeshDecimation:
+                case WorkflowStep.UniRigAutoRig:
+                    if (_sceneGraph.GetAllObjects().Count == 0)
+                    {
+                        ShowError("No Geometry", "Please generate or load geometry first.");
+                        return;
+                    }
+                    break;
+            }
+
+            string stepName = GetStepDisplayName(step);
+            ProgressDialog.Instance.Start($"Running {stepName}...", OperationType.Processing);
+
+            try
+            {
+                SceneResult? result = null;
+                var imagePaths = _loadedImages.Select(i => i.FilePath).ToList();
+
+                // Get current scene result from existing meshes
+                SceneResult? currentResult = null;
+                var existingMeshes = _sceneGraph.GetAllObjects().OfType<MeshObject>().ToList();
+                if (existingMeshes.Count > 0)
+                {
+                    currentResult = new SceneResult
+                    {
+                        Meshes = existingMeshes.Select(m => m.MeshData).ToList(),
+                        Poses = new List<CameraPose>()
+                    };
+                }
+
+                await Task.Run(async () =>
+                {
+                    // Create a single-step pipeline
+                    var pipeline = new WorkflowPipeline
+                    {
+                        Name = stepName,
+                        Steps = new List<WorkflowStep> { step }
+                    };
+
+                    result = await AIModelManager.Instance.ExecuteWorkflowAsync(pipeline, imagePaths, currentResult, (s, p) =>
+                    {
+                        ProgressDialog.Instance.Update(p, s);
+                    });
+                });
+
+                if (result != null)
+                {
+                    foreach (var mesh in result.Meshes)
+                    {
+                        if (mesh.Vertices.Count > 0)
+                        {
+                            var obj = new MeshObject($"{stepName} Result", mesh);
+                            lock (_sceneGraph)
+                            {
+                                _sceneGraph.AddObject(obj);
+                            }
+                        }
+                    }
+
+                    PopulateDepthData(result);
+                    ProgressDialog.Instance.Log($"{stepName} complete. Added {result.Meshes.Count} objects.");
+                    ProgressDialog.Instance.Complete();
+                }
+                else
+                {
+                    if (ProgressDialog.Instance.State == ProgressState.Running)
+                        ProgressDialog.Instance.Fail(new Exception($"{stepName} failed: No result returned."));
+                }
+            }
+            catch (Exception ex)
+            {
+                ProgressDialog.Instance.Fail(ex);
+            }
+        }
+
+        /// <summary>
+        /// Get a human-readable name for a workflow step
+        /// </summary>
+        private string GetStepDisplayName(WorkflowStep step)
+        {
+            return step switch
+            {
+                WorkflowStep.Dust3rReconstruction => "Dust3R Reconstruction",
+                WorkflowStep.SfMReconstruction => "Feature Matching (SfM)",
+                WorkflowStep.TripoSRGeneration => "TripoSR Generation",
+                WorkflowStep.LGMGeneration => "LGM Generation",
+                WorkflowStep.Wonder3DGeneration => "Wonder3D Generation",
+                WorkflowStep.NeRFRefinement => "NeRF Refinement",
+                WorkflowStep.DeepMeshPriorRefinement => "DeepMeshPrior Refinement",
+                WorkflowStep.TripoSFRefinement => "TripoSF Refinement",
+                WorkflowStep.GaussianSDFRefinement => "GaussianSDF Refinement",
+                WorkflowStep.PoissonReconstruction => "Poisson Reconstruction",
+                WorkflowStep.MarchingCubes => "Marching Cubes",
+                WorkflowStep.MeshSmoothing => "Mesh Smoothing",
+                WorkflowStep.MeshDecimation => "Mesh Decimation",
+                WorkflowStep.UniRigAutoRig => "UniRig Auto-Rig",
+                WorkflowStep.VoxelizePointCloud => "Voxelize Point Cloud",
+                WorkflowStep.MergePointClouds => "Merge Point Clouds",
+                WorkflowStep.AlignPointClouds => "Align Point Clouds",
+                WorkflowStep.FilterPointCloud => "Filter Point Cloud",
+                _ => step.ToString()
+            };
         }
 
         private void PopulateDepthData(SceneResult result)

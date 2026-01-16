@@ -96,10 +96,20 @@ namespace Deep3DStudio
 
         private async void OnRunInference(object? sender, EventArgs e)
         {
-            bool success = await RunPointCloudGeneration();
-            if (success)
+            if (_autoWorkflowEnabled)
             {
-                await RunMeshing();
+                // Auto workflow mode: run full pipeline based on selected workflow
+                bool success = await RunPointCloudGeneration();
+                if (success)
+                {
+                    await RunMeshing();
+                }
+            }
+            else
+            {
+                // Manual mode: run only Dust3R (point cloud generation) as the first step
+                // User can then choose to run other steps manually
+                await RunPointCloudGeneration();
             }
         }
 

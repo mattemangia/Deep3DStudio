@@ -31,6 +31,11 @@ namespace Deep3DStudio.Icons
                         case "camera": DrawCameraIcon(cr, size); break;
                         case "rig": DrawRigIcon(cr, size); break;
                         case "refine": DrawRefineIcon(cr, size); break;
+                        case "link": DrawLinkIcon(cr, size); break;
+                        case "ai_single": DrawAISingleIcon(cr, size); break;
+                        case "ai_gauss": DrawAIGaussIcon(cr, size); break;
+                        case "ai_multi": DrawAIMultiIcon(cr, size); break;
+                        case "nerf": DrawNeRFIcon(cr, size); break;
                     }
                 }
 
@@ -310,6 +315,117 @@ namespace Deep3DStudio.Icons
             cr.LineTo(size * 0.8, size * 0.5);
             cr.ClosePath();
             cr.Fill();
+        }
+
+        private static void DrawLinkIcon(Context cr, int size)
+        {
+            // Chain link icon for auto workflow toggle
+            cr.SetSourceRGB(0.2, 0.8, 0.2);
+            cr.LineWidth = 3;
+
+            // Left chain link (oval)
+            double ovalW = size * 0.35;
+            double ovalH = size * 0.4;
+
+            cr.Save();
+            cr.Translate(size * 0.3, size * 0.5);
+            cr.Scale(ovalW / 2, ovalH / 2);
+            cr.Arc(0, 0, 1, 0, 2 * Math.PI);
+            cr.Restore();
+            cr.Stroke();
+
+            // Right chain link (oval)
+            cr.Save();
+            cr.Translate(size * 0.7, size * 0.5);
+            cr.Scale(ovalW / 2, ovalH / 2);
+            cr.Arc(0, 0, 1, 0, 2 * Math.PI);
+            cr.Restore();
+            cr.Stroke();
+        }
+
+        private static void DrawAISingleIcon(Context cr, int size)
+        {
+            // TripoSR icon - single image to 3D
+            cr.SetSourceRGB(0.9, 0.2, 0.6);
+            cr.LineWidth = 2;
+
+            // Image frame
+            cr.Rectangle(size * 0.1, size * 0.25, size * 0.35, size * 0.5);
+            cr.Stroke();
+
+            // Arrow
+            cr.MoveTo(size * 0.5, size * 0.5);
+            cr.LineTo(size * 0.7, size * 0.5);
+            cr.Stroke();
+
+            // 3D cube outline
+            cr.Rectangle(size * 0.7, size * 0.3, size * 0.2, size * 0.4);
+            cr.Stroke();
+        }
+
+        private static void DrawAIGaussIcon(Context cr, int size)
+        {
+            // LGM icon - Large Gaussian Model (multiple dots)
+            cr.SetSourceRGB(0.6, 0.2, 0.8);
+
+            // Multiple gaussian dots
+            cr.Arc(size * 0.3, size * 0.3, size * 0.1, 0, 2 * Math.PI);
+            cr.Fill();
+            cr.Arc(size * 0.5, size * 0.5, size * 0.12, 0, 2 * Math.PI);
+            cr.Fill();
+            cr.Arc(size * 0.7, size * 0.35, size * 0.08, 0, 2 * Math.PI);
+            cr.Fill();
+            cr.Arc(size * 0.4, size * 0.7, size * 0.1, 0, 2 * Math.PI);
+            cr.Fill();
+            cr.Arc(size * 0.65, size * 0.65, size * 0.09, 0, 2 * Math.PI);
+            cr.Fill();
+        }
+
+        private static void DrawAIMultiIcon(Context cr, int size)
+        {
+            // Wonder3D icon - multiple views
+            cr.SetSourceRGB(0.0, 0.6, 0.6);
+            cr.LineWidth = 2;
+
+            // Multiple overlapping image frames
+            cr.Rectangle(size * 0.15, size * 0.35, size * 0.25, size * 0.35);
+            cr.Stroke();
+            cr.Rectangle(size * 0.3, size * 0.25, size * 0.25, size * 0.35);
+            cr.Stroke();
+            cr.Rectangle(size * 0.45, size * 0.35, size * 0.25, size * 0.35);
+            cr.Stroke();
+        }
+
+        private static void DrawNeRFIcon(Context cr, int size)
+        {
+            // NeRF icon - neural radiance field (network representation)
+            cr.SetSourceRGB(1.0, 0.3, 0.1);
+
+            // Input nodes
+            cr.Arc(size * 0.2, size * 0.3, size * 0.08, 0, 2 * Math.PI);
+            cr.Fill();
+            cr.Arc(size * 0.2, size * 0.7, size * 0.08, 0, 2 * Math.PI);
+            cr.Fill();
+
+            // Middle node
+            cr.Arc(size * 0.5, size * 0.5, size * 0.1, 0, 2 * Math.PI);
+            cr.Fill();
+
+            // Output node
+            cr.Arc(size * 0.8, size * 0.5, size * 0.08, 0, 2 * Math.PI);
+            cr.Fill();
+
+            // Connections
+            cr.LineWidth = 2;
+            cr.MoveTo(size * 0.28, size * 0.32);
+            cr.LineTo(size * 0.42, size * 0.48);
+            cr.Stroke();
+            cr.MoveTo(size * 0.28, size * 0.68);
+            cr.LineTo(size * 0.42, size * 0.52);
+            cr.Stroke();
+            cr.MoveTo(size * 0.58, size * 0.5);
+            cr.LineTo(size * 0.72, size * 0.5);
+            cr.Stroke();
         }
 
     }

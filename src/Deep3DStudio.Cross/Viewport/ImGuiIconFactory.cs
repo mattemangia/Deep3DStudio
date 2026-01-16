@@ -42,7 +42,13 @@ namespace Deep3DStudio.Viewport
         GrowSelection,
         ClearSelection,
         Smooth,
-        Fullscreen
+        Fullscreen,
+        Link,
+        TripoSR,
+        LGM,
+        Wonder3D,
+        NeRF,
+        Refine
     }
 
     public class ImGuiIconFactory : IDisposable
@@ -453,6 +459,72 @@ namespace Deep3DStudio.Viewport
                 // Center rectangle (representing the window)
                 float rectMargin = w * 0.3f;
                 canvas.DrawRect(rectMargin, rectMargin, w - 2 * rectMargin, h - 2 * rectMargin, p);
+            });
+
+            _icons[IconType.Link] = CreateIcon(SKColors.LimeGreen, (canvas, w, h) => {
+                // Link/Chain icon for auto workflow toggle
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 3, Style = SKPaintStyle.Stroke, IsAntialias = true };
+                // Two chain links
+                canvas.DrawOval(new SKRect(w * 0.15f, h * 0.3f, w * 0.55f, h * 0.7f), p);
+                canvas.DrawOval(new SKRect(w * 0.45f, h * 0.3f, w * 0.85f, h * 0.7f), p);
+            });
+
+            _icons[IconType.TripoSR] = CreateIcon(SKColors.DeepPink, (canvas, w, h) => {
+                // TripoSR icon - single image to 3D
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                var pFill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
+                // Image frame
+                canvas.DrawRect(w * 0.1f, h * 0.2f, w * 0.35f, h * 0.6f, p);
+                // Arrow
+                canvas.DrawLine(w * 0.5f, h * 0.5f, w * 0.7f, h * 0.5f, p);
+                // 3D cube
+                canvas.DrawRect(w * 0.7f, h * 0.3f, w * 0.2f, h * 0.4f, p);
+            });
+
+            _icons[IconType.LGM] = CreateIcon(SKColors.Purple, (canvas, w, h) => {
+                // LGM icon - Large Gaussian Model
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                var pFill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
+                // Multiple gaussian dots
+                canvas.DrawCircle(w * 0.3f, h * 0.3f, 6, pFill);
+                canvas.DrawCircle(w * 0.5f, h * 0.5f, 8, pFill);
+                canvas.DrawCircle(w * 0.7f, h * 0.35f, 5, pFill);
+                canvas.DrawCircle(w * 0.4f, h * 0.7f, 7, pFill);
+                canvas.DrawCircle(w * 0.65f, h * 0.65f, 6, pFill);
+            });
+
+            _icons[IconType.Wonder3D] = CreateIcon(SKColors.Teal, (canvas, w, h) => {
+                // Wonder3D icon - multi-view
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                // Multiple image frames at angles
+                canvas.DrawRect(w * 0.2f, h * 0.3f, w * 0.25f, h * 0.4f, p);
+                canvas.DrawRect(w * 0.35f, h * 0.25f, w * 0.25f, h * 0.4f, p);
+                canvas.DrawRect(w * 0.5f, h * 0.3f, w * 0.25f, h * 0.4f, p);
+            });
+
+            _icons[IconType.NeRF] = CreateIcon(SKColors.OrangeRed, (canvas, w, h) => {
+                // NeRF icon - neural radiance field
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                var pFill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
+                // Neural network representation
+                canvas.DrawCircle(w * 0.2f, h * 0.3f, 5, pFill);
+                canvas.DrawCircle(w * 0.2f, h * 0.7f, 5, pFill);
+                canvas.DrawCircle(w * 0.5f, h * 0.5f, 6, pFill);
+                canvas.DrawCircle(w * 0.8f, h * 0.5f, 5, pFill);
+                // Connections
+                canvas.DrawLine(w * 0.25f, h * 0.3f, w * 0.45f, h * 0.5f, p);
+                canvas.DrawLine(w * 0.25f, h * 0.7f, w * 0.45f, h * 0.5f, p);
+                canvas.DrawLine(w * 0.55f, h * 0.5f, w * 0.75f, h * 0.5f, p);
+            });
+
+            _icons[IconType.Refine] = CreateIcon(SKColors.Gold, (canvas, w, h) => {
+                // Refine icon - polish/enhance
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 3, Style = SKPaintStyle.Stroke };
+                // Star/sparkle
+                canvas.DrawLine(w * 0.5f, h * 0.15f, w * 0.5f, h * 0.85f, p);
+                canvas.DrawLine(w * 0.15f, h * 0.5f, w * 0.85f, h * 0.5f, p);
+                canvas.DrawLine(w * 0.25f, h * 0.25f, w * 0.75f, h * 0.75f, p);
+                canvas.DrawLine(w * 0.75f, h * 0.25f, w * 0.25f, h * 0.75f, p);
             });
         }
 
