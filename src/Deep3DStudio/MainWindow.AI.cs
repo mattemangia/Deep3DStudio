@@ -264,5 +264,118 @@ namespace Deep3DStudio
             _isDirty = true;
             UpdateTitle();
         }
+
+        /// <summary>
+        /// Run a single workflow step standalone (without running the full workflow).
+        /// This allows users to manually control each step of the pipeline.
+        /// </summary>
+        private async void OnRunSingleStep(AIModels.WorkflowStep step)
+        {
+            // Validate prerequisites for each step
+            switch (step)
+            {
+                case AIModels.WorkflowStep.Dust3rReconstruction:
+                case AIModels.WorkflowStep.SfMReconstruction:
+                    if (_imagePaths.Count < 2)
+                    {
+                        ShowMessage("Need More Images", "Please load at least 2 images for reconstruction.");
+                        return;
+                    }
+                    break;
+
+                case AIModels.WorkflowStep.TripoSRGeneration:
+                case AIModels.WorkflowStep.LGMGeneration:
+                case AIModels.WorkflowStep.Wonder3DGeneration:
+                    if (_imagePaths.Count == 0)
+                    {
+                        ShowMessage("No Images", "Please load at least one image.");
+                        return;
+                    }
+                    break;
+
+                case AIModels.WorkflowStep.NeRFRefinement:
+                case AIModels.WorkflowStep.DeepMeshPriorRefinement:
+                case AIModels.WorkflowStep.TripoSFRefinement:
+                case AIModels.WorkflowStep.GaussianSDFRefinement:
+                case AIModels.WorkflowStep.PoissonReconstruction:
+                case AIModels.WorkflowStep.MeshSmoothing:
+                case AIModels.WorkflowStep.MeshDecimation:
+                case AIModels.WorkflowStep.UniRigAutoRig:
+                    if (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0)
+                    {
+                        ShowMessage("No Geometry", "Please generate or load geometry first.");
+                        return;
+                    }
+                    break;
+            }
+
+            string stepName = GetStepDisplayName(step);
+            _statusLabel.Text = $"Running {stepName}...";
+
+            try
+            {
+                // Create a single-step pipeline
+                var pipeline = new AIModels.WorkflowPipeline
+                {
+                    Name = stepName,
+                    Steps = new List<AIModels.WorkflowStep> { step }
+                };
+
+                var manager = AIModels.AIModelManager.Instance;
+                var result = await manager.ExecuteWorkflowAsync(
+                    pipeline,
+                    _imagePaths,
+                    _lastSceneResult,
+                    (message, _) => Application.Invoke((s, e) => _statusLabel.Text = message)
+                );
+
+                if (result != null)
+                {
+                    Application.Invoke((s, e) =>
+                    {
+                        _lastSceneResult = result;
+                        UpdateSceneFromResult(result);
+                        _statusLabel.Text = $"{stepName} completed successfully.";
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Application.Invoke((s, e) =>
+                {
+                    ShowMessage($"{stepName} Error", $"Error: {ex.Message}");
+                    _statusLabel.Text = $"{stepName} failed.";
+                });
+            }
+        }
+
+        /// <summary>
+        /// Get a human-readable name for a workflow step
+        /// </summary>
+        private string GetStepDisplayName(AIModels.WorkflowStep step)
+        {
+            return step switch
+            {
+                AIModels.WorkflowStep.Dust3rReconstruction => "Dust3R Reconstruction",
+                AIModels.WorkflowStep.SfMReconstruction => "Feature Matching (SfM)",
+                AIModels.WorkflowStep.TripoSRGeneration => "TripoSR Generation",
+                AIModels.WorkflowStep.LGMGeneration => "LGM Generation",
+                AIModels.WorkflowStep.Wonder3DGeneration => "Wonder3D Generation",
+                AIModels.WorkflowStep.NeRFRefinement => "NeRF Refinement",
+                AIModels.WorkflowStep.DeepMeshPriorRefinement => "DeepMeshPrior Refinement",
+                AIModels.WorkflowStep.TripoSFRefinement => "TripoSF Refinement",
+                AIModels.WorkflowStep.GaussianSDFRefinement => "GaussianSDF Refinement",
+                AIModels.WorkflowStep.PoissonReconstruction => "Poisson Reconstruction",
+                AIModels.WorkflowStep.MarchingCubes => "Marching Cubes",
+                AIModels.WorkflowStep.MeshSmoothing => "Mesh Smoothing",
+                AIModels.WorkflowStep.MeshDecimation => "Mesh Decimation",
+                AIModels.WorkflowStep.UniRigAutoRig => "UniRig Auto-Rig",
+                AIModels.WorkflowStep.VoxelizePointCloud => "Voxelize Point Cloud",
+                AIModels.WorkflowStep.MergePointClouds => "Merge Point Clouds",
+                AIModels.WorkflowStep.AlignPointClouds => "Align Point Clouds",
+                AIModels.WorkflowStep.FilterPointCloud => "Filter Point Cloud",
+                _ => step.ToString()
+            };
+        }
     }
 }

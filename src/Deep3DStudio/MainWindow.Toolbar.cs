@@ -150,6 +150,20 @@ namespace Deep3DStudio
 
             toolbar.Insert(new SeparatorToolItem(), -1);
 
+            // Auto Workflow Toggle
+            _autoWorkflowToggle = new ToggleToolButton();
+            _autoWorkflowToggle.IconWidget = AppIconFactory.GenerateIcon("link", iconSize);
+            _autoWorkflowToggle.Label = "Auto";
+            _autoWorkflowToggle.TooltipText = "Auto Workflow: When ON, Play runs full pipeline. When OFF, run each step manually.";
+            _autoWorkflowToggle.Active = _autoWorkflowEnabled;
+            _autoWorkflowToggle.Toggled += (s, e) => {
+                _autoWorkflowEnabled = _autoWorkflowToggle.Active;
+                _autoWorkflowToggle.TooltipText = _autoWorkflowEnabled
+                    ? "Auto Workflow: ON (Play runs full pipeline)"
+                    : "Auto Workflow: OFF (Run each step manually)";
+            };
+            toolbar.Insert(_autoWorkflowToggle, -1);
+
             // Workflow
             var wfItem = new ToolItem();
             var wfBox = new Box(Orientation.Horizontal, 5);
@@ -171,34 +185,57 @@ namespace Deep3DStudio
 
             toolbar.Insert(new SeparatorToolItem(), -1);
 
-            // Run
-            var runPointsBtn = new ToolButton(AppIconFactory.GenerateIcon("pointcloud", iconSize), "Gen Points");
-            runPointsBtn.TooltipText = "Generate Point Cloud Only";
-            runPointsBtn.Clicked += OnGeneratePointCloud;
+            // Run - behavior depends on _autoWorkflowEnabled
+            var runPointsBtn = new ToolButton(AppIconFactory.GenerateIcon("pointcloud", iconSize), "Dust3R");
+            runPointsBtn.TooltipText = "Generate Point Cloud with Dust3R (standalone)";
+            runPointsBtn.Clicked += (s, e) => OnRunSingleStep(AIModels.WorkflowStep.Dust3rReconstruction);
             toolbar.Insert(runPointsBtn, -1);
 
-            var runMeshBtn = new ToolButton(AppIconFactory.GenerateIcon("mesh", iconSize), "Gen Mesh");
-            runMeshBtn.TooltipText = "Generate Mesh from existing Point Cloud";
-            runMeshBtn.Clicked += OnGenerateMesh;
+            var runMeshBtn = new ToolButton(AppIconFactory.GenerateIcon("mesh", iconSize), "Mesh");
+            runMeshBtn.TooltipText = "Generate Mesh from existing Point Cloud (standalone)";
+            runMeshBtn.Clicked += (s, e) => OnRunSingleStep(AIModels.WorkflowStep.PoissonReconstruction);
             toolbar.Insert(runMeshBtn, -1);
 
-            var runBtn = new ToolButton(AppIconFactory.GenerateIcon("run", iconSize), "Run All");
-            runBtn.TooltipText = "Start Full Reconstruction Process";
+            var runBtn = new ToolButton(AppIconFactory.GenerateIcon("run", iconSize), "Run");
+            runBtn.TooltipText = "Run (Auto: full workflow / Manual: selected step)";
             runBtn.Clicked += OnRunInference;
             toolbar.Insert(runBtn, -1);
 
             toolbar.Insert(new SeparatorToolItem(), -1);
 
-            // AI Model Operations
-            var aiRigBtn = new ToolButton(AppIconFactory.GenerateIcon("rig", iconSize), "Auto Rig");
-            aiRigBtn.TooltipText = "Auto-rig mesh with UniRig";
-            aiRigBtn.Clicked += OnAutoRig;
-            toolbar.Insert(aiRigBtn, -1);
+            // Standalone AI Model Operations
+            var tripoSRBtn = new ToolButton(AppIconFactory.GenerateIcon("ai_single", iconSize), "TripoSR");
+            tripoSRBtn.TooltipText = "TripoSR: Single image to 3D (standalone)";
+            tripoSRBtn.Clicked += (s, e) => OnRunSingleStep(AIModels.WorkflowStep.TripoSRGeneration);
+            toolbar.Insert(tripoSRBtn, -1);
 
-            var aiRefineBtn = new ToolButton(AppIconFactory.GenerateIcon("refine", iconSize), "AI Refine");
+            var lgmBtn = new ToolButton(AppIconFactory.GenerateIcon("ai_gauss", iconSize), "LGM");
+            lgmBtn.TooltipText = "LGM: Large Gaussian Model (standalone)";
+            lgmBtn.Clicked += (s, e) => OnRunSingleStep(AIModels.WorkflowStep.LGMGeneration);
+            toolbar.Insert(lgmBtn, -1);
+
+            var wonder3DBtn = new ToolButton(AppIconFactory.GenerateIcon("ai_multi", iconSize), "Wonder3D");
+            wonder3DBtn.TooltipText = "Wonder3D: Multi-view 3D generation (standalone)";
+            wonder3DBtn.Clicked += (s, e) => OnRunSingleStep(AIModels.WorkflowStep.Wonder3DGeneration);
+            toolbar.Insert(wonder3DBtn, -1);
+
+            toolbar.Insert(new SeparatorToolItem(), -1);
+
+            // Refinement Operations
+            var nerfBtn = new ToolButton(AppIconFactory.GenerateIcon("nerf", iconSize), "NeRF");
+            nerfBtn.TooltipText = "NeRF Refinement (standalone)";
+            nerfBtn.Clicked += (s, e) => OnRunSingleStep(AIModels.WorkflowStep.NeRFRefinement);
+            toolbar.Insert(nerfBtn, -1);
+
+            var aiRefineBtn = new ToolButton(AppIconFactory.GenerateIcon("refine", iconSize), "Refine");
             aiRefineBtn.TooltipText = "Refine mesh with AI models (TripoSF/DeepMeshPrior/GaussianSDF)";
             aiRefineBtn.Clicked += OnAIRefine;
             toolbar.Insert(aiRefineBtn, -1);
+
+            var aiRigBtn = new ToolButton(AppIconFactory.GenerateIcon("rig", iconSize), "UniRig");
+            aiRigBtn.TooltipText = "Auto-rig mesh with UniRig (standalone)";
+            aiRigBtn.Clicked += (s, e) => OnRunSingleStep(AIModels.WorkflowStep.UniRigAutoRig);
+            toolbar.Insert(aiRigBtn, -1);
 
             return toolbar;
         }
