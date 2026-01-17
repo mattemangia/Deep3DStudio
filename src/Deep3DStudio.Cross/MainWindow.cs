@@ -33,8 +33,18 @@ namespace Deep3DStudio
         // State
         private int _selectedWorkflow = 0;
         private int _selectedQuality = 1;
-        private string[] _workflows = { "Dust3r (Multi-View)", "Feature Matching (SfM)", "TripoSR (Single Image)", "LGM (Gaussian)", "Wonder3D" };
+        private string[] _workflows = {
+            "Dust3r (Multi-View)",
+            "MASt3R (Metric 3D)",       // MASt3R - better matching and metric reconstruction
+            "MUSt3R (Multi-View/Video)", // MUSt3R - optimized for many images and video
+            "Feature Matching (SfM)",
+            "TripoSR (Single Image)",
+            "LGM (Gaussian)",
+            "Wonder3D"
+        };
         private string[] _qualities = { "Fast", "Balanced", "High" };
+        private string _videoFilePath = ""; // For MUSt3R video input
+        private bool _hasVideoInput = false;
 
         // Auto Workflow Toggle - when enabled, Play button runs the full selected workflow
         // When disabled, user can manually trigger each step (e.g., Dust3R -> then LGM -> then UniRig)
@@ -935,11 +945,48 @@ namespace Deep3DStudio
                 ImGui.Text("|");
                 ImGui.SameLine();
 
-                // Workflow Selection
+                // Workflow Selection with recommendation for MASt3R/MUSt3R
                 ImGui.Text("Workflow:"); ImGui.SameLine();
-                ImGui.SetNextItemWidth(170);
+                ImGui.SetNextItemWidth(190);
+
+                // Show recommendation hint if more than 2 images loaded
+                string workflowHint = "";
+                if (_loadedImages.Count > 2 && _selectedWorkflow == 0)
+                {
+                    workflowHint = " (Consider MASt3R/MUSt3R for >2 images)";
+                    ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(1.0f, 0.8f, 0.2f, 1.0f));
+                }
+                else if (_hasVideoInput && _selectedWorkflow != 2)
+                {
+                    workflowHint = " (MUSt3R recommended for video)";
+                    ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(0.6f, 0.8f, 1.0f, 1.0f));
+                }
+
                 ImGui.Combo("##Workflow", ref _selectedWorkflow, _workflows, _workflows.Length);
+                if (!string.IsNullOrEmpty(workflowHint))
+                {
+                    ImGui.PopStyleColor();
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.SetTooltip(workflowHint.Trim());
+                    }
+                }
                 ImGui.SameLine();
+
+                // Video input button for MUSt3R
+                if (_selectedWorkflow == 2) // MUSt3R selected
+                {
+                    if (ImGui.ImageButton("##VideoInput", _iconFactory.GetIcon(IconType.Video), new System.Numerics.Vector2(24, 24)))
+                    {
+                        LoadVideoFile();
+                    }
+                    if (ImGui.IsItemHovered())
+                    {
+                        string videoTip = _hasVideoInput ? $"Video: {Path.GetFileName(_videoFilePath)}" : "Load Video for MUSt3R";
+                        ImGui.SetTooltip(videoTip);
+                    }
+                    ImGui.SameLine();
+                }
 
                 ImGui.Text("Quality:"); ImGui.SameLine();
                 ImGui.SetNextItemWidth(100);
@@ -2465,6 +2512,24 @@ namespace Deep3DStudio
             }
         }
 
+        private void LoadVideoFile()
+        {
+            var result = Nfd.OpenDialog(out string path, new Dictionary<string, string>
+            {
+                { "Video Files", "mp4,avi,mov,mkv,webm" }
+            });
+
+            if (result == NfdStatus.Ok && !string.IsNullOrEmpty(path))
+            {
+                _videoFilePath = path;
+                _hasVideoInput = true;
+                _logBuffer += $"[MUSt3R] Video loaded: {Path.GetFileName(path)}\n";
+
+                // Auto-select MUSt3R workflow when video is loaded
+                _selectedWorkflow = 2; // MUSt3R (Multi-View/Video)
+            }
+        }
+
         private void OnExportMesh()
         {
             var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
@@ -3359,7 +3424,11 @@ namespace Deep3DStudio
                 {
                     WorkflowPipeline pipeline = WorkflowPipeline.ImageToDust3rToMesh;
 
-                    if (_workflows[_selectedWorkflow].Contains("Feature Matching") || _workflows[_selectedWorkflow].Contains("SfM"))
+                    if (_workflows[_selectedWorkflow].Contains("MASt3R"))
+                        pipeline = WorkflowPipeline.ImageToMast3rToMesh;
+                    else if (_workflows[_selectedWorkflow].Contains("MUSt3R"))
+                        pipeline = WorkflowPipeline.ImageToMust3rToMesh;
+                    else if (_workflows[_selectedWorkflow].Contains("Feature Matching") || _workflows[_selectedWorkflow].Contains("SfM"))
                         pipeline = WorkflowPipeline.ImageToSfM;
                     else if (_workflows[_selectedWorkflow].Contains("TripoSR"))
                         pipeline = WorkflowPipeline.ImageToTripoSR;

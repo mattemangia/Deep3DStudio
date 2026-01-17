@@ -105,6 +105,8 @@ namespace Deep3DStudio
                 var expectedFiles = new List<string>
                 {
                     "dust3r_weights.pth",
+                    "mast3r/mast3r_weights.pth",        // MASt3R - Matching And Stereo 3D Reconstruction
+                    "must3r/must3r_weights.pth",        // MUSt3R - Multi-view Network (video support)
                     "model_fp16_fixrot.safetensors",
                     "triposr_weights.pth",
                     "wonder3d/model_index.json"
