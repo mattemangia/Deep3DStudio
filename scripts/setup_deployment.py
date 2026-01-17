@@ -232,6 +232,10 @@ def setup_python_embed(target_dir, target_platform):
         for r in m.get("requirements", []):
             all_reqs.add(r)
     reqs_list = sorted(list(all_reqs))
+    xformers_req = None
+    if "xformers" in reqs_list:
+        reqs_list.remove("xformers")
+        xformers_req = "xformers"
 
     if is_compatible:
         # Native installation
@@ -319,6 +323,24 @@ def setup_python_embed(target_dir, target_platform):
                 print(f"  pip install failed with return code {process.returncode}")
                 return False
             print("  Package installation completed!")
+
+            if xformers_req:
+                print("=" * 60)
+                print("STEP: Installing xformers (requires torch available, disabling build isolation)...")
+                print("=" * 60)
+                xformers_cmd = pip_cmd + ["--no-build-isolation", "--no-deps", xformers_req]
+                print(f"  Command: {' '.join(xformers_cmd)}")
+                xformers_proc = subprocess.Popen(xformers_cmd, env=clean_env,
+                                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                                 text=True, bufsize=1)
+                for line in xformers_proc.stdout:
+                    print(f"  {line.rstrip()}")
+                xformers_proc.wait()
+                print("-" * 60)
+                if xformers_proc.returncode != 0:
+                    print(f"  xformers install failed with return code {xformers_proc.returncode}")
+                    return False
+                print("  xformers installation completed!")
 
         except subprocess.CalledProcessError as e:
             print(f"Lib install failed with return code {e.returncode}")
