@@ -20,6 +20,8 @@ namespace Deep3DStudio.Model.AIModels
         LoadPointCloud,
         LoadMesh,
         Dust3rReconstruction,
+        Mast3rReconstruction,   // MASt3R - Metric reconstruction with dense feature matching
+        Must3rReconstruction,   // MUSt3R - Multi-view network for many images/video
         SfMReconstruction,
         TripoSRGeneration,
         LGMGeneration,
@@ -56,6 +58,32 @@ namespace Deep3DStudio.Model.AIModels
             {
                 WorkflowStep.LoadImages,
                 WorkflowStep.Dust3rReconstruction,
+                WorkflowStep.VoxelizePointCloud,
+                WorkflowStep.MarchingCubes
+            }
+        };
+
+        public static WorkflowPipeline ImageToMast3rToMesh => new()
+        {
+            Name = "Images -> MASt3R -> Mesh",
+            Description = "Multi-view metric reconstruction using MASt3R (2+ images, metric pointmaps)",
+            Steps = new List<WorkflowStep>
+            {
+                WorkflowStep.LoadImages,
+                WorkflowStep.Mast3rReconstruction,
+                WorkflowStep.VoxelizePointCloud,
+                WorkflowStep.MarchingCubes
+            }
+        };
+
+        public static WorkflowPipeline ImageToMust3rToMesh => new()
+        {
+            Name = "Images/Video -> MUSt3R -> Mesh",
+            Description = "Multi-view reconstruction using MUSt3R (many images, video support, 8-11 FPS)",
+            Steps = new List<WorkflowStep>
+            {
+                WorkflowStep.LoadImages,
+                WorkflowStep.Must3rReconstruction,
                 WorkflowStep.VoxelizePointCloud,
                 WorkflowStep.MarchingCubes
             }
@@ -153,6 +181,8 @@ namespace Deep3DStudio.Model.AIModels
         public static List<WorkflowPipeline> GetAllPipelines() => new()
         {
             ImageToDust3rToMesh,
+            ImageToMast3rToMesh,
+            ImageToMust3rToMesh,
             ImageToSfM,
             ImageToTripoSR,
             ImageToLGM,

@@ -31,11 +31,13 @@ The application is developed as part of research at the **Università degli Stud
 
 | Model | Description |
 |-------|-------------|
+| **Dust3r** | Multi-view reconstruction (2 images) |
+| **MASt3R** | Metric 3D reconstruction with dense feature matching (2+ images) |
+| **MUSt3R** | Multi-view network optimized for many images and video (8-11 FPS) |
 | **TripoSR** | Fast single-image to 3D generation |
 | **TripoSF** | High-resolution 3D mesh generation |
 | **LGM** | Large Multi-View Gaussian Model for high-quality reconstruction |
 | **Wonder3D** | Multi-view image generation and reconstruction |
-| **Dust3r** | Multi-view reconstruction with AI enhancement |
 
 ### Mesh Processing & Refinement
 
@@ -144,7 +146,9 @@ Download the latest release for your platform from the [Releases](https://github
 
 3. **Choose reconstruction method**
    - Select your preferred AI model from the dropdown in the left panel
-   - Options: Dust3r, TripoSR, LGM, Wonder3D
+   - Options: Dust3r, MASt3R, MUSt3R, TripoSR, LGM, Wonder3D
+   - For >2 images: MASt3R or MUSt3R recommended
+   - For video input: MUSt3R (supports 8-11 FPS processing)
 
 4. **Run reconstruction**
    - Click the "Reconstruct" button or use `Ctrl+R`
@@ -287,7 +291,7 @@ python scripts/setup_deployment.py --platform [win_amd64|linux_x64|osx_arm64]
 
 This will download:
 - Standalone Python 3.10.11
-- AI model repositories (Dust3r, TripoSR, TripoSF, LGM, Wonder3D, UniRig)
+- AI model repositories (Dust3r, MASt3R, MUSt3R, TripoSR, TripoSF, LGM, Wonder3D, UniRig)
 - Pre-trained model weights
 - Required Python dependencies
 
@@ -418,6 +422,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 This project incorporates or builds upon the following open-source projects:
 
 - [Dust3r](https://github.com/naver/dust3r) - Multi-view reconstruction
+- [MASt3R](https://github.com/naver/mast3r) - Matching And Stereo 3D Reconstruction with metric pointmaps
+- [MUSt3R](https://github.com/naver/must3r) - Multi-view Network for Stereo 3D Reconstruction (video support)
 - [TripoSR](https://github.com/VAST-AI-Research/TripoSR) - Single-image 3D generation
 - [TripoSF](https://github.com/VAST-AI-Research/TripoSF) - High-resolution 3D mesh generation
 - [LGM](https://github.com/3DTopia/LGM) - Large Multi-View Gaussian Model

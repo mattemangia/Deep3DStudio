@@ -48,7 +48,10 @@ namespace Deep3DStudio.Viewport
         LGM,
         Wonder3D,
         NeRF,
-        Refine
+        Refine,
+        Mast3r,     // MASt3R - Matching And Stereo 3D Reconstruction (metric pointmaps)
+        Must3r,     // MUSt3R - Multi-view Network (>2 images, video support)
+        Video       // Video file icon for MUSt3R video input
     }
 
     public class ImGuiIconFactory : IDisposable
@@ -525,6 +528,86 @@ namespace Deep3DStudio.Viewport
                 canvas.DrawLine(w * 0.15f, h * 0.5f, w * 0.85f, h * 0.5f, p);
                 canvas.DrawLine(w * 0.25f, h * 0.25f, w * 0.75f, h * 0.75f, p);
                 canvas.DrawLine(w * 0.75f, h * 0.25f, w * 0.25f, h * 0.75f, p);
+            });
+
+            _icons[IconType.Mast3r] = CreateIcon(SKColors.DodgerBlue, (canvas, w, h) => {
+                // MASt3R icon - metric matching with two connected views
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                var pFill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
+
+                // Two image frames (stereo pair)
+                canvas.DrawRect(w * 0.1f, h * 0.25f, w * 0.3f, h * 0.4f, p);
+                canvas.DrawRect(w * 0.6f, h * 0.25f, w * 0.3f, h * 0.4f, p);
+
+                // Connection lines (matching features)
+                var pMatch = new SKPaint { Color = SKColors.Yellow, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawLine(w * 0.4f, h * 0.35f, w * 0.6f, h * 0.35f, pMatch);
+                canvas.DrawLine(w * 0.4f, h * 0.5f, w * 0.6f, h * 0.5f, pMatch);
+                canvas.DrawLine(w * 0.4f, h * 0.55f, w * 0.6f, h * 0.55f, pMatch);
+
+                // Feature points
+                canvas.DrawCircle(w * 0.25f, h * 0.35f, 3, pFill);
+                canvas.DrawCircle(w * 0.25f, h * 0.5f, 3, pFill);
+                canvas.DrawCircle(w * 0.75f, h * 0.35f, 3, pFill);
+                canvas.DrawCircle(w * 0.75f, h * 0.5f, 3, pFill);
+
+                // Metric indicator (ruler)
+                canvas.DrawLine(w * 0.2f, h * 0.75f, w * 0.8f, h * 0.75f, p);
+                canvas.DrawLine(w * 0.2f, h * 0.7f, w * 0.2f, h * 0.8f, p);
+                canvas.DrawLine(w * 0.8f, h * 0.7f, w * 0.8f, h * 0.8f, p);
+            });
+
+            _icons[IconType.Must3r] = CreateIcon(SKColors.MediumPurple, (canvas, w, h) => {
+                // MUSt3R icon - multi-view with video/streaming indicator
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                var pFill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
+
+                // Multiple overlapping image frames (multi-view)
+                canvas.DrawRect(w * 0.1f, h * 0.2f, w * 0.25f, h * 0.35f, p);
+                canvas.DrawRect(w * 0.25f, h * 0.15f, w * 0.25f, h * 0.35f, p);
+                canvas.DrawRect(w * 0.4f, h * 0.2f, w * 0.25f, h * 0.35f, p);
+                canvas.DrawRect(w * 0.55f, h * 0.15f, w * 0.25f, h * 0.35f, p);
+
+                // Central 3D point cloud result
+                canvas.DrawCircle(w * 0.5f, h * 0.65f, 5, pFill);
+                canvas.DrawCircle(w * 0.35f, h * 0.7f, 4, pFill);
+                canvas.DrawCircle(w * 0.65f, h * 0.7f, 4, pFill);
+                canvas.DrawCircle(w * 0.4f, h * 0.8f, 3, pFill);
+                canvas.DrawCircle(w * 0.6f, h * 0.8f, 3, pFill);
+
+                // Flow/streaming arrows
+                var pArrow = new SKPaint { Color = SKColors.LimeGreen, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawLine(w * 0.35f, h * 0.55f, w * 0.45f, h * 0.6f, pArrow);
+                canvas.DrawLine(w * 0.65f, h * 0.55f, w * 0.55f, h * 0.6f, pArrow);
+            });
+
+            _icons[IconType.Video] = CreateIcon(SKColors.Crimson, (canvas, w, h) => {
+                // Video icon - film strip with play button
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                var pFill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
+
+                // Film strip
+                canvas.DrawRect(w * 0.15f, h * 0.2f, w * 0.7f, h * 0.6f, p);
+
+                // Sprocket holes (top)
+                canvas.DrawRect(w * 0.2f, h * 0.25f, w * 0.08f, h * 0.08f, pFill);
+                canvas.DrawRect(w * 0.35f, h * 0.25f, w * 0.08f, h * 0.08f, pFill);
+                canvas.DrawRect(w * 0.5f, h * 0.25f, w * 0.08f, h * 0.08f, pFill);
+                canvas.DrawRect(w * 0.65f, h * 0.25f, w * 0.08f, h * 0.08f, pFill);
+
+                // Sprocket holes (bottom)
+                canvas.DrawRect(w * 0.2f, h * 0.67f, w * 0.08f, h * 0.08f, pFill);
+                canvas.DrawRect(w * 0.35f, h * 0.67f, w * 0.08f, h * 0.08f, pFill);
+                canvas.DrawRect(w * 0.5f, h * 0.67f, w * 0.08f, h * 0.08f, pFill);
+                canvas.DrawRect(w * 0.65f, h * 0.67f, w * 0.08f, h * 0.08f, pFill);
+
+                // Play button in center
+                var playPath = new SKPath();
+                playPath.MoveTo(w * 0.4f, h * 0.4f);
+                playPath.LineTo(w * 0.4f, h * 0.6f);
+                playPath.LineTo(w * 0.6f, h * 0.5f);
+                playPath.Close();
+                canvas.DrawPath(playPath, pFill);
             });
         }
 

@@ -134,7 +134,9 @@ namespace Deep3DStudio.UI
                 var expectedFiles = new Dictionary<string, bool>
                 {
                     { "dust3r_weights.pth", false },
-                    { "model_fp16_fixrot.safetensors", false },  // LGM (Large Multi-View Gaussian) weights
+                    { "mast3r/mast3r_weights.pth", false },        // MASt3R - Matching And Stereo 3D Reconstruction
+                    { "must3r/must3r_weights.pth", false },        // MUSt3R - Multi-view Network (video support)
+                    { "model_fp16_fixrot.safetensors", false },    // LGM (Large Multi-View Gaussian) weights
                     { "triposf_config.yaml", false },
                     { "triposf_weights.pth", false },
                     { "triposr_config.yaml", false },

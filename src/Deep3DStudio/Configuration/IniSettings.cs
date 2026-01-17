@@ -9,6 +9,8 @@ namespace Deep3DStudio.Configuration
     public enum ReconstructionMethod
     {
         Dust3r,
+        Mast3r,         // MASt3R - Matching And Stereo 3D Reconstruction (metric pointmaps)
+        Must3r,         // MUSt3R - Multi-view Network (>2 images, video support)
         FeatureMatching,
         TripoSR,
         Wonder3D
@@ -171,11 +173,17 @@ namespace Deep3DStudio.Configuration
         // AI Model Paths (relative to app directory or absolute, or HuggingFace Hub identifiers)
         // For Dust3r: can be a local path like "models/dust3r" or HuggingFace Hub ID like "naver/DUSt3R_ViTLarge_BaseDecoder_512_dpt"
         public string Dust3rModelPath { get; set; } = "models";
+        public string Mast3rModelPath { get; set; } = "models/mast3r";
+        public string Must3rModelPath { get; set; } = "models/must3r";
         public string TripoSRModelPath { get; set; } = "models/triposr";
         public string LGMModelPath { get; set; } = "models/lgm";
         public string Wonder3DModelPath { get; set; } = "models/wonder3d";
         public string UniRigModelPath { get; set; } = "models/unirig";
         public string TripoSFModelPath { get; set; } = "models/triposf";
+
+        // MUSt3R Video Settings
+        public int Must3rMaxFrames { get; set; } = 100;
+        public int Must3rFrameInterval { get; set; } = 5;
 
         // Additional AI Model Settings
         public AIComputeDevice AIDevice { get; set; } = AIComputeDevice.CUDA;
@@ -396,6 +404,18 @@ namespace Deep3DStudio.Configuration
                     writer.WriteLine($"ModelPath={Dust3rModelPath}");
                     writer.WriteLine();
 
+                    // [Mast3r] section
+                    writer.WriteLine("[Mast3r]");
+                    writer.WriteLine($"ModelPath={Mast3rModelPath}");
+                    writer.WriteLine();
+
+                    // [Must3r] section
+                    writer.WriteLine("[Must3r]");
+                    writer.WriteLine($"ModelPath={Must3rModelPath}");
+                    writer.WriteLine($"MaxFrames={Must3rMaxFrames}");
+                    writer.WriteLine($"FrameInterval={Must3rFrameInterval}");
+                    writer.WriteLine();
+
                     // [TripoSR] section
                     writer.WriteLine("[TripoSR]");
                     writer.WriteLine($"Resolution={TripoSRResolution}");
@@ -581,6 +601,18 @@ namespace Deep3DStudio.Configuration
             if (TryGetValue("Dust3r", "ModelPath", out string? dust3rPath))
                 Dust3rModelPath = dust3rPath ?? Dust3rModelPath;
 
+            // [Mast3r]
+            if (TryGetValue("Mast3r", "ModelPath", out string? mast3rPath))
+                Mast3rModelPath = mast3rPath ?? Mast3rModelPath;
+
+            // [Must3r]
+            if (TryGetValue("Must3r", "ModelPath", out string? must3rPath))
+                Must3rModelPath = must3rPath ?? Must3rModelPath;
+            if (TryGetValue("Must3r", "MaxFrames", out string? must3rMaxFramesStr) && int.TryParse(must3rMaxFramesStr, out var must3rMaxFrames))
+                Must3rMaxFrames = Math.Clamp(must3rMaxFrames, 10, 500);
+            if (TryGetValue("Must3r", "FrameInterval", out string? must3rFrameIntervalStr) && int.TryParse(must3rFrameIntervalStr, out var must3rFrameInterval))
+                Must3rFrameInterval = Math.Clamp(must3rFrameInterval, 1, 30);
+
             // [UniRig]
             if (TryGetValue("UniRig", "MaxJoints", out string? urJointsStr) && int.TryParse(urJointsStr, out var urJoints))
                 UniRigMaxJoints = Math.Clamp(urJoints, 16, 256);
@@ -735,6 +767,14 @@ namespace Deep3DStudio.Configuration
 
             // Dust3r
             Dust3rModelPath = "models/dust3r";
+
+            // Mast3r
+            Mast3rModelPath = "models/mast3r";
+
+            // Must3r
+            Must3rModelPath = "models/must3r";
+            Must3rMaxFrames = 100;
+            Must3rFrameInterval = 5;
 
             // TripoSR
             TripoSRResolution = 256;
