@@ -300,7 +300,29 @@ namespace Deep3DStudio.Model
 
                 try
                 {
-                    _bridgeModule = null;
+                    // Clean up Python object references within GIL context
+                    // This is critical to prevent AccessViolationException
+                    if (_bridgeModule != null && PythonService.Instance.IsInitialized)
+                    {
+                        try
+                        {
+                            PythonService.Instance.ExecuteWithGIL((scope) =>
+                            {
+                                // Release the reference within GIL context
+                                _bridgeModule = null;
+                            });
+                        }
+                        catch (Exception)
+                        {
+                            // If GIL acquisition fails, just clear the reference
+                            _bridgeModule = null;
+                        }
+                    }
+                    else
+                    {
+                        _bridgeModule = null;
+                    }
+
                     _isLoaded = false;
                 }
                 catch (Exception ex)

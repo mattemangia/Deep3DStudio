@@ -12,8 +12,10 @@ namespace Deep3DStudio.Python
     {
         private static PythonService? _instance;
         private static readonly object _lock = new object();
+        private static readonly object _initLock = new object();
         private IntPtr _threadState;
         private bool _isInitialized = false;
+        private bool _threadStateValid = false;
 
         public bool IsInitialized => _isInitialized;
         public string InitializationError { get; private set; } = "";
@@ -43,168 +45,176 @@ namespace Deep3DStudio.Python
 
         public void Initialize()
         {
+            // Double-check locking for thread-safe initialization
             if (_isInitialized) return;
 
-            try
+            lock (_initLock)
             {
-                // Ensure environment is ready
-                EnsurePythonEnvironment();
+                // Check again inside lock
+                if (_isInitialized) return;
 
-                string pythonHome = GetPythonHome();
-                string pythonDll = GetPythonDllPath(pythonHome);
-
-                if (!File.Exists(pythonDll))
+                try
                 {
-                    string msg = $"Python DLL not found at {pythonDll}";
-                    InitializationError = msg;
-                    Log($"Warning: {msg}");
-                    Log($"Python features will be disabled. Please run setup_deployment.py to install Python environment.");
-                    // Don't throw - allow app to continue without Python
-                    return;
-                }
+                    // Ensure environment is ready
+                    EnsurePythonEnvironment();
 
-                // CRITICAL: Clear any existing Python environment variables FIRST
-                // This prevents system Python installations (like FEFLOW, Anaconda) from interfering
-                ClearSystemPythonEnvironment();
+                    string pythonHome = GetPythonHome();
+                    string pythonDll = GetPythonDllPath(pythonHome);
 
-                Runtime.PythonDLL = pythonDll;
-
-                // Construct paths for the embedded environment (platform-specific)
-                string libDir;
-                string sitePackages;
-                string dllsDir;
-
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                {
-                    // Windows: pythonHome/Lib and pythonHome/Lib/site-packages
-                    libDir = Path.Combine(pythonHome, "Lib");
-                    sitePackages = Path.Combine(libDir, "site-packages");
-                    dllsDir = Path.Combine(pythonHome, "DLLs");
-                }
-                else
-                {
-                    // Linux/macOS: pythonHome/lib/python3.10 and pythonHome/lib/python3.10/site-packages
-                    string libBase = Path.Combine(pythonHome, "lib");
-
-                    // Find the python3.x directory dynamically
-                    string? pythonLibDir = null;
-                    if (Directory.Exists(libBase))
+                    if (!File.Exists(pythonDll))
                     {
-                        foreach (string dir in Directory.GetDirectories(libBase))
-                        {
-                            string dirName = Path.GetFileName(dir);
-                            if (dirName.StartsWith("python3"))
-                            {
-                                pythonLibDir = dir;
-                                break;
-                            }
-                        }
+                        string msg = $"Python DLL not found at {pythonDll}";
+                        InitializationError = msg;
+                        Log($"Warning: {msg}");
+                        Log($"Python features will be disabled. Please run setup_deployment.py to install Python environment.");
+                        // Don't throw - allow app to continue without Python
+                        return;
                     }
 
-                    if (pythonLibDir != null)
+                    // CRITICAL: Clear any existing Python environment variables FIRST
+                    // This prevents system Python installations (like FEFLOW, Anaconda) from interfering
+                    ClearSystemPythonEnvironment();
+
+                    Runtime.PythonDLL = pythonDll;
+
+                    // Construct paths for the embedded environment (platform-specific)
+                    string libDir;
+                    string sitePackages;
+                    string dllsDir;
+
+                    if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                     {
-                        libDir = pythonLibDir;
-                        sitePackages = Path.Combine(pythonLibDir, "site-packages");
-                        dllsDir = Path.Combine(pythonLibDir, "lib-dynload");
+                        // Windows: pythonHome/Lib and pythonHome/Lib/site-packages
+                        libDir = Path.Combine(pythonHome, "Lib");
+                        sitePackages = Path.Combine(libDir, "site-packages");
+                        dllsDir = Path.Combine(pythonHome, "DLLs");
                     }
                     else
                     {
-                        // Fallback to expected structure
-                        libDir = Path.Combine(libBase, "python3.10");
-                        sitePackages = Path.Combine(libDir, "site-packages");
-                        dllsDir = Path.Combine(libDir, "lib-dynload");
+                        // Linux/macOS: pythonHome/lib/python3.10 and pythonHome/lib/python3.10/site-packages
+                        string libBase = Path.Combine(pythonHome, "lib");
+
+                        // Find the python3.x directory dynamically
+                        string? pythonLibDir = null;
+                        if (Directory.Exists(libBase))
+                        {
+                            foreach (string dir in Directory.GetDirectories(libBase))
+                            {
+                                string dirName = Path.GetFileName(dir);
+                                if (dirName.StartsWith("python3"))
+                                {
+                                    pythonLibDir = dir;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (pythonLibDir != null)
+                        {
+                            libDir = pythonLibDir;
+                            sitePackages = Path.Combine(pythonLibDir, "site-packages");
+                            dllsDir = Path.Combine(pythonLibDir, "lib-dynload");
+                        }
+                        else
+                        {
+                            // Fallback to expected structure
+                            libDir = Path.Combine(libBase, "python3.10");
+                            sitePackages = Path.Combine(libDir, "site-packages");
+                            dllsDir = Path.Combine(libDir, "lib-dynload");
+                        }
                     }
+
+                    // Build the PYTHONPATH - order matters!
+                    var pathComponents = new List<string>();
+
+                    // Standard library zip (if exists) - highest priority for standard library
+                    string stdlibZip = Path.Combine(pythonHome, "python310.zip");
+                    if (File.Exists(stdlibZip))
+                    {
+                        pathComponents.Add(stdlibZip);
+                    }
+
+                    // Lib directory (standard library)
+                    if (Directory.Exists(libDir))
+                    {
+                        pathComponents.Add(libDir);
+                    }
+
+                    // DLLs/lib-dynload directory (binary extensions)
+                    if (Directory.Exists(dllsDir))
+                    {
+                        pathComponents.Add(dllsDir);
+                    }
+
+                    // site-packages (third-party packages)
+                    if (Directory.Exists(sitePackages))
+                    {
+                        pathComponents.Add(sitePackages);
+                    }
+
+                    // Base Python home
+                    pathComponents.Add(pythonHome);
+
+                    string pythonPath = string.Join(Path.PathSeparator.ToString(), pathComponents);
+
+                    Log($"Configuring Python Environment (ISOLATED MODE):");
+                    Log($"  Platform: {(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "Windows" : RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "Linux" : "macOS")}");
+                    Log($"  PYTHONHOME: {pythonHome}");
+                    Log($"  Python DLL: {pythonDll}");
+                    Log($"  Lib Dir: {libDir} (exists: {Directory.Exists(libDir)})");
+                    Log($"  Site-packages: {sitePackages} (exists: {Directory.Exists(sitePackages)})");
+                    Log($"  DLLs/lib-dynload: {dllsDir} (exists: {Directory.Exists(dllsDir)})");
+                    Log($"  PYTHONPATH: {pythonPath}");
+
+                    // CRITICAL: Initialization order matters for proper isolation!
+                    // Reference: https://github.com/pythonnet/pythonnet/issues/1517
+                    //
+                    // 1. Runtime.PythonDLL is already set above (loads DLL, keeps reference)
+                    // 2. Set PythonHome FIRST
+                    // 3. Then SetNoSiteFlag() (prevents site.py from adding system paths)
+                    // 4. Then set PythonPath
+                    // 5. Then Initialize()
+
+                    // Step 2: Set PythonHome
+                    PythonEngine.PythonHome = pythonHome;
+
+                    // Step 3: CRITICAL - Disable site.py to prevent system paths from being added
+                    // This MUST be called after PythonHome is set but before Initialize()
+                    // site.py is what adds /usr/local/..., ~/.local/..., etc. to sys.path
+                    PythonEngine.SetNoSiteFlag();
+                    Log($"  SetNoSiteFlag: enabled (prevents site.py from adding system paths)");
+
+                    // Step 4: Set PythonPath
+                    PythonEngine.PythonPath = pythonPath;
+
+                    // Also set environment variables as backup
+                    Environment.SetEnvironmentVariable("PYTHONHOME", pythonHome, EnvironmentVariableTarget.Process);
+                    Environment.SetEnvironmentVariable("PYTHONPATH", pythonPath, EnvironmentVariableTarget.Process);
+
+                    // Isolation flags - prevent loading from user/system locations
+                    Environment.SetEnvironmentVariable("PYTHONNOUSERSITE", "1", EnvironmentVariableTarget.Process);
+                    Environment.SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "1", EnvironmentVariableTarget.Process);
+
+                    // Step 5: Initialize Python
+                    PythonEngine.Initialize();
+                    _threadState = PythonEngine.BeginAllowThreads();
+                    _threadStateValid = true;
+                    _isInitialized = true;
+
+                    // Post-initialization: Verify and clean sys.path
+                    CleanSysPath(pythonHome);
+
+                    SetupStdioRedirection();
+
+                    Log($"Python initialized successfully. Home: {pythonHome}");
                 }
-
-                // Build the PYTHONPATH - order matters!
-                var pathComponents = new List<string>();
-
-                // Standard library zip (if exists) - highest priority for standard library
-                string stdlibZip = Path.Combine(pythonHome, "python310.zip");
-                if (File.Exists(stdlibZip))
+                catch (Exception ex)
                 {
-                    pathComponents.Add(stdlibZip);
+                    InitializationError = $"Failed to initialize Python: {ex.Message}";
+                    Log($"Warning: {InitializationError}");
+                    Log($"Python features will be disabled. The application will continue without AI functionality.");
+                    // Don't re-throw - allow app to start without Python
                 }
-
-                // Lib directory (standard library)
-                if (Directory.Exists(libDir))
-                {
-                    pathComponents.Add(libDir);
-                }
-
-                // DLLs/lib-dynload directory (binary extensions)
-                if (Directory.Exists(dllsDir))
-                {
-                    pathComponents.Add(dllsDir);
-                }
-
-                // site-packages (third-party packages)
-                if (Directory.Exists(sitePackages))
-                {
-                    pathComponents.Add(sitePackages);
-                }
-
-                // Base Python home
-                pathComponents.Add(pythonHome);
-
-                string pythonPath = string.Join(Path.PathSeparator.ToString(), pathComponents);
-
-                Log($"Configuring Python Environment (ISOLATED MODE):");
-                Log($"  Platform: {(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "Windows" : RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "Linux" : "macOS")}");
-                Log($"  PYTHONHOME: {pythonHome}");
-                Log($"  Python DLL: {pythonDll}");
-                Log($"  Lib Dir: {libDir} (exists: {Directory.Exists(libDir)})");
-                Log($"  Site-packages: {sitePackages} (exists: {Directory.Exists(sitePackages)})");
-                Log($"  DLLs/lib-dynload: {dllsDir} (exists: {Directory.Exists(dllsDir)})");
-                Log($"  PYTHONPATH: {pythonPath}");
-
-                // CRITICAL: Initialization order matters for proper isolation!
-                // Reference: https://github.com/pythonnet/pythonnet/issues/1517
-                //
-                // 1. Runtime.PythonDLL is already set above (loads DLL, keeps reference)
-                // 2. Set PythonHome FIRST
-                // 3. Then SetNoSiteFlag() (prevents site.py from adding system paths)
-                // 4. Then set PythonPath
-                // 5. Then Initialize()
-
-                // Step 2: Set PythonHome
-                PythonEngine.PythonHome = pythonHome;
-
-                // Step 3: CRITICAL - Disable site.py to prevent system paths from being added
-                // This MUST be called after PythonHome is set but before Initialize()
-                // site.py is what adds /usr/local/..., ~/.local/..., etc. to sys.path
-                PythonEngine.SetNoSiteFlag();
-                Log($"  SetNoSiteFlag: enabled (prevents site.py from adding system paths)");
-
-                // Step 4: Set PythonPath
-                PythonEngine.PythonPath = pythonPath;
-
-                // Also set environment variables as backup
-                Environment.SetEnvironmentVariable("PYTHONHOME", pythonHome, EnvironmentVariableTarget.Process);
-                Environment.SetEnvironmentVariable("PYTHONPATH", pythonPath, EnvironmentVariableTarget.Process);
-
-                // Isolation flags - prevent loading from user/system locations
-                Environment.SetEnvironmentVariable("PYTHONNOUSERSITE", "1", EnvironmentVariableTarget.Process);
-                Environment.SetEnvironmentVariable("PYTHONDONTWRITEBYTECODE", "1", EnvironmentVariableTarget.Process);
-
-                // Step 5: Initialize Python
-                PythonEngine.Initialize();
-                _threadState = PythonEngine.BeginAllowThreads();
-                _isInitialized = true;
-
-                // Post-initialization: Verify and clean sys.path
-                CleanSysPath(pythonHome);
-
-                SetupStdioRedirection();
-
-                Log($"Python initialized successfully. Home: {pythonHome}");
-            }
-            catch (Exception ex)
-            {
-                InitializationError = $"Failed to initialize Python: {ex.Message}";
-                Log($"Warning: {InitializationError}");
-                Log($"Python features will be disabled. The application will continue without AI functionality.");
-                // Don't re-throw - allow app to start without Python
             }
         }
 
@@ -559,10 +569,33 @@ class LoggerWriter:
 
         public void Dispose()
         {
-            if (_isInitialized)
+            lock (_initLock)
             {
-                PythonEngine.Shutdown();
-                _isInitialized = false;
+                if (_isInitialized)
+                {
+                    try
+                    {
+                        // CRITICAL: Restore thread state before shutdown to prevent AccessViolationException
+                        // BeginAllowThreads() releases the GIL and saves the thread state
+                        // EndAllowThreads() must be called to restore it before Shutdown()
+                        if (_threadStateValid && _threadState != IntPtr.Zero)
+                        {
+                            PythonEngine.EndAllowThreads(_threadState);
+                            _threadStateValid = false;
+                        }
+
+                        PythonEngine.Shutdown();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[PythonService] Dispose warning: {ex.Message}");
+                    }
+                    finally
+                    {
+                        _isInitialized = false;
+                        _threadState = IntPtr.Zero;
+                    }
+                }
             }
         }
     }
