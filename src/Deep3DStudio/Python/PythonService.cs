@@ -577,7 +577,19 @@ sys.stderr = _stderr_capture
             using (Py.GIL())
             using (var scope = Py.CreateScope())
             {
-                action(scope);
+                try
+                {
+                    action(scope);
+                }
+                finally
+                {
+                    // CRITICAL: Run garbage collection INSIDE the GIL block as a safety net
+                    // This ensures any PyObject finalizers that weren't explicitly disposed
+                    // get cleaned up while we still hold the GIL, preventing heap corruption
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                    GC.Collect();
+                }
             }
         }
 
