@@ -197,9 +197,9 @@ namespace Deep3DStudio.Python
 
                     // Step 5: Initialize Python
                     PythonEngine.Initialize();
-                    _threadState = PythonEngine.BeginAllowThreads();
-                    _threadStateValid = true;
-                    _isInitialized = true;
+
+                    // IMPORTANT: Do all post-initialization Python work BEFORE releasing the GIL
+                    // This ensures all setup happens with the main thread's original thread state
 
                     // Post-initialization: Verify and clean sys.path
                     CleanSysPath(pythonHome);
@@ -207,6 +207,12 @@ namespace Deep3DStudio.Python
                     SetupStdioRedirection();
 
                     Log($"Python initialized successfully. Home: {pythonHome}");
+
+                    // NOW release the GIL to allow background threads to use Python
+                    // This must happen AFTER all initialization Python work is complete
+                    _threadState = PythonEngine.BeginAllowThreads();
+                    _threadStateValid = true;
+                    _isInitialized = true;
                 }
                 catch (Exception ex)
                 {
