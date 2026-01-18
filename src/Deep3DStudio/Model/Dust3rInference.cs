@@ -243,49 +243,104 @@ namespace Deep3DStudio.Model
                         foreach(var b in imagesBytes)
                             pyList.Append(b.ToPython());
 
-                        dynamic output = _bridgeModule.infer_dust3r(pyList);
-
-                        int len = (int)output.__len__();
-                        for (int i = 0; i < len; i++)
+                        // CRITICAL: Use PyObject explicitly so we can dispose it properly
+                        PyObject outputObj = _bridgeModule.infer_dust3r(pyList);
+                        try
                         {
-                            dynamic item = output[i];
-                            var mesh = new MeshData();
-
-                            dynamic vertices = item["vertices"];
-                            dynamic colors = item["colors"];
-                            dynamic faces = item["faces"];
-                            int imageIndex = i;
-                            try
+                            int len = (int)outputObj.Length();
+                            for (int i = 0; i < len; i++)
                             {
-                                if (item.__contains__("image_index"))
+                                PyObject item = outputObj[i];
+                                try
                                 {
-                                    imageIndex = (int)item["image_index"];
+                                    var mesh = new MeshData();
+
+                                    // Extract data immediately to primitive types, disposing PyObjects ASAP
+                                    using (PyObject verticesObj = item["vertices"])
+                                    using (PyObject colorsObj = item["colors"])
+                                    using (PyObject facesObj = item["faces"])
+                                    {
+                                        int imageIndex = i;
+                                        try
+                                        {
+                                            using (PyObject containsResult = item.InvokeMethod("__contains__", new PyString("image_index")))
+                                            {
+                                                if (containsResult.IsTrue())
+                                                {
+                                                    using (PyObject idxObj = item["image_index"])
+                                                    {
+                                                        imageIndex = idxObj.As<int>();
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        catch (Exception)
+                                        {
+                                            imageIndex = i;
+                                        }
+
+                                        // Get shapes as primitives immediately
+                                        long vCount, fCount;
+                                        using (PyObject vShapeObj = verticesObj.GetAttr("shape"))
+                                        {
+                                            vCount = vShapeObj[0].As<long>();
+                                        }
+                                        using (PyObject fShapeObj = facesObj.GetAttr("shape"))
+                                        {
+                                            fCount = fShapeObj[0].As<long>();
+                                        }
+
+                                        // Extract vertex and color data
+                                        for(int v=0; v<vCount; v++)
+                                        {
+                                            using (PyObject vRow = verticesObj[v])
+                                            using (PyObject cRow = colorsObj[v])
+                                            {
+                                                float vx = vRow[0].As<float>();
+                                                float vy = vRow[1].As<float>();
+                                                float vz = vRow[2].As<float>();
+                                                float cx = cRow[0].As<float>();
+                                                float cy = cRow[1].As<float>();
+                                                float cz = cRow[2].As<float>();
+                                                mesh.Vertices.Add(new Vector3(vx, vy, vz));
+                                                mesh.Colors.Add(new Vector3(cx, cy, cz));
+                                            }
+                                        }
+
+                                        // Extract face indices
+                                        for(int f=0; f<fCount; f++)
+                                        {
+                                            using (PyObject fRow = facesObj[f])
+                                            {
+                                                mesh.Indices.Add(fRow[0].As<int>());
+                                                mesh.Indices.Add(fRow[1].As<int>());
+                                                mesh.Indices.Add(fRow[2].As<int>());
+                                            }
+                                        }
+                                    }
+
+                                    result.Meshes.Add(mesh);
+                                    if (imageIndex >= 0 && imageIndex < imagePaths.Count)
+                                    {
+                                        result.Poses.Add(new CameraPose { ImageIndex = imageIndex, ImagePath = imagePaths[imageIndex] });
+                                    }
+                                }
+                                finally
+                                {
+                                    item.Dispose();
                                 }
                             }
-                            catch (Exception)
-                            {
-                                imageIndex = i;
-                            }
-
-                            long vCount = (long)vertices.shape[0];
-                            long fCount = (long)faces.shape[0];
-
-                            for(int v=0; v<vCount; v++) {
-                                mesh.Vertices.Add(new Vector3((float)vertices[v][0], (float)vertices[v][1], (float)vertices[v][2]));
-                                mesh.Colors.Add(new Vector3((float)colors[v][0], (float)colors[v][1], (float)colors[v][2]));
-                            }
-                            for(int f=0; f<fCount; f++) {
-                                mesh.Indices.Add((int)faces[f][0]);
-                                mesh.Indices.Add((int)faces[f][1]);
-                                mesh.Indices.Add((int)faces[f][2]);
-                            }
-
-                            result.Meshes.Add(mesh);
-                            if (imageIndex >= 0 && imageIndex < imagePaths.Count)
-                            {
-                                result.Poses.Add(new CameraPose { ImageIndex = imageIndex, ImagePath = imagePaths[imageIndex] });
-                            }
                         }
+                        finally
+                        {
+                            outputObj.Dispose();
+                        }
+
+                        // CRITICAL: Force garbage collection INSIDE the GIL block
+                        // This ensures all PyObject finalizers run while we still hold the GIL
+                        GC.Collect();
+                        GC.WaitForPendingFinalizers();
+                        GC.Collect();
                     }
                 });
             }
