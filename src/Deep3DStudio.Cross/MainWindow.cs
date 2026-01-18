@@ -1995,6 +1995,44 @@ namespace Deep3DStudio
                             ImGui.TextDisabled("Path to models/dust3r or dust3r_weights.pth file");
                         }
 
+                        if (ImGui.CollapsingHeader("MASt3R (Metric Multi-View)"))
+                        {
+                            ImGui.TextWrapped("MASt3R provides metric 3D reconstruction with dense feature matching. Best for 2+ images requiring accurate scale.");
+                            ImGui.Spacing();
+
+                            string mast3rPath = s.Mast3rModelPath;
+                            if (ImGui.InputText("Model Path##Mast3r", ref mast3rPath, 256)) s.Mast3rModelPath = mast3rPath;
+                            ImGui.TextDisabled("Path to models/mast3r folder");
+                        }
+
+                        if (ImGui.CollapsingHeader("MUSt3R (Video/Many Images)"))
+                        {
+                            ImGui.TextWrapped("MUSt3R is optimized for many images and video input. Supports 8-11 FPS video processing with memory mechanism.");
+                            ImGui.Spacing();
+
+                            string must3rPath = s.Must3rModelPath;
+                            if (ImGui.InputText("Model Path##Must3r", ref must3rPath, 256)) s.Must3rModelPath = must3rPath;
+                            ImGui.TextDisabled("Path to models/must3r folder");
+
+                            ImGui.Spacing();
+                            ImGui.Text("Video Settings:");
+
+                            int maxFrames = s.Must3rMaxFrames;
+                            if (ImGui.SliderInt("Max Frames", ref maxFrames, 10, 500)) s.Must3rMaxFrames = maxFrames;
+                            ImGui.TextDisabled("Maximum frames to extract from video");
+
+                            int frameInterval = s.Must3rFrameInterval;
+                            if (ImGui.SliderInt("Frame Interval", ref frameInterval, 1, 30)) s.Must3rFrameInterval = frameInterval;
+                            ImGui.TextDisabled("Extract every Nth frame");
+                        }
+
+                        if (ImGui.CollapsingHeader("SfM (Feature Matching)"))
+                        {
+                            ImGui.TextWrapped("Structure from Motion using OpenCV feature matching. Works without AI models but may be less accurate.");
+                            ImGui.Spacing();
+                            ImGui.TextDisabled("SfM uses SIFT/ORB features and doesn't require model downloads.");
+                        }
+
                         if (ImGui.CollapsingHeader("TripoSR (Single Image)"))
                         {
                             int res = s.TripoSRResolution;
