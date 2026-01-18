@@ -142,7 +142,6 @@ namespace Deep3DStudio.UI
                     ("MUSt3R Retrieval", settings.Must3rModelPath, "must3r_retrieval.pth"),
                     ("MUSt3R Codebook", settings.Must3rModelPath, "must3r_retrieval_codebook.pkl"),
                     ("TripoSR", settings.TripoSRModelPath, "triposr_weights.pth"),
-                    ("TripoSR Config", settings.TripoSRModelPath, "triposr_config.yaml"),
                     ("TripoSF", settings.TripoSFModelPath, "triposf_weights.pth"),
                     ("LGM", settings.LGMModelPath, "model_fp16_fixrot.safetensors"),
                     ("UniRig", settings.UniRigModelPath, "unirig_weights.pth"),
@@ -157,6 +156,13 @@ namespace Deep3DStudio.UI
                     ("Wonder3D VAE Model", settings.Wonder3DModelPath, "vae/diffusion_pytorch_model.bin"),
                 };
 
+                Log($"[INFO] Base directory: {baseDir}");
+                Log($"[INFO] Settings paths:");
+                Log($"       Dust3r: {settings.Dust3rModelPath}");
+                Log($"       TripoSR: {settings.TripoSRModelPath}");
+                Log($"       TripoSF: {settings.TripoSFModelPath}");
+                Log($"       LGM: {settings.LGMModelPath}");
+                Log($"       UniRig: {settings.UniRigModelPath}");
                 Log($"[INFO] Checking model weights based on Settings paths:");
                 int foundCount = 0;
                 foreach (var (name, modelPath, file) in expectedModels)
@@ -173,6 +179,7 @@ namespace Deep3DStudio.UI
                     else
                     {
                         Log($"[FAIL] {name}: Missing {file}");
+                        Log($"       Expected at: {fullPath}");
                     }
                 }
 

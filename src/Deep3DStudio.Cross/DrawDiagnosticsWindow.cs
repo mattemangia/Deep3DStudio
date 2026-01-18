@@ -115,13 +115,19 @@ namespace Deep3DStudio
                     ("MUSt3R Retrieval", settings.Must3rModelPath, "must3r_retrieval.pth"),
                     ("MUSt3R Codebook", settings.Must3rModelPath, "must3r_retrieval_codebook.pkl"),
                     ("TripoSR", settings.TripoSRModelPath, "triposr_weights.pth"),
-                    ("TripoSR Config", settings.TripoSRModelPath, "triposr_config.yaml"),
                     ("TripoSF", settings.TripoSFModelPath, "triposf_weights.pth"),
                     ("LGM", settings.LGMModelPath, "model_fp16_fixrot.safetensors"),
                     ("UniRig", settings.UniRigModelPath, "unirig_weights.pth"),
                     ("Wonder3D", settings.Wonder3DModelPath, "model_index.json"),
                 };
 
+                Log($"[INFO] Base directory: {baseDir}");
+                Log($"[INFO] Settings paths:");
+                Log($"       Dust3r: {settings.Dust3rModelPath}");
+                Log($"       TripoSR: {settings.TripoSRModelPath}");
+                Log($"       TripoSF: {settings.TripoSFModelPath}");
+                Log($"       LGM: {settings.LGMModelPath}");
+                Log($"       UniRig: {settings.UniRigModelPath}");
                 Log($"[INFO] Checking model weights based on Settings paths:");
                 foreach (var (name, modelPath, file) in expectedModels)
                 {
