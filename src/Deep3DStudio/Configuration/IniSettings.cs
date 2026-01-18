@@ -170,16 +170,17 @@ namespace Deep3DStudio.Configuration
         public int TripoSFResolution { get; set; } = 512;
         public int TripoSFSparseDilation { get; set; } = 1;
 
-        // AI Model Paths (relative to app directory or absolute, or HuggingFace Hub identifiers)
-        // For Dust3r: can be a local path like "models/dust3r" or HuggingFace Hub ID like "naver/DUSt3R_ViTLarge_BaseDecoder_512_dpt"
+        // AI Model Paths (relative to app directory or absolute)
+        // Models with subfolders: mast3r, must3r, wonder3d
+        // Models flat in models/: dust3r, triposr, triposf, lgm, unirig
         public string Dust3rModelPath { get; set; } = "models";
         public string Mast3rModelPath { get; set; } = "models/mast3r";
         public string Must3rModelPath { get; set; } = "models/must3r";
-        public string TripoSRModelPath { get; set; } = "models/triposr";
-        public string LGMModelPath { get; set; } = "models/lgm";
+        public string TripoSRModelPath { get; set; } = "models";
+        public string LGMModelPath { get; set; } = "models";
         public string Wonder3DModelPath { get; set; } = "models/wonder3d";
-        public string UniRigModelPath { get; set; } = "models/unirig";
-        public string TripoSFModelPath { get; set; } = "models/triposf";
+        public string UniRigModelPath { get; set; } = "models";
+        public string TripoSFModelPath { get; set; } = "models";
 
         // MUSt3R Video Settings
         public int Must3rMaxFrames { get; set; } = 100;
@@ -765,36 +766,36 @@ namespace Deep3DStudio.Configuration
             MeshExtraction = MeshExtractionMethod.MarchingCubes;
             MeshRefinement = MeshRefinementMethod.None;
 
-            // Dust3r
-            Dust3rModelPath = "models/dust3r";
+            // Dust3r (flat in models/)
+            Dust3rModelPath = "models";
 
-            // Mast3r
+            // Mast3r (subfolder)
             Mast3rModelPath = "models/mast3r";
 
-            // Must3r
+            // Must3r (subfolder)
             Must3rModelPath = "models/must3r";
             Must3rMaxFrames = 100;
             Must3rFrameInterval = 5;
 
-            // TripoSR
+            // TripoSR (flat in models/)
             TripoSRResolution = 256;
             TripoSRMarchingCubesRes = 128;
-            TripoSRModelPath = "models/triposr";
+            TripoSRModelPath = "models";
 
-            // LGM
+            // LGM (flat in models/)
             LGMFlowSteps = 25;
             LGMQueryResolution = 128;
-            LGMModelPath = "models/lgm";
+            LGMModelPath = "models";
 
-            // Wonder3D
+            // Wonder3D (subfolder)
             Wonder3DDiffusionSteps = 50;
             Wonder3DCFGScale = 3.0f;
             Wonder3DModelPath = "models/wonder3d";
 
-            // UniRig
+            // UniRig (flat in models/)
             UniRigMaxJoints = 64;
             UniRigMaxBonesPerVertex = 4;
-            UniRigModelPath = "models/unirig";
+            UniRigModelPath = "models";
 
             // DeepMeshPrior
             DeepMeshPriorIterations = 500;
@@ -807,10 +808,10 @@ namespace Deep3DStudio.Configuration
             GaussianSDFIterations = 1;
             GaussianSDFIsoLevel = 0.0f;
 
-            // TripoSF
+            // TripoSF (flat in models/)
             TripoSFResolution = 512;
             TripoSFSparseDilation = 1;
-            TripoSFModelPath = "models/triposf";
+            TripoSFModelPath = "models";
         }
 
         private void EnforcePlatformConstraints()

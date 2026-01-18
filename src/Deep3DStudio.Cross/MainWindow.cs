@@ -1996,7 +1996,7 @@ namespace Deep3DStudio
 
                             string dust3rPath = s.Dust3rModelPath;
                             if (ImGui.InputText("Model Path##Dust3r", ref dust3rPath, 256)) s.Dust3rModelPath = dust3rPath;
-                            ImGui.TextDisabled("Path to models/dust3r or dust3r_weights.pth file");
+                            ImGui.TextDisabled("Folder containing dust3r_weights.pth");
                         }
 
                         if (ImGui.CollapsingHeader("MASt3R (Metric Multi-View)"))
@@ -2006,7 +2006,7 @@ namespace Deep3DStudio
 
                             string mast3rPath = s.Mast3rModelPath;
                             if (ImGui.InputText("Model Path##Mast3r", ref mast3rPath, 256)) s.Mast3rModelPath = mast3rPath;
-                            ImGui.TextDisabled("Path to models/mast3r folder");
+                            ImGui.TextDisabled("Folder containing mast3r_weights.pth (models/mast3r/)");
                         }
 
                         if (ImGui.CollapsingHeader("MUSt3R (Video/Many Images)"))
@@ -2016,7 +2016,7 @@ namespace Deep3DStudio
 
                             string must3rPath = s.Must3rModelPath;
                             if (ImGui.InputText("Model Path##Must3r", ref must3rPath, 256)) s.Must3rModelPath = must3rPath;
-                            ImGui.TextDisabled("Path to models/must3r folder");
+                            ImGui.TextDisabled("Folder containing must3r_weights.pth (models/must3r/)");
 
                             ImGui.Spacing();
                             ImGui.Text("Video Settings:");
@@ -2047,6 +2047,7 @@ namespace Deep3DStudio
 
                             string path = s.TripoSRModelPath;
                             if (ImGui.InputText("Model Path##TripoSR", ref path, 256)) s.TripoSRModelPath = path;
+                            ImGui.TextDisabled("Folder containing triposr_weights.pth");
                         }
 
                         if (ImGui.CollapsingHeader("LGM (Large Gaussian Model)"))
@@ -2062,6 +2063,7 @@ namespace Deep3DStudio
 
                             string path = s.LGMModelPath;
                             if (ImGui.InputText("Model Path##LGM", ref path, 256)) s.LGMModelPath = path;
+                            ImGui.TextDisabled("Folder containing model_fp16_fixrot.safetensors");
                         }
 
                         if (ImGui.CollapsingHeader("Wonder3D"))
@@ -2077,6 +2079,7 @@ namespace Deep3DStudio
 
                             string path = s.Wonder3DModelPath;
                             if (ImGui.InputText("Model Path##Wonder3D", ref path, 256)) s.Wonder3DModelPath = path;
+                            ImGui.TextDisabled("Folder containing model_index.json (models/wonder3d/)");
                         }
 
                         if (ImGui.CollapsingHeader("UniRig (Auto Rigging)"))
@@ -2094,6 +2097,7 @@ namespace Deep3DStudio
 
                             string path = s.UniRigModelPath;
                             if (ImGui.InputText("Model Path##UniRig", ref path, 256)) s.UniRigModelPath = path;
+                            ImGui.TextDisabled("Folder containing unirig_weights.pth");
                         }
 
                         ImGui.EndTabItem();

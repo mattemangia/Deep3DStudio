@@ -127,63 +127,56 @@ namespace Deep3DStudio.UI
 
                 UpdateProgress(0.3, "Checking Model Files...");
 
-                // 2. Check Models
-                string modelsDir = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models");
+                // 2. Check Models using IniSettings paths
+                var settings = Configuration.IniSettings.Instance;
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
 
-                // List of expected files/folders based on user input
-                var expectedFiles = new Dictionary<string, bool>
+                // Build expected files list based on IniSettings paths
+                var expectedModels = new List<(string name, string path, string file)>
                 {
-                    { "dust3r_weights.pth", false },
-                    { "mast3r/mast3r_weights.pth", false },        // MASt3R - Matching And Stereo 3D Reconstruction
-                    { "mast3r/mast3r_retrieval.pth", false },      // MASt3R retrieval for unordered images (optional)
-                    { "mast3r/mast3r_retrieval_codebook.pkl", false },
-                    { "must3r/must3r_weights.pth", false },        // MUSt3R - Multi-view Network (video support)
-                    { "must3r/must3r_retrieval.pth", false },      // MUSt3R retrieval for unordered images (optional)
-                    { "must3r/must3r_retrieval_codebook.pkl", false },
-                    { "model_fp16_fixrot.safetensors", false },    // LGM (Large Multi-View Gaussian) weights
-                    { "triposf_weights.pth", false },              // TripoSF (SparseFlex) weights
-                    { "triposr_config.yaml", false },              // TripoSR config
-                    { "triposr_weights.pth", false },              // TripoSR weights
-                    { "unirig_weights.pth", false },               // UniRig auto-rigging weights
-                    // Wonder3D structure
-                    { "wonder3d/model_index.json", false },
-                    { "wonder3d/feature_extractor/preprocessor_config.json", false },
-                    { "wonder3d/image_encoder/config.json", false },
-                    { "wonder3d/image_encoder/pytorch_model.bin", false },
-                    { "wonder3d/scheduler/scheduler_config.json", false },
-                    { "wonder3d/unet/config.json", false },
-                    { "wonder3d/unet/diffusion_pytorch_model.bin", false },
-                    { "wonder3d/vae/config.json", false },
-                    { "wonder3d/vae/diffusion_pytorch_model.bin", false }
+                    ("Dust3r", settings.Dust3rModelPath, "dust3r_weights.pth"),
+                    ("MASt3R", settings.Mast3rModelPath, "mast3r_weights.pth"),
+                    ("MASt3R Retrieval", settings.Mast3rModelPath, "mast3r_retrieval.pth"),
+                    ("MASt3R Codebook", settings.Mast3rModelPath, "mast3r_retrieval_codebook.pkl"),
+                    ("MUSt3R", settings.Must3rModelPath, "must3r_weights.pth"),
+                    ("MUSt3R Retrieval", settings.Must3rModelPath, "must3r_retrieval.pth"),
+                    ("MUSt3R Codebook", settings.Must3rModelPath, "must3r_retrieval_codebook.pkl"),
+                    ("TripoSR", settings.TripoSRModelPath, "triposr_weights.pth"),
+                    ("TripoSR Config", settings.TripoSRModelPath, "triposr_config.yaml"),
+                    ("TripoSF", settings.TripoSFModelPath, "triposf_weights.pth"),
+                    ("LGM", settings.LGMModelPath, "model_fp16_fixrot.safetensors"),
+                    ("UniRig", settings.UniRigModelPath, "unirig_weights.pth"),
+                    ("Wonder3D", settings.Wonder3DModelPath, "model_index.json"),
+                    ("Wonder3D Feature Extractor", settings.Wonder3DModelPath, "feature_extractor/preprocessor_config.json"),
+                    ("Wonder3D Image Encoder Config", settings.Wonder3DModelPath, "image_encoder/config.json"),
+                    ("Wonder3D Image Encoder Model", settings.Wonder3DModelPath, "image_encoder/pytorch_model.bin"),
+                    ("Wonder3D Scheduler", settings.Wonder3DModelPath, "scheduler/scheduler_config.json"),
+                    ("Wonder3D UNet Config", settings.Wonder3DModelPath, "unet/config.json"),
+                    ("Wonder3D UNet Model", settings.Wonder3DModelPath, "unet/diffusion_pytorch_model.bin"),
+                    ("Wonder3D VAE Config", settings.Wonder3DModelPath, "vae/config.json"),
+                    ("Wonder3D VAE Model", settings.Wonder3DModelPath, "vae/diffusion_pytorch_model.bin"),
                 };
 
-                if (System.IO.Directory.Exists(modelsDir))
+                Log($"[INFO] Checking model weights based on Settings paths:");
+                int foundCount = 0;
+                foreach (var (name, modelPath, file) in expectedModels)
                 {
-                    Log($"[OK] Models directory found at: {modelsDir}");
+                    string fullPath = System.IO.Path.IsPathRooted(modelPath)
+                        ? System.IO.Path.Combine(modelPath, file)
+                        : System.IO.Path.Combine(baseDir, modelPath, file);
 
-                    // Iterate and check
-                    int foundCount = 0;
-                    foreach(var key in new List<string>(expectedFiles.Keys))
+                    if (System.IO.File.Exists(fullPath))
                     {
-                        string fullPath = System.IO.Path.Combine(modelsDir, key);
-                        if (System.IO.File.Exists(fullPath))
-                        {
-                            expectedFiles[key] = true;
-                            foundCount++;
-                            Log($"[OK] Found: {key}");
-                        }
-                        else
-                        {
-                            Log($"[FAIL] Missing: {key}");
-                        }
+                        foundCount++;
+                        Log($"[OK] {name}: {file}");
                     }
+                    else
+                    {
+                        Log($"[FAIL] {name}: Missing {file}");
+                    }
+                }
 
-                    Log($"Summary: Found {foundCount} / {expectedFiles.Count} required model files.");
-                }
-                else
-                {
-                    Log($"[FAIL] Models directory not found at {modelsDir}");
-                }
+                Log($"Summary: Found {foundCount} / {expectedModels.Count} model files.");
 
                 UpdateProgress(0.5, "Initializing Python & Imports...");
 
