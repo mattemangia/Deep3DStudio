@@ -26,6 +26,112 @@ def _patched_torch_load(*args, **kwargs):
     return _original_torch_load(*args, **kwargs)
 torch.load = _patched_torch_load
 
+# ============================================================================
+# Fix for MASt3R/MUSt3R path_to_dust3r issue
+# These packages expect dust3r to be installed as a git submodule, but we have
+# it installed as a pip package. We need to:
+# 1. Create the expected directory structure (dust3r/dust3r)
+# 2. Pre-inject fake path_to_dust3r modules into sys.modules BEFORE any imports
+# ============================================================================
+def _setup_dust3r_for_mast3r():
+    """
+    Setup dust3r paths so mast3r/must3r can find it.
+    The mast3r package expects: site-packages/dust3r/dust3r to exist
+    (it checks for the submodule structure, not pip package structure)
+    """
+    import types
+
+    try:
+        import dust3r
+        dust3r_pkg_path = os.path.dirname(dust3r.__file__)  # site-packages/dust3r
+        site_packages = os.path.dirname(dust3r_pkg_path)
+
+        # The check in path_to_dust3r.py looks for dust3r/dust3r (a subdir named dust3r)
+        dust3r_subdir = os.path.join(dust3r_pkg_path, 'dust3r')
+
+        if not os.path.exists(dust3r_subdir):
+            # Create the expected directory structure
+            print(f"[Py] Creating dust3r submodule compatibility shim...")
+            os.makedirs(dust3r_subdir, exist_ok=True)
+
+            # Create an __init__.py that re-exports from the parent
+            init_content = '''# Auto-generated to satisfy mast3r/must3r path_to_dust3r.py check
+import sys
+import os
+_parent = os.path.dirname(os.path.dirname(__file__))
+if _parent not in sys.path:
+    sys.path.insert(0, _parent)
+from dust3r import *
+'''
+            with open(os.path.join(dust3r_subdir, '__init__.py'), 'w') as f:
+                f.write(init_content)
+            print(f"[Py] Created dust3r/dust3r shim at {dust3r_subdir}")
+
+        # Also ensure croco exists (another dependency)
+        croco_path = os.path.join(site_packages, 'croco')
+        croco_models_path = os.path.join(croco_path, 'models')
+
+        if not os.path.exists(croco_models_path):
+            os.makedirs(croco_models_path, exist_ok=True)
+            with open(os.path.join(croco_path, '__init__.py'), 'w') as f:
+                f.write('# CroCo stub\n')
+            with open(os.path.join(croco_models_path, '__init__.py'), 'w') as f:
+                f.write('# CroCo models stub\n')
+            print(f"[Py] Created croco shim at {croco_path}")
+
+        # ===================================================================
+        # CRITICAL: Pre-inject fake path_to_dust3r modules BEFORE mast3r/must3r imports
+        # This prevents the ImportError from path_to_dust3r.py's directory check
+        # ===================================================================
+
+        # Create fake path_to_dust3r module for mast3r
+        fake_mast3r_path = types.ModuleType('mast3r.utils.path_to_dust3r')
+        fake_mast3r_path.DUSt3R_REPO_PATH = site_packages
+        fake_mast3r_path.DUSt3R_LIB_PATH = dust3r_subdir
+
+        # Ensure parent modules exist in sys.modules first
+        if 'mast3r' not in sys.modules:
+            mast3r_mod = types.ModuleType('mast3r')
+            mast3r_mod.__path__ = [os.path.join(site_packages, 'mast3r')]
+            sys.modules['mast3r'] = mast3r_mod
+        if 'mast3r.utils' not in sys.modules:
+            mast3r_utils = types.ModuleType('mast3r.utils')
+            mast3r_utils.__path__ = [os.path.join(site_packages, 'mast3r', 'utils')]
+            sys.modules['mast3r.utils'] = mast3r_utils
+
+        sys.modules['mast3r.utils.path_to_dust3r'] = fake_mast3r_path
+
+        # Create fake path_to_dust3r module for must3r
+        fake_must3r_path = types.ModuleType('must3r.utils.path_to_dust3r')
+        fake_must3r_path.DUSt3R_REPO_PATH = site_packages
+        fake_must3r_path.DUSt3R_LIB_PATH = dust3r_subdir
+
+        if 'must3r' not in sys.modules:
+            must3r_mod = types.ModuleType('must3r')
+            must3r_mod.__path__ = [os.path.join(site_packages, 'must3r')]
+            sys.modules['must3r'] = must3r_mod
+        if 'must3r.utils' not in sys.modules:
+            must3r_utils = types.ModuleType('must3r.utils')
+            must3r_utils.__path__ = [os.path.join(site_packages, 'must3r', 'utils')]
+            sys.modules['must3r.utils'] = must3r_utils
+
+        sys.modules['must3r.utils.path_to_dust3r'] = fake_must3r_path
+
+        print(f"[Py] Injected path_to_dust3r shims into sys.modules")
+
+        return True
+    except ImportError as e:
+        print(f"[Py] Warning: dust3r not installed: {e}")
+        return False
+    except Exception as e:
+        print(f"[Py] Warning: Could not setup dust3r paths: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+# Run the setup early, before any mast3r/must3r imports
+_dust3r_setup_ok = _setup_dust3r_for_mast3r()
+
 # Try importing torch_directml safely
 try:
     import torch_directml
@@ -546,26 +652,20 @@ def load_model(model_name, weights_path, device=None):
         elif model_name == 'mast3r':
             report_progress("load", 0.2, "Importing MASt3R module...")
 
-            # MASt3R builds on dust3r, ensure dust3r is available
+            # Check if dust3r setup was successful (done at module load time)
+            if not _dust3r_setup_ok:
+                raise ImportError("dust3r is not properly installed. MASt3R requires dust3r.")
+
             try:
-                import dust3r
-                dust3r_path = os.path.dirname(dust3r.__file__)
-                croco_path = os.path.join(os.path.dirname(dust3r_path), 'croco')
-                croco_models_path = os.path.join(croco_path, 'models')
-
-                if not os.path.exists(croco_models_path):
-                    report_progress("load", 0.15, "Creating croco dependency...")
-                    os.makedirs(croco_models_path, exist_ok=True)
-                    with open(os.path.join(croco_path, '__init__.py'), 'w') as f:
-                        f.write('# CroCo stub for mast3r\n')
-                    with open(os.path.join(croco_models_path, '__init__.py'), 'w') as f:
-                        f.write('# CroCo models stub\n')
-                    if croco_path not in sys.path:
-                        sys.path.insert(0, os.path.dirname(croco_path))
-            except Exception as e:
-                print(f"Warning: Could not setup croco for MASt3R: {e}")
-
-            from mast3r.model import AsymmetricMASt3R
+                from mast3r.model import AsymmetricMASt3R
+            except ImportError as ie:
+                # If import still fails, provide a helpful error message
+                raise ImportError(
+                    f"Failed to import MASt3R: {ie}\n"
+                    "This usually means dust3r is not properly set up as a submodule.\n"
+                    "The inference_bridge tried to create compatibility shims but they may not be sufficient.\n"
+                    "Try reinstalling dust3r and mast3r packages."
+                ) from ie
             report_progress("load", 0.4, "Loading MASt3R weights...")
 
             # Only support local files
@@ -664,26 +764,20 @@ def load_model(model_name, weights_path, device=None):
         elif model_name == 'must3r':
             report_progress("load", 0.2, "Importing MUSt3R module...")
 
-            # MUSt3R also builds on dust3r
+            # Check if dust3r setup was successful (done at module load time)
+            if not _dust3r_setup_ok:
+                raise ImportError("dust3r is not properly installed. MUSt3R requires dust3r.")
+
             try:
-                import dust3r
-                dust3r_path = os.path.dirname(dust3r.__file__)
-                croco_path = os.path.join(os.path.dirname(dust3r_path), 'croco')
-                croco_models_path = os.path.join(croco_path, 'models')
-
-                if not os.path.exists(croco_models_path):
-                    report_progress("load", 0.15, "Creating croco dependency...")
-                    os.makedirs(croco_models_path, exist_ok=True)
-                    with open(os.path.join(croco_path, '__init__.py'), 'w') as f:
-                        f.write('# CroCo stub for must3r\n')
-                    with open(os.path.join(croco_models_path, '__init__.py'), 'w') as f:
-                        f.write('# CroCo models stub\n')
-                    if croco_path not in sys.path:
-                        sys.path.insert(0, os.path.dirname(croco_path))
-            except Exception as e:
-                print(f"Warning: Could not setup croco for MUSt3R: {e}")
-
-            from must3r.model import MUSt3R
+                from must3r.model import MUSt3R
+            except ImportError as ie:
+                # If import still fails, provide a helpful error message
+                raise ImportError(
+                    f"Failed to import MUSt3R: {ie}\n"
+                    "This usually means dust3r is not properly set up as a submodule.\n"
+                    "The inference_bridge tried to create compatibility shims but they may not be sufficient.\n"
+                    "Try reinstalling dust3r and must3r packages."
+                ) from ie
             report_progress("load", 0.4, "Loading MUSt3R weights...")
 
             is_local_pth = weights_path.endswith('.pth') and os.path.isfile(weights_path)
