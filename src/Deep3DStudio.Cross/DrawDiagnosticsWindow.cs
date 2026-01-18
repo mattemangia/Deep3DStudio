@@ -100,32 +100,40 @@ namespace Deep3DStudio
 
                 SetProgress(0.3f, "Checking Models...");
 
-                // 2. Check Models
-                string modelsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models");
-                var expectedFiles = new List<string>
+                // 2. Check Models using IniSettings paths
+                var settings = Deep3DStudio.Configuration.IniSettings.Instance;
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+
+                // Build expected files list based on IniSettings paths
+                var expectedModels = new List<(string name, string path, string file)>
                 {
-                    "dust3r_weights.pth",
-                    "mast3r/mast3r_weights.pth",        // MASt3R - Matching And Stereo 3D Reconstruction
-                    "mast3r/mast3r_retrieval.pth",      // MASt3R retrieval for unordered images (optional)
-                    "mast3r/mast3r_retrieval_codebook.pkl",
-                    "must3r/must3r_weights.pth",        // MUSt3R - Multi-view Network (video support)
-                    "must3r/must3r_retrieval.pth",      // MUSt3R retrieval for unordered images (optional)
-                    "must3r/must3r_retrieval_codebook.pkl",
-                    "model_fp16_fixrot.safetensors",
-                    "triposr_weights.pth",
-                    "wonder3d/model_index.json"
+                    ("Dust3r", settings.Dust3rModelPath, "dust3r_weights.pth"),
+                    ("MASt3R", settings.Mast3rModelPath, "mast3r_weights.pth"),
+                    ("MASt3R Retrieval", settings.Mast3rModelPath, "mast3r_retrieval.pth"),
+                    ("MASt3R Codebook", settings.Mast3rModelPath, "mast3r_retrieval_codebook.pkl"),
+                    ("MUSt3R", settings.Must3rModelPath, "must3r_weights.pth"),
+                    ("MUSt3R Retrieval", settings.Must3rModelPath, "must3r_retrieval.pth"),
+                    ("MUSt3R Codebook", settings.Must3rModelPath, "must3r_retrieval_codebook.pkl"),
+                    ("TripoSR", settings.TripoSRModelPath, "triposr_weights.pth"),
+                    ("TripoSR Config", settings.TripoSRModelPath, "triposr_config.yaml"),
+                    ("TripoSF", settings.TripoSFModelPath, "triposf_weights.pth"),
+                    ("LGM", settings.LGMModelPath, "model_fp16_fixrot.safetensors"),
+                    ("UniRig", settings.UniRigModelPath, "unirig_weights.pth"),
+                    ("Wonder3D", settings.Wonder3DModelPath, "model_index.json"),
                 };
 
-                if (Directory.Exists(modelsDir))
+                Log($"[INFO] Checking model weights based on Settings paths:");
+                foreach (var (name, modelPath, file) in expectedModels)
                 {
-                    Log($"[OK] Models dir: {modelsDir}");
-                    foreach (var f in expectedFiles)
-                    {
-                        if (File.Exists(Path.Combine(modelsDir, f))) Log($"[OK] Found {f}");
-                        else Log($"[FAIL] Missing {f}");
-                    }
+                    string fullPath = Path.IsPathRooted(modelPath)
+                        ? Path.Combine(modelPath, file)
+                        : Path.Combine(baseDir, modelPath, file);
+
+                    if (File.Exists(fullPath))
+                        Log($"[OK] {name}: {file}");
+                    else
+                        Log($"[FAIL] {name}: Missing {file} (expected at {fullPath})");
                 }
-                else Log($"[FAIL] Models directory missing.");
 
                 SetProgress(0.5f, "Initializing Python...");
 

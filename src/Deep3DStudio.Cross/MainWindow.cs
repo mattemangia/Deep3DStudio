@@ -2097,6 +2097,7 @@ namespace Deep3DStudio
 
                             string path = s.UniRigModelPath;
                             if (ImGui.InputText("Model Path##UniRig", ref path, 256)) s.UniRigModelPath = path;
+                            ImGui.TextDisabled("Folder containing unirig_weights.pth");
                         }
 
                         ImGui.EndTabItem();
