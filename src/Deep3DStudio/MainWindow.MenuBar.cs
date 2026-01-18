@@ -446,13 +446,13 @@ namespace Deep3DStudio
             var workflowsMenuItem = new MenuItem("_Workflows");
             workflowsMenuItem.Submenu = workflowsMenu;
 
-            var dust3rDmpItem = new MenuItem("_Dust3r → DeepMeshPrior");
-            dust3rDmpItem.Activated += OnDust3rDeepMeshPriorWorkflow;
-            workflowsMenu.Append(dust3rDmpItem);
+            var multiViewDmpItem = new MenuItem("_Multi-View → DeepMeshPrior (uses Settings engine)");
+            multiViewDmpItem.Activated += OnMultiViewDeepMeshPriorWorkflow;
+            workflowsMenu.Append(multiViewDmpItem);
 
-            var dust3rNerfItem = new MenuItem("Dust3r → _NeRF → DeepMeshPrior");
-            dust3rNerfItem.Activated += OnDust3rNeRFDeepMeshPriorWorkflow;
-            workflowsMenu.Append(dust3rNerfItem);
+            var multiViewNerfItem = new MenuItem("Multi-View → _NeRF → DeepMeshPrior (uses Settings engine)");
+            multiViewNerfItem.Activated += OnMultiViewNeRFDeepMeshPriorWorkflow;
+            workflowsMenu.Append(multiViewNerfItem);
 
             var fullPipelineItem = new MenuItem("_Full Pipeline (Mesh Only)");
             fullPipelineItem.Activated += OnFullPipelineWorkflow;

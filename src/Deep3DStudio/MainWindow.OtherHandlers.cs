@@ -118,20 +118,38 @@ namespace Deep3DStudio
             var settings = IniSettings.Instance;
 
             // Determine effective method from Workflow Combo
+            // First option "Multi-View (...)" uses the engine from Settings
+            // Other options explicitly set their method
             ReconstructionMethod method = settings.ReconstructionMethod;
             string workflow = _workflowCombo.ActiveText;
 
             if (!string.IsNullOrEmpty(workflow))
             {
-                if (workflow.Contains("TripoSR")) method = ReconstructionMethod.TripoSR;
-                else if (workflow.Contains("Wonder3D")) method = ReconstructionMethod.Wonder3D;
-                else if (workflow.Contains("Dust3r")) method = ReconstructionMethod.Dust3r;
+                if (workflow.StartsWith("Multi-View"))
+                {
+                    // Use the reconstruction method from Settings
+                    method = settings.ReconstructionMethod;
+                }
+                else if (workflow.Contains("Feature Matching") || workflow.Contains("SfM"))
+                {
+                    method = ReconstructionMethod.FeatureMatching;
+                }
+                else if (workflow.Contains("TripoSR"))
+                {
+                    method = ReconstructionMethod.TripoSR;
+                }
+                else if (workflow.Contains("Wonder3D"))
+                {
+                    method = ReconstructionMethod.Wonder3D;
+                }
             }
 
             // Special check for LGM workflow to allow single image pass-through (handled in Meshing phase)
             bool isLGM = !string.IsNullOrEmpty(workflow) && workflow.Contains("LGM");
 
             bool requiresMultiView = !isLGM && (method == ReconstructionMethod.Dust3r ||
+                                     method == ReconstructionMethod.Mast3r ||
+                                     method == ReconstructionMethod.Must3r ||
                                      method == ReconstructionMethod.FeatureMatching);
             int minImages = requiresMultiView ? 2 : 1;
 
@@ -220,6 +238,20 @@ namespace Deep3DStudio
                         {
                             result = wonderResult;
                         }
+                        break;
+
+                    case ReconstructionMethod.Mast3r:
+                        _statusLabel.Text = "Estimating Geometry (MASt3R)...";
+                        var mast3r = new Deep3DStudio.Model.Mast3rInference();
+                        mast3r.LogCallback = msg => Application.Invoke((s, e) => _statusLabel.Text = msg);
+                        result = await Task.Run(() => mast3r.ReconstructScene(_imagePaths, useRetrieval: true));
+                        break;
+
+                    case ReconstructionMethod.Must3r:
+                        _statusLabel.Text = "Estimating Geometry (MUSt3R)...";
+                        var must3r = new Deep3DStudio.Model.Must3rInference();
+                        must3r.LogCallback = msg => Application.Invoke((s, e) => _statusLabel.Text = msg);
+                        result = await Task.Run(() => must3r.ReconstructScene(_imagePaths, useRetrieval: true));
                         break;
                 }
 

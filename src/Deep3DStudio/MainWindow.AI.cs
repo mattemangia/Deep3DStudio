@@ -136,19 +136,30 @@ namespace Deep3DStudio
             RunAIWorkflowAsync(pipeline);
         }
 
-        private void OnDust3rDeepMeshPriorWorkflow(object? sender, EventArgs e)
+        private void OnMultiViewDeepMeshPriorWorkflow(object? sender, EventArgs e)
         {
             if (_imagePaths.Count < 2)
             {
-                ShowMessage("Need More Images", "Please load at least 2 images for Dust3r reconstruction.");
+                ShowMessage("Need More Images", $"Please load at least 2 images for {GetCurrentEngineName()} reconstruction.");
                 return;
             }
 
-            _statusLabel.Text = "Running Dust3r → DeepMeshPrior workflow...";
-            RunAIWorkflowAsync(AIModels.WorkflowPipeline.Dust3rToDeepMeshPrior);
+            _statusLabel.Text = $"Running {GetCurrentEngineName()} → DeepMeshPrior workflow...";
+            // Build pipeline using settings-based reconstruction step
+            var pipeline = new AIModels.WorkflowPipeline
+            {
+                Name = $"{GetCurrentEngineName()} → DeepMeshPrior",
+                Steps = new List<AIModels.WorkflowStep>
+                {
+                    AIModels.WorkflowStep.LoadImages,
+                    GetReconstructionStep(),
+                    AIModels.WorkflowStep.DeepMeshPriorRefinement
+                }
+            };
+            RunAIWorkflowAsync(pipeline);
         }
 
-        private void OnDust3rNeRFDeepMeshPriorWorkflow(object? sender, EventArgs e)
+        private void OnMultiViewNeRFDeepMeshPriorWorkflow(object? sender, EventArgs e)
         {
             if (_imagePaths.Count < 2)
             {
@@ -156,8 +167,20 @@ namespace Deep3DStudio
                 return;
             }
 
-            _statusLabel.Text = "Running Dust3r → NeRF → DeepMeshPrior workflow...";
-            RunAIWorkflowAsync(AIModels.WorkflowPipeline.Dust3rToNeRFToMesh);
+            _statusLabel.Text = $"Running {GetCurrentEngineName()} → NeRF → DeepMeshPrior workflow...";
+            // Build pipeline using settings-based reconstruction step
+            var pipeline = new AIModels.WorkflowPipeline
+            {
+                Name = $"{GetCurrentEngineName()} → NeRF → DeepMeshPrior",
+                Steps = new List<AIModels.WorkflowStep>
+                {
+                    AIModels.WorkflowStep.LoadImages,
+                    GetReconstructionStep(),
+                    AIModels.WorkflowStep.NeRFRefinement,
+                    AIModels.WorkflowStep.DeepMeshPriorRefinement
+                }
+            };
+            RunAIWorkflowAsync(pipeline);
         }
 
         private void OnFullPipelineWorkflow(object? sender, EventArgs e)
