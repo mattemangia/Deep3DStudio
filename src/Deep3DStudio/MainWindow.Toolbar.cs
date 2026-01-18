@@ -164,20 +164,16 @@ namespace Deep3DStudio
             };
             toolbar.Insert(_autoWorkflowToggle, -1);
 
-            // Workflow
+            // Workflow - first option uses engine from Settings
             var wfItem = new ToolItem();
             var wfBox = new Box(Orientation.Horizontal, 5);
             wfBox.PackStart(new Label("Workflow: "), false, false, 0);
             _workflowCombo = new ComboBoxText();
-            _workflowCombo.AppendText("Dust3r (Fast)");
-            _workflowCombo.AppendText("NeRF (Refined)");
-            _workflowCombo.AppendText("Interior Scan");
+            _workflowCombo.AppendText($"Multi-View ({GetCurrentEngineName()})"); // Uses Settings engine
+            _workflowCombo.AppendText("Feature Matching (SfM)");
             _workflowCombo.AppendText("TripoSR (Single Image)");
-            _workflowCombo.AppendText("LGM (High Quality)");
-            _workflowCombo.AppendText("Wonder3D (Multi-View)");
-            _workflowCombo.AppendText("Dust3r + DeepMeshPrior");
-            _workflowCombo.AppendText("Dust3r + NeRF + DeepMeshPrior");
-            _workflowCombo.AppendText("Full Pipeline (Mesh Only)");
+            _workflowCombo.AppendText("LGM (Gaussian)");
+            _workflowCombo.AppendText("Wonder3D");
             _workflowCombo.Active = 0;
             wfBox.PackStart(_workflowCombo, false, false, 0);
             wfItem.Add(wfBox);
@@ -185,10 +181,10 @@ namespace Deep3DStudio
 
             toolbar.Insert(new SeparatorToolItem(), -1);
 
-            // Run - behavior depends on _autoWorkflowEnabled
-            var runPointsBtn = new ToolButton(AppIconFactory.GenerateIcon("pointcloud", iconSize), "Dust3R");
-            runPointsBtn.TooltipText = "Generate Point Cloud with Dust3R (standalone)";
-            runPointsBtn.Clicked += (s, e) => OnRunSingleStep(AIModels.WorkflowStep.Dust3rReconstruction);
+            // Run Point Cloud - uses engine from Settings
+            var runPointsBtn = new ToolButton(AppIconFactory.GenerateIcon("pointcloud", iconSize), "Points");
+            runPointsBtn.TooltipText = $"Generate Point Cloud with {GetCurrentEngineName()} (standalone)";
+            runPointsBtn.Clicked += (s, e) => OnRunSingleStep(GetReconstructionStep());
             toolbar.Insert(runPointsBtn, -1);
 
             var runMeshBtn = new ToolButton(AppIconFactory.GenerateIcon("mesh", iconSize), "Mesh");

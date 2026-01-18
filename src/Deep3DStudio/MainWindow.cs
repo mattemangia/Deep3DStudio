@@ -53,6 +53,51 @@ namespace Deep3DStudio
         // When disabled, user can manually trigger each step (e.g., Dust3R -> then LGM -> then UniRig)
         private bool _autoWorkflowEnabled = true;
 
+        /// <summary>
+        /// Gets the current reconstruction engine display name from settings.
+        /// </summary>
+        private string GetCurrentEngineName()
+        {
+            return IniSettings.Instance.ReconstructionMethod switch
+            {
+                ReconstructionMethod.Dust3r => "Dust3R",
+                ReconstructionMethod.Mast3r => "MASt3R",
+                ReconstructionMethod.Must3r => "MUSt3R",
+                ReconstructionMethod.FeatureMatching => "SfM",
+                ReconstructionMethod.TripoSR => "TripoSR",
+                ReconstructionMethod.Wonder3D => "Wonder3D",
+                _ => "Dust3R"
+            };
+        }
+
+        /// <summary>
+        /// Gets the correct reconstruction workflow step based on settings.
+        /// </summary>
+        private AIModels.WorkflowStep GetReconstructionStep()
+        {
+            return IniSettings.Instance.ReconstructionMethod switch
+            {
+                ReconstructionMethod.Mast3r => AIModels.WorkflowStep.Mast3rReconstruction,
+                ReconstructionMethod.Must3r => AIModels.WorkflowStep.Must3rReconstruction,
+                ReconstructionMethod.FeatureMatching => AIModels.WorkflowStep.SfMReconstruction,
+                _ => AIModels.WorkflowStep.Dust3rReconstruction
+            };
+        }
+
+        /// <summary>
+        /// Gets the workflow pipeline based on settings reconstruction method.
+        /// </summary>
+        private AIModels.WorkflowPipeline GetMultiViewPipeline()
+        {
+            return IniSettings.Instance.ReconstructionMethod switch
+            {
+                ReconstructionMethod.Mast3r => AIModels.WorkflowPipeline.ImageToMast3rToMesh,
+                ReconstructionMethod.Must3r => AIModels.WorkflowPipeline.ImageToMust3rToMesh,
+                ReconstructionMethod.FeatureMatching => AIModels.WorkflowPipeline.ImageToSfM,
+                _ => AIModels.WorkflowPipeline.ImageToDust3rToMesh
+            };
+        }
+
         // Panel containers for show/hide
         private Widget _leftPanel = null!;
         private Widget _verticalToolbar = null!;

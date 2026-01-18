@@ -33,15 +33,55 @@ namespace Deep3DStudio
         // State
         private int _selectedWorkflow = 0;
         private int _selectedQuality = 1;
-        private string[] _workflows = {
-            "Dust3r (Multi-View)",
-            "MASt3R (Metric 3D)",       // MASt3R - better matching and metric reconstruction
-            "MUSt3R (Multi-View/Video)", // MUSt3R - optimized for many images and video
+        // Dynamic workflow names - first entry uses Settings reconstruction method
+        private string[] _workflowsBase = {
+            "Multi-View (Settings)", // Uses IniSettings.ReconstructionMethod
             "Feature Matching (SfM)",
             "TripoSR (Single Image)",
             "LGM (Gaussian)",
             "Wonder3D"
         };
+
+        /// <summary>
+        /// Gets the current reconstruction engine display name from settings.
+        /// </summary>
+        private string GetCurrentEngineName()
+        {
+            return IniSettings.Instance.ReconstructionMethod switch
+            {
+                ReconstructionMethod.Dust3r => "Dust3R",
+                ReconstructionMethod.Mast3r => "MASt3R",
+                ReconstructionMethod.Must3r => "MUSt3R",
+                ReconstructionMethod.FeatureMatching => "SfM",
+                ReconstructionMethod.TripoSR => "TripoSR",
+                ReconstructionMethod.Wonder3D => "Wonder3D",
+                _ => "Dust3R"
+            };
+        }
+
+        /// <summary>
+        /// Gets the workflow names with dynamic first entry based on current settings.
+        /// </summary>
+        private string[] GetWorkflowNames()
+        {
+            var result = (string[])_workflowsBase.Clone();
+            result[0] = $"Multi-View ({GetCurrentEngineName()})";
+            return result;
+        }
+
+        /// <summary>
+        /// Gets the correct reconstruction workflow step based on settings.
+        /// </summary>
+        private WorkflowStep GetReconstructionStep()
+        {
+            return IniSettings.Instance.ReconstructionMethod switch
+            {
+                ReconstructionMethod.Mast3r => WorkflowStep.Mast3rReconstruction,
+                ReconstructionMethod.Must3r => WorkflowStep.Must3rReconstruction,
+                ReconstructionMethod.FeatureMatching => WorkflowStep.SfMReconstruction,
+                _ => WorkflowStep.Dust3rReconstruction
+            };
+        }
         private string[] _qualities = { "Fast", "Balanced", "High" };
         private string _videoFilePath = ""; // For MUSt3R video input
         private bool _hasVideoInput = false;
@@ -949,20 +989,19 @@ namespace Deep3DStudio
                 ImGui.Text("Workflow:"); ImGui.SameLine();
                 ImGui.SetNextItemWidth(190);
 
-                // Show recommendation hint if more than 2 images loaded
+                // Get dynamic workflow names (first option shows current engine from settings)
+                var workflowNames = GetWorkflowNames();
+
+                // Show recommendation hint if video loaded but MUSt3R not selected
                 string workflowHint = "";
-                if (_loadedImages.Count > 2 && _selectedWorkflow == 0)
+                bool isMust3rSelected = IniSettings.Instance.ReconstructionMethod == ReconstructionMethod.Must3r;
+                if (_hasVideoInput && !isMust3rSelected)
                 {
-                    workflowHint = " (Consider MASt3R/MUSt3R for >2 images)";
-                    ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(1.0f, 0.8f, 0.2f, 1.0f));
-                }
-                else if (_hasVideoInput && _selectedWorkflow != 2)
-                {
-                    workflowHint = " (MUSt3R recommended for video)";
+                    workflowHint = " (MUSt3R recommended for video - change in Settings)";
                     ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(0.6f, 0.8f, 1.0f, 1.0f));
                 }
 
-                ImGui.Combo("##Workflow", ref _selectedWorkflow, _workflows, _workflows.Length);
+                ImGui.Combo("##Workflow", ref _selectedWorkflow, workflowNames, workflowNames.Length);
                 if (!string.IsNullOrEmpty(workflowHint))
                 {
                     ImGui.PopStyleColor();
@@ -973,8 +1012,8 @@ namespace Deep3DStudio
                 }
                 ImGui.SameLine();
 
-                // Video input button for MUSt3R
-                if (_selectedWorkflow == 2) // MUSt3R selected
+                // Video input button - show when using Multi-View workflow with MUSt3R
+                if (_selectedWorkflow == 0 && isMust3rSelected)
                 {
                     if (ImGui.ImageButton("##VideoInput", _iconFactory.GetIcon(IconType.Video), new System.Numerics.Vector2(24, 24)))
                     {
@@ -1003,10 +1042,10 @@ namespace Deep3DStudio
                     if (_autoWorkflowEnabled)
                         RunReconstruction(); // Run full workflow
                     else
-                        RunSingleStep(WorkflowStep.Dust3rReconstruction); // Just run the selected workflow's first step
+                        RunSingleStep(GetReconstructionStep()); // Run the selected engine's reconstruction step
                 }, _autoWorkflowEnabled ? "Run Full Workflow" : "Run Selected Step", size);
                 ImGui.SameLine();
-                DrawToolbarButton("##Points", IconType.Cloud, false, () => RunSingleStep(WorkflowStep.Dust3rReconstruction), "Generate Point Cloud (Dust3R/SfM)", size);
+                DrawToolbarButton("##Points", IconType.Cloud, false, () => RunSingleStep(GetReconstructionStep()), $"Generate Point Cloud ({GetCurrentEngineName()})", size);
                 ImGui.SameLine();
                 DrawToolbarButton("##Mesh", IconType.Mesh, false, () => RunSingleStep(WorkflowStep.PoissonReconstruction), "Generate Mesh from Points", size);
 
@@ -1117,10 +1156,10 @@ namespace Deep3DStudio
                 ImGui.TextDisabled("AI Steps");
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("AI Processing Steps");
 
-                // Point Cloud Generation (Dust3R or SfM depending on workflow)
-                if (ImGui.ImageButton("##Dust3R", _iconFactory.GetIcon(IconType.PointCloudGen), size))
-                    RunSingleStep(WorkflowStep.Dust3rReconstruction);
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Dust3R Point Cloud");
+                // Point Cloud Generation (uses engine from Settings)
+                if (ImGui.ImageButton("##PointCloud", _iconFactory.GetIcon(IconType.PointCloudGen), size))
+                    RunSingleStep(GetReconstructionStep());
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{GetCurrentEngineName()} Point Cloud");
 
                 // Single-image 3D generation models
                 if (ImGui.ImageButton("##TripoSR", _iconFactory.GetIcon(IconType.TripoSR), size))
@@ -2571,8 +2610,9 @@ namespace Deep3DStudio
                 _hasVideoInput = true;
                 _logBuffer += $"[MUSt3R] Video loaded: {Path.GetFileName(path)}\n";
 
-                // Auto-select MUSt3R workflow when video is loaded
-                _selectedWorkflow = 2; // MUSt3R (Multi-View/Video)
+                // Auto-select MUSt3R as reconstruction method and first workflow when video is loaded
+                IniSettings.Instance.ReconstructionMethod = ReconstructionMethod.Must3r;
+                _selectedWorkflow = 0; // Multi-View (will use MUSt3R from settings)
             }
         }
 
@@ -3306,19 +3346,19 @@ namespace Deep3DStudio
         private void RunAIModel(string modelName)
         {
             _logBuffer += $"Running {modelName}...\n";
-            // Map to appropriate workflow
+            // Map to appropriate workflow (indices match _workflowsBase array)
             switch (modelName)
             {
                 case "TripoSR":
-                    _selectedWorkflow = 1;
+                    _selectedWorkflow = 2; // TripoSR (Single Image)
                     RunReconstruction();
                     break;
                 case "LGM":
-                    _selectedWorkflow = 2;
+                    _selectedWorkflow = 3; // LGM (Gaussian)
                     RunReconstruction();
                     break;
                 case "Wonder3D":
-                    _selectedWorkflow = 3;
+                    _selectedWorkflow = 4; // Wonder3D
                     RunReconstruction();
                     break;
                 case "DeepMeshPrior":
@@ -3460,7 +3500,8 @@ namespace Deep3DStudio
                 return;
             }
 
-            ProgressDialog.Instance.Start($"Running {_workflows[_selectedWorkflow]}...", OperationType.Processing);
+            var workflowNames = GetWorkflowNames();
+            ProgressDialog.Instance.Start($"Running {workflowNames[_selectedWorkflow]}...", OperationType.Processing);
 
             try
             {
@@ -3468,20 +3509,32 @@ namespace Deep3DStudio
 
                 await Task.Run(async () =>
                 {
-                    WorkflowPipeline pipeline = WorkflowPipeline.ImageToDust3rToMesh;
+                    WorkflowPipeline pipeline;
 
-                    if (_workflows[_selectedWorkflow].Contains("MASt3R"))
-                        pipeline = WorkflowPipeline.ImageToMast3rToMesh;
-                    else if (_workflows[_selectedWorkflow].Contains("MUSt3R"))
-                        pipeline = WorkflowPipeline.ImageToMust3rToMesh;
-                    else if (_workflows[_selectedWorkflow].Contains("Feature Matching") || _workflows[_selectedWorkflow].Contains("SfM"))
+                    // First workflow option uses the engine from settings
+                    if (_selectedWorkflow == 0)
+                    {
+                        // Use the reconstruction method from settings
+                        pipeline = IniSettings.Instance.ReconstructionMethod switch
+                        {
+                            ReconstructionMethod.Mast3r => WorkflowPipeline.ImageToMast3rToMesh,
+                            ReconstructionMethod.Must3r => WorkflowPipeline.ImageToMust3rToMesh,
+                            ReconstructionMethod.FeatureMatching => WorkflowPipeline.ImageToSfM,
+                            ReconstructionMethod.TripoSR => WorkflowPipeline.ImageToTripoSR,
+                            ReconstructionMethod.Wonder3D => WorkflowPipeline.ImageToWonder3D,
+                            _ => WorkflowPipeline.ImageToDust3rToMesh // Default to Dust3r
+                        };
+                    }
+                    else if (workflowNames[_selectedWorkflow].Contains("SfM"))
                         pipeline = WorkflowPipeline.ImageToSfM;
-                    else if (_workflows[_selectedWorkflow].Contains("TripoSR"))
+                    else if (workflowNames[_selectedWorkflow].Contains("TripoSR"))
                         pipeline = WorkflowPipeline.ImageToTripoSR;
-                    else if (_workflows[_selectedWorkflow].Contains("LGM"))
+                    else if (workflowNames[_selectedWorkflow].Contains("LGM"))
                         pipeline = WorkflowPipeline.ImageToLGM;
-                    else if (_workflows[_selectedWorkflow].Contains("Wonder3D"))
+                    else if (workflowNames[_selectedWorkflow].Contains("Wonder3D"))
                         pipeline = WorkflowPipeline.ImageToWonder3D;
+                    else
+                        pipeline = WorkflowPipeline.ImageToDust3rToMesh;
 
                     // Convert ProjectImage list to string list
                     var imagePaths = _loadedImages.Select(i => i.FilePath).ToList();
