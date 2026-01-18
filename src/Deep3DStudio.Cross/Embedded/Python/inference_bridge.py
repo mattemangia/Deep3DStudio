@@ -6,6 +6,8 @@ import gc
 import torch
 import numpy as np
 from PIL import Image
+import importlib.util
+import ctypes.util
 import torchvision.transforms as transforms
 import argparse
 import numbers
@@ -25,6 +27,44 @@ def _patched_torch_load(*args, **kwargs):
         kwargs['weights_only'] = False
     return _original_torch_load(*args, **kwargs)
 torch.load = _patched_torch_load
+
+# ============================================================================
+# OpenCV fallback: provide a minimal stub if cv2 is unavailable or libGL is missing.
+# This prevents dust3r.utils.image from failing on headless environments.
+# ============================================================================
+def _install_cv2_stub(reason):
+    import types
+
+    cv2_stub = types.ModuleType('cv2')
+    cv2_stub.IMREAD_COLOR = 1
+    cv2_stub.IMREAD_ANYDEPTH = 2
+    cv2_stub.COLOR_BGR2RGB = 4
+
+    def imread(path, flags=cv2_stub.IMREAD_COLOR):
+        img = Image.open(path).convert('RGB')
+        arr = np.array(img)
+        return arr[..., ::-1]
+
+    def cvtColor(img, code):
+        if code == cv2_stub.COLOR_BGR2RGB:
+            return img[..., ::-1]
+        return img
+
+    cv2_stub.imread = imread
+    cv2_stub.cvtColor = cvtColor
+
+    sys.modules['cv2'] = cv2_stub
+    print(f"[Py] Installed cv2 stub ({reason})")
+
+def _ensure_cv2_available():
+    cv2_spec = importlib.util.find_spec('cv2')
+    if cv2_spec is None:
+        _install_cv2_stub("cv2 not installed")
+        return
+    if ctypes.util.find_library('GL') is None:
+        _install_cv2_stub("libGL missing")
+
+_ensure_cv2_available()
 
 # Try importing torch_directml safely
 try:

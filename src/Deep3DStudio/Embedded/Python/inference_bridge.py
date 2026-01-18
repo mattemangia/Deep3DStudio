@@ -6,6 +6,8 @@ import gc
 import torch
 import numpy as np
 from PIL import Image
+import importlib.util
+import ctypes.util
 import torchvision.transforms as transforms
 import argparse
 import numbers
@@ -40,6 +42,12 @@ def _setup_dust3r_for_mast3r():
     (it checks for the submodule structure, not pip package structure)
     """
     import types
+
+    def _safe_find_spec(name):
+        try:
+            return importlib.util.find_spec(name)
+        except ModuleNotFoundError:
+            return None
 
     try:
         import dust3r
@@ -84,38 +92,55 @@ from dust3r import *
         # This prevents the ImportError from path_to_dust3r.py's directory check
         # ===================================================================
 
-        # Create fake path_to_dust3r module for mast3r
-        fake_mast3r_path = types.ModuleType('mast3r.utils.path_to_dust3r')
-        fake_mast3r_path.DUSt3R_REPO_PATH = site_packages
-        fake_mast3r_path.DUSt3R_LIB_PATH = dust3r_subdir
+        mast3r_spec = _safe_find_spec('mast3r')
+        mast3r_needs_shim = True
+        if mast3r_spec and getattr(mast3r_spec, 'submodule_search_locations', None):
+            mast3r_pkg_root = next(iter(mast3r_spec.submodule_search_locations))
+            mast3r_repo_root = os.path.dirname(mast3r_pkg_root)
+            mast3r_expected = os.path.join(mast3r_repo_root, 'dust3r', 'dust3r')
+            mast3r_needs_shim = not os.path.isdir(mast3r_expected)
 
-        # Ensure parent modules exist in sys.modules first
-        if 'mast3r' not in sys.modules:
-            mast3r_mod = types.ModuleType('mast3r')
-            mast3r_mod.__path__ = [os.path.join(site_packages, 'mast3r')]
-            sys.modules['mast3r'] = mast3r_mod
-        if 'mast3r.utils' not in sys.modules:
-            mast3r_utils = types.ModuleType('mast3r.utils')
-            mast3r_utils.__path__ = [os.path.join(site_packages, 'mast3r', 'utils')]
-            sys.modules['mast3r.utils'] = mast3r_utils
+        if mast3r_needs_shim:
+            fake_mast3r_path = types.ModuleType('mast3r.utils.path_to_dust3r')
+            fake_mast3r_path.DUSt3R_REPO_PATH = site_packages
+            fake_mast3r_path.DUSt3R_LIB_PATH = dust3r_subdir
 
-        sys.modules['mast3r.utils.path_to_dust3r'] = fake_mast3r_path
+            if mast3r_spec is None:
+                if 'mast3r' not in sys.modules:
+                    mast3r_mod = types.ModuleType('mast3r')
+                    mast3r_mod.__path__ = [os.path.join(site_packages, 'mast3r')]
+                    sys.modules['mast3r'] = mast3r_mod
+                if 'mast3r.utils' not in sys.modules:
+                    mast3r_utils = types.ModuleType('mast3r.utils')
+                    mast3r_utils.__path__ = [os.path.join(site_packages, 'mast3r', 'utils')]
+                    sys.modules['mast3r.utils'] = mast3r_utils
 
-        # Create fake path_to_dust3r module for must3r
-        fake_must3r_path = types.ModuleType('must3r.utils.path_to_dust3r')
-        fake_must3r_path.DUSt3R_REPO_PATH = site_packages
-        fake_must3r_path.DUSt3R_LIB_PATH = dust3r_subdir
+            sys.modules['mast3r.utils.path_to_dust3r'] = fake_mast3r_path
 
-        if 'must3r' not in sys.modules:
-            must3r_mod = types.ModuleType('must3r')
-            must3r_mod.__path__ = [os.path.join(site_packages, 'must3r')]
-            sys.modules['must3r'] = must3r_mod
-        if 'must3r.utils' not in sys.modules:
-            must3r_utils = types.ModuleType('must3r.utils')
-            must3r_utils.__path__ = [os.path.join(site_packages, 'must3r', 'utils')]
-            sys.modules['must3r.utils'] = must3r_utils
+        must3r_spec = _safe_find_spec('must3r')
+        must3r_needs_shim = True
+        if must3r_spec and getattr(must3r_spec, 'submodule_search_locations', None):
+            must3r_pkg_root = next(iter(must3r_spec.submodule_search_locations))
+            must3r_repo_root = os.path.dirname(must3r_pkg_root)
+            must3r_expected = os.path.join(must3r_repo_root, 'dust3r', 'dust3r')
+            must3r_needs_shim = not os.path.isdir(must3r_expected)
 
-        sys.modules['must3r.utils.path_to_dust3r'] = fake_must3r_path
+        if must3r_needs_shim:
+            fake_must3r_path = types.ModuleType('must3r.utils.path_to_dust3r')
+            fake_must3r_path.DUSt3R_REPO_PATH = site_packages
+            fake_must3r_path.DUSt3R_LIB_PATH = dust3r_subdir
+
+            if must3r_spec is None:
+                if 'must3r' not in sys.modules:
+                    must3r_mod = types.ModuleType('must3r')
+                    must3r_mod.__path__ = [os.path.join(site_packages, 'must3r')]
+                    sys.modules['must3r'] = must3r_mod
+                if 'must3r.utils' not in sys.modules:
+                    must3r_utils = types.ModuleType('must3r.utils')
+                    must3r_utils.__path__ = [os.path.join(site_packages, 'must3r', 'utils')]
+                    sys.modules['must3r.utils'] = must3r_utils
+
+            sys.modules['must3r.utils.path_to_dust3r'] = fake_must3r_path
 
         print(f"[Py] Injected path_to_dust3r shims into sys.modules")
 
@@ -131,6 +156,44 @@ from dust3r import *
 
 # Run the setup early, before any mast3r/must3r imports
 _dust3r_setup_ok = _setup_dust3r_for_mast3r()
+
+# ============================================================================
+# OpenCV fallback: provide a minimal stub if cv2 is unavailable or libGL is missing.
+# This prevents dust3r.utils.image from failing on headless environments.
+# ============================================================================
+def _install_cv2_stub(reason):
+    import types
+
+    cv2_stub = types.ModuleType('cv2')
+    cv2_stub.IMREAD_COLOR = 1
+    cv2_stub.IMREAD_ANYDEPTH = 2
+    cv2_stub.COLOR_BGR2RGB = 4
+
+    def imread(path, flags=cv2_stub.IMREAD_COLOR):
+        img = Image.open(path).convert('RGB')
+        arr = np.array(img)
+        return arr[..., ::-1]
+
+    def cvtColor(img, code):
+        if code == cv2_stub.COLOR_BGR2RGB:
+            return img[..., ::-1]
+        return img
+
+    cv2_stub.imread = imread
+    cv2_stub.cvtColor = cvtColor
+
+    sys.modules['cv2'] = cv2_stub
+    print(f"[Py] Installed cv2 stub ({reason})")
+
+def _ensure_cv2_available():
+    cv2_spec = importlib.util.find_spec('cv2')
+    if cv2_spec is None:
+        _install_cv2_stub("cv2 not installed")
+        return
+    if ctypes.util.find_library('GL') is None:
+        _install_cv2_stub("libGL missing")
+
+_ensure_cv2_available()
 
 # Try importing torch_directml safely
 try:
@@ -698,6 +761,26 @@ def load_model(model_name, weights_path, device=None):
             else:
                 ckpt = torch.load(weights_path, map_location='cpu')
 
+            if 'args' in ckpt and hasattr(ckpt['args'], 'model'):
+                model_str = ckpt['args'].model.replace("ManyAR_PatchEmbed", "PatchEmbedDust3R")
+                if 'landscape_only' not in model_str:
+                    model_str = model_str[:-1] + ', landscape_only=False)'
+                else:
+                    model_str = model_str.replace(" ", "").replace('landscape_only=True', 'landscape_only=False')
+
+                state_dict = ckpt.get('model', ckpt.get('state_dict', ckpt))
+                state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+
+                model = eval(model_str, {'AsymmetricMASt3R': AsymmetricMASt3R, 'inf': float('inf')})
+                model.load_state_dict(state_dict, strict=False)
+
+                report_progress("load", 0.7, "Moving MASt3R to device...")
+                model.to(device_obj)
+                model.eval()
+                loaded_models[model_name] = model
+                report_progress("load", 1.0, "Successfully loaded mast3r")
+                return True
+
             # Extract model args
             if 'args' in ckpt:
                 model_args = ckpt['args']
@@ -733,6 +816,14 @@ def load_model(model_name, weights_path, device=None):
                 'dec_num_heads': 12,
                 'img_size': (512, 512),
                 'pos_embed': 'RoPE100',
+                'output_mode': 'pts3d+desc24',
+                'head_type': 'catmlp+dpt',
+                'depth_mode': ('exp', float('-inf'), float('inf')),
+                'conf_mode': ('exp', 1, float('inf')),
+                'patch_embed_cls': 'PatchEmbedDust3R',
+                'two_confs': True,
+                'desc_conf_mode': ('exp', 0, float('inf')),
+                'landscape_only': False,
             }
             final_model_args = {**default_args, **filtered_model_args}
 
@@ -808,6 +899,32 @@ def load_model(model_name, weights_path, device=None):
                 ckpt = load_file(weights_path)
             else:
                 ckpt = torch.load(weights_path, map_location='cpu')
+
+            if 'encoder' in ckpt and 'decoder' in ckpt and 'args' in ckpt:
+                from must3r.model import Dust3rEncoder
+                import must3r.model as must3r_model
+
+                encoder_args = ckpt['args'].encoder
+                decoder_args = must3r_model.convert_decoder_args(ckpt['args'].decoder)
+
+                encoder = eval(encoder_args, {'Dust3rEncoder': Dust3rEncoder})
+                decoder = eval(decoder_args, must3r_model.__dict__)
+
+                encoder.load_state_dict(ckpt['encoder'], strict=True)
+                decoder.load_state_dict(ckpt['decoder'], strict=True)
+
+                encoder.to(device_obj)
+                decoder.to(device_obj)
+                encoder.eval()
+                decoder.eval()
+
+                loaded_models[model_name] = {
+                    'encoder': encoder,
+                    'decoder': decoder,
+                }
+                report_progress("load", 0.7, "Moving MUSt3R to device...")
+                report_progress("load", 1.0, "Successfully loaded must3r")
+                return True
 
             if 'args' in ckpt:
                 model_args = ckpt['args']
@@ -1099,7 +1216,10 @@ def infer_dust3r(images_bytes_list):
             img.save(path)
             temp_files.append(path)
 
-        device = next(model.parameters()).device
+        if isinstance(model, dict) and 'encoder' in model:
+            device = next(model['encoder'].parameters()).device
+        else:
+            device = next(model.parameters()).device
         report_progress("inference", 0.1, f"Processing {len(pil_images)} images with Dust3r...")
 
         dust3r_images = load_images(temp_files, size=512)
@@ -1271,7 +1391,10 @@ def infer_mast3r(images_bytes_list, use_retrieval=True):
             img.save(path)
             temp_files.append(path)
 
-        device = next(model.parameters()).device
+        if isinstance(model, dict) and 'encoder' in model:
+            device = next(model['encoder'].parameters()).device
+        else:
+            device = next(model.parameters()).device
         report_progress("inference", 0.1, f"Processing {len(pil_images)} images with MASt3R...")
 
         mast3r_images = load_images(temp_files, size=512)
@@ -1462,7 +1585,10 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
             img.save(path)
             temp_files.append(path)
 
-        device = next(model.parameters()).device
+        if isinstance(model, dict) and 'encoder' in model:
+            device = next(model['encoder'].parameters()).device
+        else:
+            device = next(model.parameters()).device
         report_progress("inference", 0.1, f"Processing {len(pil_images)} images with MUSt3R (multi-view)...")
 
         must3r_images = load_images(temp_files, size=512)
@@ -1477,46 +1603,89 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
         try:
             # MUSt3R forward pass - processes all images together
             with torch.no_grad():
-                # Prepare input for MUSt3R
-                imgs_tensor = []
-                for must3r_img in must3r_images:
-                    img_tensor = must3r_img['img'].to(device)
-                    imgs_tensor.append(img_tensor)
+                if isinstance(model, dict) and 'encoder' in model and 'decoder' in model:
+                    from must3r.engine.inference import inference_multi_ar_batch
 
-                if len(imgs_tensor) > 0:
-                    imgs_batch = torch.stack(imgs_tensor, dim=0)
+                    imgs_tensor = torch.cat([img['img'] for img in must3r_images], dim=0).to(device)
+                    true_shape = np.concatenate([img['true_shape'] for img in must3r_images], axis=0)
+                    true_shape_tensor = torch.from_numpy(true_shape).to(device)
 
-                    # MUSt3R inference with memory mechanism
-                    output = model(imgs_batch, use_memory=use_memory)
+                    _, pointmaps = inference_multi_ar_batch(
+                        model['encoder'],
+                        model['decoder'],
+                        [imgs_tensor],
+                        [true_shape_tensor],
+                        device=device,
+                        post_process_function=lambda x: {'pts3d': x},
+                    )
 
-                    report_progress("inference", 0.6, "Processing MUSt3R output...")
+                    if pointmaps:
+                        pointmaps_dict = pointmaps[0]
+                        pts3d = pointmaps_dict.get('pts3d') if isinstance(pointmaps_dict, dict) else None
+                        conf = pointmaps_dict.get('conf') if isinstance(pointmaps_dict, dict) else None
 
-                    # Extract point clouds from output
-                    if hasattr(output, 'pts3d') or 'pts3d' in output:
-                        pts3d = output['pts3d'] if isinstance(output, dict) else output.pts3d
-                        conf = output.get('conf', None) if isinstance(output, dict) else getattr(output, 'conf', None)
+                        if pts3d is not None:
+                            for i, img in enumerate(pil_images):
+                                if i < len(pts3d):
+                                    pts = pts3d[i].detach().cpu().numpy()
+                                    img_np = _fit_image(img, pts.shape[:2])
 
-                        for i, img in enumerate(pil_images):
-                            if i < len(pts3d):
-                                pts = pts3d[i].detach().cpu().numpy()
-                                img_np = _fit_image(img, pts.shape[:2])
+                                    if conf is not None and i < len(conf):
+                                        mask = conf[i].detach().cpu().numpy() > 1.0
+                                    else:
+                                        mask = np.ones(pts.shape[:2], dtype=bool)
 
-                                if conf is not None and i < len(conf):
-                                    mask = conf[i].detach().cpu().numpy() > 1.0
-                                else:
-                                    mask = np.ones(pts.shape[:2], dtype=bool)
+                                    mask = _fit_mask(mask, pts.shape[:2])
+                                    valid_pts = pts[mask]
+                                    valid_colors = img_np[mask]
 
-                                mask = _fit_mask(mask, pts.shape[:2])
-                                valid_pts = pts[mask]
-                                valid_colors = img_np[mask]
+                                    results.append({
+                                        'vertices': valid_pts.astype(np.float32),
+                                        'colors': valid_colors.astype(np.float32),
+                                        'faces': np.array([], dtype=np.int32),
+                                        'confidence': np.ones(len(valid_pts), dtype=np.float32),
+                                        'image_index': i
+                                    })
+                else:
+                    imgs_tensor = []
+                    for must3r_img in must3r_images:
+                        img_tensor = must3r_img['img'].to(device)
+                        imgs_tensor.append(img_tensor)
 
-                                results.append({
-                                    'vertices': valid_pts.astype(np.float32),
-                                    'colors': valid_colors.astype(np.float32),
-                                    'faces': np.array([], dtype=np.int32),
-                                    'confidence': np.ones(len(valid_pts), dtype=np.float32),
-                                    'image_index': i
-                                })
+                    if len(imgs_tensor) > 0:
+                        imgs_batch = torch.stack(imgs_tensor, dim=0)
+
+                        # MUSt3R inference with memory mechanism
+                        output = model(imgs_batch, use_memory=use_memory)
+
+                        report_progress("inference", 0.6, "Processing MUSt3R output...")
+
+                        # Extract point clouds from output
+                        if hasattr(output, 'pts3d') or 'pts3d' in output:
+                            pts3d = output['pts3d'] if isinstance(output, dict) else output.pts3d
+                            conf = output.get('conf', None) if isinstance(output, dict) else getattr(output, 'conf', None)
+
+                            for i, img in enumerate(pil_images):
+                                if i < len(pts3d):
+                                    pts = pts3d[i].detach().cpu().numpy()
+                                    img_np = _fit_image(img, pts.shape[:2])
+
+                                    if conf is not None and i < len(conf):
+                                        mask = conf[i].detach().cpu().numpy() > 1.0
+                                    else:
+                                        mask = np.ones(pts.shape[:2], dtype=bool)
+
+                                    mask = _fit_mask(mask, pts.shape[:2])
+                                    valid_pts = pts[mask]
+                                    valid_colors = img_np[mask]
+
+                                    results.append({
+                                        'vertices': valid_pts.astype(np.float32),
+                                        'colors': valid_colors.astype(np.float32),
+                                        'faces': np.array([], dtype=np.int32),
+                                        'confidence': np.ones(len(valid_pts), dtype=np.float32),
+                                        'image_index': i
+                                    })
 
         except Exception as e:
             print(f"MUSt3R direct inference failed: {e}, trying fallback...")
