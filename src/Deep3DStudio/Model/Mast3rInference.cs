@@ -206,7 +206,9 @@ namespace Deep3DStudio.Model
         /// Reconstruct 3D scene from multiple images using MASt3R.
         /// MASt3R provides metric pointmaps and better feature matching than DUSt3R.
         /// </summary>
-        public SceneResult ReconstructScene(List<string> imagePaths)
+        /// <param name="imagePaths">List of image file paths</param>
+        /// <param name="useRetrieval">If true, use retrieval model for optimal pairing of unordered images</param>
+        public SceneResult ReconstructScene(List<string> imagePaths, bool useRetrieval = true)
         {
             Initialize();
             var result = new SceneResult();
@@ -233,7 +235,8 @@ namespace Deep3DStudio.Model
                         foreach(var b in imagesBytes)
                             pyList.Append(b.ToPython());
 
-                        dynamic output = _bridgeModule.infer_mast3r(pyList);
+                        // Pass use_retrieval parameter for optimal pairing of unordered images
+                        dynamic output = _bridgeModule.infer_mast3r(pyList, use_retrieval: useRetrieval);
 
                         int len = (int)output.__len__();
                         for (int i = 0; i < len; i++)

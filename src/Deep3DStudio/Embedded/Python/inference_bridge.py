@@ -132,7 +132,9 @@ def get_model_memory_estimate(model_name):
     estimates = {
         'dust3r': 3000,
         'mast3r': 3500,  # MASt3R requires slightly more memory than DUSt3R
+        'mast3r_retrieval': 500,  # Retrieval model is smaller
         'must3r': 4000,  # MUSt3R with multi-layer memory requires more
+        'must3r_retrieval': 500,  # Retrieval model is smaller
         'triposr': 2000,
         'triposf': 2500,
         'lgm': 4000,
@@ -140,6 +142,198 @@ def get_model_memory_estimate(model_name):
         'unirig': 1500
     }
     return estimates.get(model_name, 2000)
+
+
+def load_retrieval_model(model_name, models_dir, device_obj):
+    """
+    Load retrieval model and codebook for MASt3R or MUSt3R.
+    Retrieval is used for unordered image collections to find optimal pairs.
+    Returns (retrieval_model, codebook) or (None, None) if not available.
+    """
+    global loaded_models
+
+    retrieval_key = f"{model_name}_retrieval"
+    codebook_key = f"{model_name}_codebook"
+
+    # Check if already loaded
+    if retrieval_key in loaded_models and codebook_key in loaded_models:
+        return loaded_models[retrieval_key], loaded_models[codebook_key]
+
+    # Determine paths
+    retrieval_path = os.path.join(models_dir, model_name, f"{model_name}_retrieval.pth")
+    codebook_path = os.path.join(models_dir, model_name, f"{model_name}_retrieval_codebook.pkl")
+
+    if not os.path.exists(retrieval_path) or not os.path.exists(codebook_path):
+        print(f"Retrieval components not found for {model_name}, using standard pairing")
+        return None, None
+
+    try:
+        import pickle
+
+        print(f"Loading {model_name} retrieval model from {retrieval_path}...")
+        retrieval_ckpt = torch.load(retrieval_path, map_location='cpu')
+
+        # Load the appropriate retrieval model
+        if model_name == 'mast3r':
+            from mast3r.model import AsymmetricMASt3R
+
+            # Extract model args from checkpoint
+            if 'args' in retrieval_ckpt:
+                model_args = retrieval_ckpt['args']
+                if hasattr(model_args, '__dict__'):
+                    model_args = vars(model_args)
+            else:
+                model_args = {}
+
+            valid_model_keys = {
+                'enc_embed_dim', 'enc_depth', 'enc_num_heads',
+                'dec_embed_dim', 'dec_depth', 'dec_num_heads',
+                'output_mode', 'head_type', 'img_size', 'pos_embed',
+                'two_confs', 'desc_conf_mode'
+            }
+            filtered_args = {k: v for k, v in model_args.items() if k in valid_model_keys}
+
+            default_args = {
+                'enc_embed_dim': 1024, 'enc_depth': 24, 'enc_num_heads': 16,
+                'dec_embed_dim': 768, 'dec_depth': 12, 'dec_num_heads': 12,
+                'img_size': (512, 512), 'pos_embed': 'RoPE100',
+            }
+            final_args = {**default_args, **filtered_args}
+
+            retrieval_model = AsymmetricMASt3R(**final_args)
+
+        elif model_name == 'must3r':
+            from must3r.model import MUSt3R
+
+            if 'args' in retrieval_ckpt:
+                model_args = retrieval_ckpt['args']
+                if hasattr(model_args, '__dict__'):
+                    model_args = vars(model_args)
+            else:
+                model_args = {}
+
+            valid_model_keys = {
+                'enc_embed_dim', 'enc_depth', 'enc_num_heads',
+                'dec_embed_dim', 'dec_depth', 'dec_num_heads',
+                'output_mode', 'head_type', 'img_size', 'pos_embed',
+                'mem_layers', 'num_mem_tokens'
+            }
+            filtered_args = {k: v for k, v in model_args.items() if k in valid_model_keys}
+
+            default_args = {
+                'enc_embed_dim': 1024, 'enc_depth': 24, 'enc_num_heads': 16,
+                'dec_embed_dim': 768, 'dec_depth': 12, 'dec_num_heads': 12,
+                'img_size': (512, 512), 'pos_embed': 'RoPE100',
+            }
+            final_args = {**default_args, **filtered_args}
+
+            retrieval_model = MUSt3R(**final_args)
+        else:
+            return None, None
+
+        # Load state dict
+        if 'model' in retrieval_ckpt:
+            state_dict = retrieval_ckpt['model']
+        elif 'state_dict' in retrieval_ckpt:
+            state_dict = retrieval_ckpt['state_dict']
+        else:
+            state_dict = retrieval_ckpt
+
+        state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+        retrieval_model.load_state_dict(state_dict, strict=False)
+        retrieval_model.to(device_obj)
+        retrieval_model.eval()
+
+        # Load codebook
+        print(f"Loading {model_name} retrieval codebook from {codebook_path}...")
+        with open(codebook_path, 'rb') as f:
+            codebook = pickle.load(f)
+
+        # Cache for later use
+        loaded_models[retrieval_key] = retrieval_model
+        loaded_models[codebook_key] = codebook
+
+        print(f"Successfully loaded {model_name} retrieval components")
+        return retrieval_model, codebook
+
+    except Exception as e:
+        print(f"Failed to load {model_name} retrieval: {e}")
+        import traceback
+        traceback.print_exc()
+        return None, None
+
+
+def get_optimal_pairs_with_retrieval(images, retrieval_model, codebook, device, max_pairs_per_image=3):
+    """
+    Use retrieval model to find optimal image pairs for unordered collections.
+    This is useful when images are not in sequential order.
+
+    Args:
+        images: List of dust3r-formatted images
+        retrieval_model: Loaded retrieval model
+        codebook: Loaded codebook with pre-computed features
+        device: Torch device
+        max_pairs_per_image: Maximum number of pairs per image
+
+    Returns:
+        List of (i, j) index pairs for optimal matching
+    """
+    try:
+        from dust3r.image_pairs import make_pairs
+
+        # If retrieval is not available, fall back to standard pairing
+        if retrieval_model is None or codebook is None:
+            return make_pairs(images, scene_graph='complete', prefilter=None, symmetrize=True)
+
+        # Extract features for each image using retrieval model
+        with torch.no_grad():
+            features = []
+            for img_data in images:
+                img_tensor = img_data['img'].unsqueeze(0).to(device)
+                # Get encoder features
+                feat = retrieval_model.forward_encoder(img_tensor)
+                if isinstance(feat, tuple):
+                    feat = feat[0]
+                # Global average pool
+                feat = feat.mean(dim=1)  # [1, D]
+                features.append(feat)
+
+            features = torch.cat(features, dim=0)  # [N, D]
+            features = torch.nn.functional.normalize(features, dim=-1)
+
+        # Compute similarity matrix
+        similarity = features @ features.T  # [N, N]
+
+        # Find top-k pairs for each image
+        n_images = len(images)
+        pairs = []
+
+        for i in range(n_images):
+            # Get similarities for image i, exclude self
+            sims = similarity[i].clone()
+            sims[i] = -float('inf')
+
+            # Get top-k most similar images
+            _, top_indices = sims.topk(min(max_pairs_per_image, n_images - 1))
+
+            for j in top_indices.tolist():
+                pair = (i, j) if i < j else (j, i)
+                if pair not in pairs:
+                    pairs.append(pair)
+
+        # Convert to dust3r pair format
+        pair_list = []
+        for i, j in pairs:
+            pair_list.append((images[i], images[j]))
+            pair_list.append((images[j], images[i]))  # Symmetrize
+
+        print(f"Retrieval found {len(pairs)} optimal pairs from {n_images} images")
+        return pair_list
+
+    except Exception as e:
+        print(f"Retrieval pairing failed: {e}, falling back to standard")
+        from dust3r.image_pairs import make_pairs
+        return make_pairs(images, scene_graph='complete', prefilter=None, symmetrize=True)
 
 def get_torch_device(device_str):
     if device_str == "directml":
@@ -913,11 +1107,16 @@ def infer_dust3r(images_bytes_list):
                 pass
 
 
-def infer_mast3r(images_bytes_list):
+def infer_mast3r(images_bytes_list, use_retrieval=True):
     """
     Infer 3D point clouds from multiple images using MASt3R.
     MASt3R provides metric pointmaps and dense feature maps for better matching.
     Works with 2 or more images.
+
+    Args:
+        images_bytes_list: List of image bytes
+        use_retrieval: If True and retrieval model available, use it for optimal pairing
+                       (useful for unordered image collections)
     """
     model = loaded_models.get('mast3r')
     if not model:
@@ -985,13 +1184,28 @@ def infer_mast3r(images_bytes_list):
         report_progress("inference", 0.15, f"Loaded {len(mast3r_images)} images for MASt3R")
 
         image_count = len(mast3r_images)
-        scene_graph = 'complete' if image_count <= 8 else 'sparse'
-        pairs = make_pairs(mast3r_images, scene_graph=scene_graph, prefilter=None, symmetrize=True)
-        if image_count > 8:
-            max_pairs = image_count * 6
-            if len(pairs) > max_pairs:
-                pairs = pairs[:max_pairs]
-        report_progress("inference", 0.2, f"Created {len(pairs)} image pairs for MASt3R (scene_graph={scene_graph})")
+
+        # Try to use retrieval for optimal pairing if available and enabled
+        # This is particularly useful for unordered image collections
+        pairs = None
+        if use_retrieval and image_count > 2:
+            models_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+            models_dir = os.path.join(models_dir, 'models')
+            retrieval_model, codebook = load_retrieval_model('mast3r', models_dir, device)
+            if retrieval_model is not None:
+                report_progress("inference", 0.18, "Using retrieval for optimal image pairing...")
+                pairs = get_optimal_pairs_with_retrieval(mast3r_images, retrieval_model, codebook, device)
+
+        # Fallback to standard pairing
+        if pairs is None:
+            scene_graph = 'complete' if image_count <= 8 else 'sparse'
+            pairs = make_pairs(mast3r_images, scene_graph=scene_graph, prefilter=None, symmetrize=True)
+            if image_count > 8:
+                max_pairs = image_count * 6
+                if len(pairs) > max_pairs:
+                    pairs = pairs[:max_pairs]
+
+        report_progress("inference", 0.2, f"Created {len(pairs)} image pairs for MASt3R")
 
         output = inference(pairs, model, device, batch_size=1)
         report_progress("inference", 0.5, "Running MASt3R global alignment...")
@@ -1082,11 +1296,17 @@ def infer_mast3r(images_bytes_list):
                 pass
 
 
-def infer_must3r(images_bytes_list, use_memory=True):
+def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
     """
     Infer 3D point clouds from multiple images using MUSt3R.
     MUSt3R is optimized for multi-view reconstruction (>2 images) with memory mechanism.
     Can handle many images efficiently and supports video/streaming scenarios.
+
+    Args:
+        images_bytes_list: List of image bytes
+        use_memory: If True, use MUSt3R's memory mechanism for efficiency
+        use_retrieval: If True and retrieval model available, use it for optimal pairing
+                       (useful for unordered image collections)
     """
     model = loaded_models.get('must3r')
     if not model:
@@ -1212,8 +1432,21 @@ def infer_must3r(images_bytes_list, use_memory=True):
                 from dust3r.image_pairs import make_pairs
 
                 image_count = len(must3r_images)
-                scene_graph = 'complete' if image_count <= 8 else 'sparse'
-                pairs = make_pairs(must3r_images, scene_graph=scene_graph, prefilter=None, symmetrize=True)
+
+                # Try to use retrieval for optimal pairing if available
+                pairs = None
+                if use_retrieval and image_count > 2:
+                    models_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+                    models_dir = os.path.join(models_dir, 'models')
+                    retrieval_model, codebook = load_retrieval_model('must3r', models_dir, device)
+                    if retrieval_model is not None:
+                        report_progress("inference", 0.5, "Using retrieval for optimal image pairing...")
+                        pairs = get_optimal_pairs_with_retrieval(must3r_images, retrieval_model, codebook, device)
+
+                # Fallback to standard pairing
+                if pairs is None:
+                    scene_graph = 'complete' if image_count <= 8 else 'sparse'
+                    pairs = make_pairs(must3r_images, scene_graph=scene_graph, prefilter=None, symmetrize=True)
 
                 output = inference(pairs, model, device, batch_size=1)
 
