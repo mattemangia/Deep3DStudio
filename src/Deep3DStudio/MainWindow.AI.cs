@@ -243,6 +243,9 @@ namespace Deep3DStudio
 
         private async void RunAIWorkflowAsync(AIModels.WorkflowPipeline pipeline)
         {
+            // Process pending GTK events before starting to ensure clean state
+            while (Application.EventsPending()) Application.RunIteration();
+
             try
             {
                 var manager = AIModels.AIModelManager.Instance;
@@ -252,6 +255,10 @@ namespace Deep3DStudio
                     _lastSceneResult,
                     (message, _) => Application.Invoke((s, e) => _statusLabel.Text = message)
                 );
+
+                // Process pending GTK events after workflow to ensure queued Application.Invoke calls
+                // are processed before continuing - prevents GTK reference tracking issues
+                while (Application.EventsPending()) Application.RunIteration();
 
                 if (result != null)
                 {
@@ -271,6 +278,9 @@ namespace Deep3DStudio
                     _statusLabel.Text = "Workflow failed.";
                 });
             }
+
+            // Final event processing to ensure all UI updates are applied
+            while (Application.EventsPending()) Application.RunIteration();
         }
 
         private void UpdateSceneFromResult(SceneResult result)
@@ -335,6 +345,9 @@ namespace Deep3DStudio
             string stepName = GetStepDisplayName(step);
             _statusLabel.Text = $"Running {stepName}...";
 
+            // Process pending GTK events before starting to ensure clean state
+            while (Application.EventsPending()) Application.RunIteration();
+
             try
             {
                 // Create a single-step pipeline
@@ -351,6 +364,10 @@ namespace Deep3DStudio
                     _lastSceneResult,
                     (message, _) => Application.Invoke((s, e) => _statusLabel.Text = message)
                 );
+
+                // Process pending GTK events after workflow to ensure queued Application.Invoke calls
+                // are processed before continuing - prevents GTK reference tracking issues
+                while (Application.EventsPending()) Application.RunIteration();
 
                 if (result != null)
                 {
@@ -370,6 +387,9 @@ namespace Deep3DStudio
                     _statusLabel.Text = $"{stepName} failed.";
                 });
             }
+
+            // Final event processing to ensure all UI updates are applied
+            while (Application.EventsPending()) Application.RunIteration();
         }
 
         /// <summary>

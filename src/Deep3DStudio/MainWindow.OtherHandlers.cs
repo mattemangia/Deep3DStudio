@@ -242,16 +242,30 @@ namespace Deep3DStudio
 
                     case ReconstructionMethod.Mast3r:
                         _statusLabel.Text = "Estimating Geometry (MASt3R)...";
-                        var mast3r = new Deep3DStudio.Model.Mast3rInference();
-                        mast3r.LogCallback = msg => Application.Invoke((s, e) => _statusLabel.Text = msg);
-                        result = await Task.Run(() => mast3r.ReconstructScene(_imagePaths, useRetrieval: true));
+                        // Process pending events before starting inference to ensure GTK state is clean
+                        while (Application.EventsPending()) Application.RunIteration();
+                        using (var mast3r = new Deep3DStudio.Model.Mast3rInference())
+                        {
+                            mast3r.LogCallback = msg => Application.Invoke((s, e) => _statusLabel.Text = msg);
+                            result = await Task.Run(() => mast3r.ReconstructScene(_imagePaths, useRetrieval: true));
+                        }
+                        // Process pending GTK events to ensure queued Application.Invoke calls are processed
+                        // This prevents GTK reference tracking issues with Python interop
+                        while (Application.EventsPending()) Application.RunIteration();
                         break;
 
                     case ReconstructionMethod.Must3r:
                         _statusLabel.Text = "Estimating Geometry (MUSt3R)...";
-                        var must3r = new Deep3DStudio.Model.Must3rInference();
-                        must3r.LogCallback = msg => Application.Invoke((s, e) => _statusLabel.Text = msg);
-                        result = await Task.Run(() => must3r.ReconstructScene(_imagePaths, useRetrieval: true));
+                        // Process pending events before starting inference to ensure GTK state is clean
+                        while (Application.EventsPending()) Application.RunIteration();
+                        using (var must3r = new Deep3DStudio.Model.Must3rInference())
+                        {
+                            must3r.LogCallback = msg => Application.Invoke((s, e) => _statusLabel.Text = msg);
+                            result = await Task.Run(() => must3r.ReconstructScene(_imagePaths, useRetrieval: true));
+                        }
+                        // Process pending GTK events to ensure queued Application.Invoke calls are processed
+                        // This prevents GTK reference tracking issues with Python interop
+                        while (Application.EventsPending()) Application.RunIteration();
                         break;
                 }
 
@@ -468,12 +482,19 @@ namespace Deep3DStudio
             string label = contextLabel ?? pipeline.Name;
             _statusLabel.Text = $"{label}...";
 
+            // Process pending GTK events before starting to ensure clean state
+            while (Application.EventsPending()) Application.RunIteration();
+
             var result = await manager.ExecuteWorkflowAsync(
                 pipeline,
                 _imagePaths,
                 _lastSceneResult,
                 (message, _) => Application.Invoke((s, e) => _statusLabel.Text = message)
             );
+
+            // Process pending GTK events after workflow to ensure queued Application.Invoke calls
+            // are processed before continuing - prevents GTK reference tracking issues
+            while (Application.EventsPending()) Application.RunIteration();
 
             if (result != null)
             {
