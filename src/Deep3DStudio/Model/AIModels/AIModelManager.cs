@@ -462,6 +462,72 @@ gc.collect()
                             }
                             break;
 
+                        case WorkflowStep.Mast3rReconstruction:
+                            if (imagePaths != null && imagePaths.Count >= 2)
+                            {
+                                progressCallback?.Invoke("Running MASt3R reconstruction...", progress);
+                                try
+                                {
+                                    using (var mast3r = new Mast3rInference())
+                                    {
+                                        mast3r.LogCallback = (msg) => progressCallback?.Invoke(msg, progress);
+                                        // Use retrieval for optimal pairing of unordered images
+                                        currentResult = mast3r.ReconstructScene(imagePaths, useRetrieval: true);
+                                    }
+
+                                    if (currentResult.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
+                                    {
+                                        progressCallback?.Invoke($"MASt3R reconstruction complete. {currentResult.Meshes[0].Vertices.Count} points.", progress + 0.1f);
+                                    }
+                                    else
+                                    {
+                                        progressCallback?.Invoke("MASt3R reconstruction failed - no points generated.", progress);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    progressCallback?.Invoke($"MASt3R failed: {ex.Message}", progress);
+                                }
+                            }
+                            else
+                            {
+                                progressCallback?.Invoke("MASt3R requires at least 2 images.", progress);
+                            }
+                            break;
+
+                        case WorkflowStep.Must3rReconstruction:
+                            if (imagePaths != null && imagePaths.Count >= 2)
+                            {
+                                progressCallback?.Invoke("Running MUSt3R reconstruction...", progress);
+                                try
+                                {
+                                    using (var must3r = new Must3rInference())
+                                    {
+                                        must3r.LogCallback = (msg) => progressCallback?.Invoke(msg, progress);
+                                        // Use retrieval for optimal pairing of unordered images
+                                        currentResult = must3r.ReconstructScene(imagePaths, useRetrieval: true);
+                                    }
+
+                                    if (currentResult.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
+                                    {
+                                        progressCallback?.Invoke($"MUSt3R reconstruction complete. {currentResult.Meshes[0].Vertices.Count} points.", progress + 0.1f);
+                                    }
+                                    else
+                                    {
+                                        progressCallback?.Invoke("MUSt3R reconstruction failed - no points generated.", progress);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    progressCallback?.Invoke($"MUSt3R failed: {ex.Message}", progress);
+                                }
+                            }
+                            else
+                            {
+                                progressCallback?.Invoke("MUSt3R requires at least 2 images.", progress);
+                            }
+                            break;
+
                         case WorkflowStep.SfMReconstruction:
                             if (imagePaths != null && imagePaths.Count >= 2)
                             {
