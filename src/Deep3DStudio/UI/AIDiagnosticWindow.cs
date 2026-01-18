@@ -141,11 +141,10 @@ namespace Deep3DStudio.UI
                     { "must3r/must3r_retrieval.pth", false },      // MUSt3R retrieval for unordered images (optional)
                     { "must3r/must3r_retrieval_codebook.pkl", false },
                     { "model_fp16_fixrot.safetensors", false },    // LGM (Large Multi-View Gaussian) weights
-                    { "triposf_config.yaml", false },
-                    { "triposf_weights.pth", false },
-                    { "triposr_config.yaml", false },
-                    { "triposr_weights.pth", false },
-                    { "unirig_weights.pth", false },
+                    { "triposf_weights.pth", false },              // TripoSF (SparseFlex) weights
+                    { "triposr_config.yaml", false },              // TripoSR config
+                    { "triposr_weights.pth", false },              // TripoSR weights
+                    { "unirig_weights.pth", false },               // UniRig auto-rigging weights
                     // Wonder3D structure
                     { "wonder3d/model_index.json", false },
                     { "wonder3d/feature_extractor/preprocessor_config.json", false },
