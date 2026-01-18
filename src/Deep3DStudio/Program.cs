@@ -16,6 +16,32 @@ namespace Deep3DStudio
             // This is critical for GL.Begin/GL.End calls in the viewport.
             Environment.SetEnvironmentVariable("MESA_GL_VERSION_OVERRIDE", "3.3COMPAT");
 
+            // CRITICAL: Initialize Python BEFORE GTK to avoid GC/ToggleRef conflicts
+            // Python.NET and GtkSharp both hook into .NET's GC, and initializing Python
+            // while GTK is running can cause ToggleRef corruption
+            Console.WriteLine("Pre-initializing Python environment...");
+            try
+            {
+                // Simple console logging during Python init (no GTK operations)
+                PythonService.Instance.OnLogOutput += (msg) => {
+                    if (msg != null && msg.Length > 0 && msg != "\n")
+                        Console.WriteLine($"[Python] {msg.Trim()}");
+                };
+                PythonService.Instance.Initialize();
+                Console.WriteLine("Python environment ready.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Python initialization error: {ex.Message}");
+                Console.WriteLine($"Application will continue without Python/AI features.");
+            }
+
+            // Force GC before GTK initialization to ensure clean slate
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            // NOW initialize GTK after Python is fully set up
             Application.Init();
 
             // Show Splash Screen
@@ -40,37 +66,7 @@ namespace Deep3DStudio
                 Console.WriteLine($"Warning: Could not set application icon: {ex.Message}");
             }
 
-            // Initialize Python Environment (Heavy Task)
-            // This is now non-blocking - app will start even if Python fails
-            splash.UpdateStatus("Initializing Python Environment (this may take a moment)...");
-
-            // Hook up logging to splash screen
-            Action<string> logHandler = (msg) => {
-                if (msg != null && msg.Length > 0 && msg != "\n")
-                {
-                    Console.WriteLine($"[Python] {msg.Trim()}");
-                    splash.UpdateStatus(msg.Trim());
-                }
-            };
-            PythonService.Instance.OnLogOutput += logHandler;
-
-            try
-            {
-                // Force initialization now to show progress on splash
-                // This will extract the zip if needed
-                // Note: Initialize() will not throw even if Python is missing - it will log warnings
-                PythonService.Instance.Initialize();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Python initialization error: {ex.Message}");
-                Console.WriteLine($"Application will continue without Python/AI features.");
-                splash.UpdateStatus("Continuing without Python (AI features disabled)");
-            }
-            finally
-            {
-                PythonService.Instance.OnLogOutput -= logHandler;
-            }
+            splash.UpdateStatus("Python environment ready.");
 
             var app = new Application("org.Deep3DStudio.Deep3DStudio", GLib.ApplicationFlags.None);
             app.Register(GLib.Cancellable.Current);
