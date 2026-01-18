@@ -34,7 +34,11 @@ MODELS = {
         # MASt3R - Matching And Stereo 3D Reconstruction (builds on DUSt3R with metric pointmaps)
         "repo": "https://github.com/naver/mast3r.git",
         "weights_structure": {
-            "mast3r_weights.pth": "https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth"
+            # Main model weights
+            "mast3r_weights.pth": "https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth",
+            # Retrieval components (for unordered image collections)
+            "mast3r_retrieval.pth": "https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric_retrieval_trainingfree.pth",
+            "mast3r_retrieval_codebook.pkl": "https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric_retrieval_codebook.pkl"
         },
         "files": ["mast3r/"],  # Uses dust3r as dependency (already included)
         "requirements": ["torch", "torchvision", "einops", "opencv-python", "kornia", "trimesh", "roma"]
@@ -43,7 +47,11 @@ MODELS = {
         # MUSt3R - Multi-view Network for Stereo 3D Reconstruction (supports >2 images and video)
         "repo": "https://github.com/naver/must3r.git",
         "weights_structure": {
-            "must3r_weights.pth": "https://download.europe.naverlabs.com/ComputerVision/MUSt3R/MUSt3R_512.pth"
+            # Main model weights
+            "must3r_weights.pth": "https://download.europe.naverlabs.com/ComputerVision/MUSt3R/MUSt3R_512.pth",
+            # Retrieval components (for unordered image collections)
+            "must3r_retrieval.pth": "https://download.europe.naverlabs.com/ComputerVision/MUSt3R/MUSt3R_512_retrieval_trainingfree.pth",
+            "must3r_retrieval_codebook.pkl": "https://download.europe.naverlabs.com/ComputerVision/MUSt3R/MUSt3R_512_retrieval_codebook.pkl"
         },
         "files": ["must3r/"],  # Uses dust3r as dependency (already included)
         "requirements": ["torch", "torchvision", "einops", "opencv-python", "kornia", "trimesh", "roma", "xformers"]

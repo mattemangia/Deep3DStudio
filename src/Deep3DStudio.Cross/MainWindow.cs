@@ -3489,6 +3489,8 @@ namespace Deep3DStudio
             switch (step)
             {
                 case WorkflowStep.Dust3rReconstruction:
+                case WorkflowStep.Mast3rReconstruction:
+                case WorkflowStep.Must3rReconstruction:
                 case WorkflowStep.SfMReconstruction:
                     if (_loadedImages.Count < 2)
                     {

@@ -106,7 +106,11 @@ namespace Deep3DStudio
                 {
                     "dust3r_weights.pth",
                     "mast3r/mast3r_weights.pth",        // MASt3R - Matching And Stereo 3D Reconstruction
+                    "mast3r/mast3r_retrieval.pth",      // MASt3R retrieval for unordered images (optional)
+                    "mast3r/mast3r_retrieval_codebook.pkl",
                     "must3r/must3r_weights.pth",        // MUSt3R - Multi-view Network (video support)
+                    "must3r/must3r_retrieval.pth",      // MUSt3R retrieval for unordered images (optional)
+                    "must3r/must3r_retrieval_codebook.pkl",
                     "model_fp16_fixrot.safetensors",
                     "triposr_weights.pth",
                     "wonder3d/model_index.json"

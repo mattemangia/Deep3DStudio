@@ -135,7 +135,11 @@ namespace Deep3DStudio.UI
                 {
                     { "dust3r_weights.pth", false },
                     { "mast3r/mast3r_weights.pth", false },        // MASt3R - Matching And Stereo 3D Reconstruction
+                    { "mast3r/mast3r_retrieval.pth", false },      // MASt3R retrieval for unordered images (optional)
+                    { "mast3r/mast3r_retrieval_codebook.pkl", false },
                     { "must3r/must3r_weights.pth", false },        // MUSt3R - Multi-view Network (video support)
+                    { "must3r/must3r_retrieval.pth", false },      // MUSt3R retrieval for unordered images (optional)
+                    { "must3r/must3r_retrieval_codebook.pkl", false },
                     { "model_fp16_fixrot.safetensors", false },    // LGM (Large Multi-View Gaussian) weights
                     { "triposf_config.yaml", false },
                     { "triposf_weights.pth", false },
