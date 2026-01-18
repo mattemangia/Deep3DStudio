@@ -1115,6 +1115,7 @@ namespace Deep3DStudio
 
                 // Standalone AI Actions - each can be run independently
                 ImGui.TextDisabled("AI Steps");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("AI Processing Steps");
 
                 // Point Cloud Generation (Dust3R or SfM depending on workflow)
                 if (ImGui.ImageButton("##Dust3R", _iconFactory.GetIcon(IconType.PointCloudGen), size))
@@ -1138,6 +1139,7 @@ namespace Deep3DStudio
 
                 // Refinement models
                 ImGui.TextDisabled("Refine");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Refinement Models");
 
                 if (ImGui.ImageButton("##NeRF", _iconFactory.GetIcon(IconType.NeRF), size))
                     RunSingleStep(WorkflowStep.NeRFRefinement);
@@ -1155,6 +1157,7 @@ namespace Deep3DStudio
 
                 // Meshing
                 ImGui.TextDisabled("Mesh Gen");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Mesh Generation");
 
                 if (ImGui.ImageButton("##Poisson", _iconFactory.GetIcon(IconType.MeshGen), size))
                     RunSingleStep(WorkflowStep.PoissonReconstruction);
@@ -1170,6 +1173,7 @@ namespace Deep3DStudio
 
                 // Mesh Operations Section
                 ImGui.TextDisabled("Mesh");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Mesh Operations");
 
                 if (ImGui.ImageButton("##Decimate", _iconFactory.GetIcon(IconType.Decimate), size))
                     OnDecimate();
