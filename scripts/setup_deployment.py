@@ -129,6 +129,101 @@ def get_dir_size(path):
                 pass
     return total
 
+
+def format_size(size_bytes):
+    """Format bytes to human readable string"""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    elif size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    else:
+        return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
+
+
+def download_with_progress(url, target_path, description=None):
+    """
+    Download a file with a progress bar showing percentage and speed.
+
+    Args:
+        url: URL to download from
+        target_path: Local path to save the file
+        description: Optional description to show (defaults to filename)
+    """
+    import time
+
+    if description is None:
+        description = os.path.basename(target_path)
+
+    # Truncate description if too long
+    max_desc_len = 35
+    if len(description) > max_desc_len:
+        description = description[:max_desc_len-3] + "..."
+
+    start_time = time.time()
+    last_update_time = start_time
+    last_downloaded = 0
+
+    def progress_hook(block_num, block_size, total_size):
+        nonlocal last_update_time, last_downloaded
+
+        downloaded = block_num * block_size
+        current_time = time.time()
+
+        # Calculate progress percentage
+        if total_size > 0:
+            percent = min(100, downloaded * 100 / total_size)
+            downloaded_str = format_size(downloaded)
+            total_str = format_size(total_size)
+        else:
+            percent = 0
+            downloaded_str = format_size(downloaded)
+            total_str = "?"
+
+        # Calculate speed (update every 0.5 seconds to avoid flickering)
+        time_delta = current_time - last_update_time
+        if time_delta >= 0.5 or downloaded >= total_size:
+            bytes_delta = downloaded - last_downloaded
+            if time_delta > 0:
+                speed = bytes_delta / time_delta
+                speed_str = f"{format_size(speed)}/s"
+            else:
+                speed_str = "-- B/s"
+            last_update_time = current_time
+            last_downloaded = downloaded
+        else:
+            # Estimate speed from last calculation
+            elapsed = current_time - start_time
+            if elapsed > 0:
+                speed = downloaded / elapsed
+                speed_str = f"{format_size(speed)}/s"
+            else:
+                speed_str = "-- B/s"
+
+        # Create progress bar
+        bar_width = 25
+        filled = int(bar_width * percent / 100)
+        bar = "█" * filled + "░" * (bar_width - filled)
+
+        # Print progress (use \r to overwrite line)
+        status = f"\r  {description}: [{bar}] {percent:5.1f}% ({downloaded_str}/{total_str}) {speed_str}   "
+        sys.stdout.write(status)
+        sys.stdout.flush()
+
+        # Print newline when complete
+        if total_size > 0 and downloaded >= total_size:
+            elapsed = current_time - start_time
+            avg_speed = downloaded / elapsed if elapsed > 0 else 0
+            print(f"\n  ✓ Completed in {elapsed:.1f}s (avg: {format_size(avg_speed)}/s)")
+
+    try:
+        urllib.request.urlretrieve(url, target_path, reporthook=progress_hook)
+        return True
+    except Exception as e:
+        print(f"\n  ✗ Failed: {e}")
+        return False
+
 def setup_python_embed(target_dir, target_platform):
     print(f"Setting up Python for {target_platform} in {target_dir}...")
     if not os.path.exists(target_dir):
@@ -143,11 +238,8 @@ def setup_python_embed(target_dir, target_platform):
     archive_path = os.path.join(target_dir, archive_name)
 
     if not os.path.exists(archive_path):
-        print(f"Downloading {url}...")
-        try:
-            urllib.request.urlretrieve(url, archive_path)
-        except Exception as e:
-            print(f"Failed to download python: {e}")
+        print(f"Downloading Python for {target_platform}...")
+        if not download_with_progress(url, archive_path, f"Python {PYTHON_VERSION}"):
             return False
 
     print("Extracting...")
@@ -250,7 +342,7 @@ def setup_python_embed(target_dir, target_platform):
         get_pip_path = os.path.join(target_dir, "get-pip.py")
         if not os.path.exists(get_pip_path):
             print("Downloading get-pip.py...")
-            urllib.request.urlretrieve("https://bootstrap.pypa.io/get-pip.py", get_pip_path)
+            download_with_progress("https://bootstrap.pypa.io/get-pip.py", get_pip_path, "get-pip.py")
 
         # Create isolated environment - remove any Python-related env vars that could
         # cause pip to find/use system packages
@@ -566,11 +658,8 @@ def setup_models(models_dir, python_dir, target_platform):
                         print(f"File {target_path} exists but is empty. Re-downloading.")
 
                 if should_download:
-                    print(f"Downloading {rel_path}...")
-                    try:
-                        urllib.request.urlretrieve(url, target_path)
-                    except Exception as e:
-                        print(f"Failed to download {rel_path}: {e}")
+                    print(f"Downloading {name}/{rel_path}...")
+                    download_with_progress(url, target_path, f"{name}/{rel_path}")
 
         elif "weights" in config:
             # Single weight file
@@ -587,12 +676,8 @@ def setup_models(models_dir, python_dir, target_platform):
                     print(f"File {weight_path} exists but is empty. Re-downloading.")
 
             if should_download:
-                print(f"Downloading weights for {name} from {config['weights']}...")
-                try:
-                    urllib.request.urlretrieve(config["weights"], weight_path)
-                    print(f"Successfully downloaded {name} weights.")
-                except Exception as e:
-                    print(f"Failed to download weights for {name}: {e}")
+                print(f"Downloading weights for {name}...")
+                download_with_progress(config["weights"], weight_path, f"{name} weights")
 
         # 1.5 Download Configs
         if "configs" in config:
@@ -604,10 +689,7 @@ def setup_models(models_dir, python_dir, target_platform):
 
                 if should_download_conf:
                     print(f"Downloading config {conf_name}...")
-                    try:
-                        urllib.request.urlretrieve(conf_url, conf_path)
-                    except Exception as e:
-                        print(f"Failed to download config {conf_name}: {e}")
+                    download_with_progress(conf_url, conf_path, f"{name} config")
 
         # 2. Clone Repo to Temp
         temp_repo = f"temp_{name}"
