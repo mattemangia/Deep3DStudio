@@ -509,21 +509,52 @@ namespace Deep3DStudio.Python
 
         private void SetupStdioRedirection()
         {
+            // Use pure Python redirect to avoid C# object references in Python runtime
+            // This prevents GTK ToggleRef issues caused by mixed managed/unmanaged references
             using (Py.GIL())
             {
                 string redirectScript = @"
 import sys
-class LoggerWriter:
-    def write(self, message):
-        import Deep3DStudio.Python
-        pass
-    def flush(self):
-        pass
+import io
 
+class CaptureWriter(io.StringIO):
+    def __init__(self, prefix='[Py] '):
+        super().__init__()
+        self._prefix = prefix
+        self._original = None
+
+    def write(self, message):
+        if message and message.strip():
+            # Print directly to avoid any callback overhead
+            print(f'{self._prefix}{message.strip()}', file=self._original if self._original else sys.__stdout__, flush=True)
+        return super().write(message)
+
+    def flush(self):
+        super().flush()
+
+# Keep reference to original stdout for fallback
+_original_stdout = sys.stdout
+_original_stderr = sys.stderr
+
+# Create pure Python writers
+_stdout_capture = CaptureWriter('[Py] ')
+_stdout_capture._original = sys.__stdout__
+_stderr_capture = CaptureWriter('[Py] ')
+_stderr_capture._original = sys.__stderr__
+
+sys.stdout = _stdout_capture
+sys.stderr = _stderr_capture
 ";
-                dynamic sys = Py.Import("sys");
-                sys.stdout = new OutputRedirector(this);
-                sys.stderr = new OutputRedirector(this);
+                try
+                {
+                    PythonEngine.Exec(redirectScript);
+                    Log("Stdio redirection set up using pure Python");
+                }
+                catch (Exception ex)
+                {
+                    // If pure Python redirect fails, continue without redirection
+                    Log($"Warning: Could not set up stdio redirection: {ex.Message}");
+                }
             }
         }
 

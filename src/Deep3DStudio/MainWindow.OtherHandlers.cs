@@ -242,29 +242,41 @@ namespace Deep3DStudio
 
                     case ReconstructionMethod.Mast3r:
                         _statusLabel.Text = "Estimating Geometry (MASt3R)...";
-                        // Process pending events before starting inference to ensure GTK state is clean
+                        // Process pending events and force GC before starting inference
+                        // This ensures GTK reference tracking and Python memory are in sync
                         while (Application.EventsPending()) Application.RunIteration();
+                        GC.Collect();
+                        GC.WaitForPendingFinalizers();
                         using (var mast3r = new Deep3DStudio.Model.Mast3rInference())
                         {
-                            mast3r.LogCallback = msg => Application.Invoke((s, e) => _statusLabel.Text = msg);
+                            // Don't use Application.Invoke during inference - it can cause GTK reference issues
+                            // Just log to console instead
+                            mast3r.LogCallback = msg => Console.WriteLine($"[MASt3R] {msg}");
                             result = await Task.Run(() => mast3r.ReconstructScene(_imagePaths, useRetrieval: true));
                         }
-                        // Process pending GTK events to ensure queued Application.Invoke calls are processed
-                        // This prevents GTK reference tracking issues with Python interop
+                        // Force GC and process pending GTK events after inference
+                        GC.Collect();
+                        GC.WaitForPendingFinalizers();
                         while (Application.EventsPending()) Application.RunIteration();
                         break;
 
                     case ReconstructionMethod.Must3r:
                         _statusLabel.Text = "Estimating Geometry (MUSt3R)...";
-                        // Process pending events before starting inference to ensure GTK state is clean
+                        // Process pending events and force GC before starting inference
+                        // This ensures GTK reference tracking and Python memory are in sync
                         while (Application.EventsPending()) Application.RunIteration();
+                        GC.Collect();
+                        GC.WaitForPendingFinalizers();
                         using (var must3r = new Deep3DStudio.Model.Must3rInference())
                         {
-                            must3r.LogCallback = msg => Application.Invoke((s, e) => _statusLabel.Text = msg);
+                            // Don't use Application.Invoke during inference - it can cause GTK reference issues
+                            // Just log to console instead
+                            must3r.LogCallback = msg => Console.WriteLine($"[MUSt3R] {msg}");
                             result = await Task.Run(() => must3r.ReconstructScene(_imagePaths, useRetrieval: true));
                         }
-                        // Process pending GTK events to ensure queued Application.Invoke calls are processed
-                        // This prevents GTK reference tracking issues with Python interop
+                        // Force GC and process pending GTK events after inference
+                        GC.Collect();
+                        GC.WaitForPendingFinalizers();
                         while (Application.EventsPending()) Application.RunIteration();
                         break;
                 }
