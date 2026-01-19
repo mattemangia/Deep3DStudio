@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Embedded\Python\inference_bridge.py" />
+    <EmbeddedResource Include="Embedded\Python\subprocess_inference.py" />
     <EmbeddedResource Include="logo.png" />
   </ItemGroup>
 
