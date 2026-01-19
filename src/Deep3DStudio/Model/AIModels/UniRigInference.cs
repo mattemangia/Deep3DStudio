@@ -47,51 +47,95 @@ namespace Deep3DStudio.Model.AIModels
                 byte[] facesBytes = new byte[facesArr.Length * sizeof(int)];
                 Buffer.BlockCopy(facesArr, 0, facesBytes, 0, facesBytes.Length);
 
-                using (Py.GIL())
+                PythonService.Instance.ExecuteWithGIL((scope) =>
                 {
-                    // Pass bytes and configured max_joints to Python
-                    dynamic output = _bridgeModule.infer_unirig_mesh_bytes(
-                        vertsBytes.ToPython(),
-                        facesBytes.ToPython(),
-                        maxJoints
-                    );
+                    // CRITICAL: Use explicit PyObject method calls instead of dynamic
+                    // to prevent GC from collecting temporary arguments
+                    using var inferMethod = _bridgeModule!.GetAttr("infer_unirig_mesh_bytes");
+                    using var vertsBytesPy = vertsBytes.ToPython();
+                    using var facesBytesPy = facesBytes.ToPython();
+                    using var maxJointsPy = maxJoints.ToPython();
+                    using var args = new PyTuple(new PyObject[] { vertsBytesPy, facesBytesPy, maxJointsPy });
 
-                    if (output != null)
+                    using var output = inferMethod.Invoke(args);
+                    if (output != null && !output.IsNone())
                     {
-                        dynamic joints = output["joint_positions"];
-                        dynamic parents = output["parent_indices"];
-                        dynamic weights = output["skinning_weights"];
-                        dynamic names = output["joint_names"];
+                        using var joints = output["joint_positions"];
+                        using var parents = output["parent_indices"];
+                        using var weights = output["skinning_weights"];
+                        using var names = output["joint_names"];
 
-                        long jCount = (long)joints.shape[0];
+                        using var jShapeObj = joints.GetAttr("shape");
+                        long jCount = jShapeObj[0].As<long>();
+
+                        // Import builtins once for conversions
+                        using var builtins = Py.Import("builtins");
+                        using var floatFunc = builtins.GetAttr("float");
+                        using var intFunc = builtins.GetAttr("int");
+                        using var strFunc = builtins.GetAttr("str");
+
                         result.JointPositions = new Vector3[jCount];
                         for(int i=0; i<jCount; i++)
                         {
-                            result.JointPositions[i] = new Vector3((float)joints[i][0], (float)joints[i][1], (float)joints[i][2]);
+                            using var jRow = joints[i];
+                            using var jx0 = jRow[0];
+                            using var jy0 = jRow[1];
+                            using var jz0 = jRow[2];
+
+                            using var jxArgs = new PyTuple(new PyObject[] { jx0 });
+                            using var jyArgs = new PyTuple(new PyObject[] { jy0 });
+                            using var jzArgs = new PyTuple(new PyObject[] { jz0 });
+
+                            using var jxPy = floatFunc.Invoke(jxArgs);
+                            using var jyPy = floatFunc.Invoke(jyArgs);
+                            using var jzPy = floatFunc.Invoke(jzArgs);
+
+                            result.JointPositions[i] = new Vector3(
+                                (float)jxPy.As<double>(),
+                                (float)jyPy.As<double>(),
+                                (float)jzPy.As<double>()
+                            );
                         }
 
                         result.ParentIndices = new int[jCount];
-                        for(int i=0; i<jCount; i++) result.ParentIndices[i] = (int)parents[i];
+                        for(int i=0; i<jCount; i++)
+                        {
+                            using var pIdx = parents[i];
+                            using var pIdxArgs = new PyTuple(new PyObject[] { pIdx });
+                            using var pIdxPy = intFunc.Invoke(pIdxArgs);
+                            result.ParentIndices[i] = (int)pIdxPy.As<long>();
+                        }
 
                         result.JointNames = new string[jCount];
-                        for(int i=0; i<jCount; i++) result.JointNames[i] = (string)names[i];
+                        for(int i=0; i<jCount; i++)
+                        {
+                            using var nameObj = names[i];
+                            using var nameArgs = new PyTuple(new PyObject[] { nameObj });
+                            using var namePy = strFunc.Invoke(nameArgs);
+                            result.JointNames[i] = namePy.As<string>() ?? $"joint_{i}";
+                        }
 
-                        long vCount = (long)weights.shape[0];
-                        long wBones = (long)weights.shape[1];
+                        using var wShapeObj = weights.GetAttr("shape");
+                        long vCount = wShapeObj[0].As<long>();
+                        long wBones = wShapeObj[1].As<long>();
                         result.SkinningWeights = new float[vCount, wBones];
 
                         for(int v=0; v<vCount; v++)
                         {
+                            using var wRow = weights[v];
                             for(int b=0; b<wBones; b++)
                             {
-                                result.SkinningWeights[v,b] = (float)weights[v][b];
+                                using var wVal = wRow[b];
+                                using var wValArgs = new PyTuple(new PyObject[] { wVal });
+                                using var wValPy = floatFunc.Invoke(wValArgs);
+                                result.SkinningWeights[v,b] = (float)wValPy.As<double>();
                             }
                         }
 
                         result.Success = true;
                         result.StatusMessage = "Rigging successful";
                     }
-                }
+                });
             }
             catch (Exception ex)
             {
