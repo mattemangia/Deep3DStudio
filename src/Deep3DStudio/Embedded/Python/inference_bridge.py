@@ -1472,7 +1472,12 @@ def infer_mast3r(images_bytes_list, use_retrieval=True):
         gc.collect()
         clear_gpu_memory()
 
+        print(f"[Py] MASt3R temp files count: {len(temp_files)}")
+        if temp_files:
+            print(f"[Py] MASt3R first temp file: {temp_files[0]}")
+        report_progress("inference", 0.12, "MASt3R calling load_images...")
         mast3r_images = load_images(temp_files, size=512)
+        report_progress("inference", 0.14, "MASt3R load_images complete")
         report_progress("inference", 0.15, f"Loaded {len(mast3r_images)} images for MASt3R")
 
         image_count = len(mast3r_images)
@@ -1499,6 +1504,7 @@ def infer_mast3r(images_bytes_list, use_retrieval=True):
 
         report_progress("inference", 0.2, f"Created {len(pairs)} image pairs for MASt3R")
 
+        report_progress("inference", 0.35, "MASt3R calling inference()...")
         output = inference(pairs, model, device, batch_size=1)
         report_progress("inference", 0.4, "MASt3R inference forward pass complete")
         report_progress("inference", 0.5, "Running MASt3R global alignment...")

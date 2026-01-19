@@ -262,6 +262,7 @@ namespace Deep3DStudio.Model
                 }
 
                 Log($"[Mast3r] Starting inference for {imagesBytes.Count} image(s). Use retrieval: {useRetrieval}.");
+                Log($"[Mast3r] Managed thread: {Environment.CurrentManagedThreadId}.");
 
                 PythonService.Instance.ExecuteWithGIL((scope) =>
                 {
@@ -277,6 +278,12 @@ namespace Deep3DStudio.Model
                                 var pyBytes = b.ToPython();
                                 pyImages.Add(pyBytes);
                                 pyList.Append(pyBytes);
+                            }
+
+                            Console.WriteLine($"[Mast3r] Prepared PyList with {pyList.Length()} image(s).");
+                            if (imagesBytes.Count > 0)
+                            {
+                                Console.WriteLine($"[Mast3r] First image byte length: {imagesBytes[0].Length}.");
                             }
 
                             // Pass use_retrieval parameter for optimal pairing of unordered images
