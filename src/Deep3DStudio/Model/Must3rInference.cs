@@ -261,6 +261,8 @@ namespace Deep3DStudio.Model
                     return result;
                 }
 
+                Log($"[Must3r] Starting inference for {imagesBytes.Count} image(s). Use retrieval: {useRetrieval}.");
+
                 PythonService.Instance.ExecuteWithGIL((scope) =>
                 {
                     using(var pyList = new PyList())
@@ -283,6 +285,7 @@ namespace Deep3DStudio.Model
                             try
                             {
                                 int len = (int)outputObj.Length();
+                                Log($"[Must3r] Python returned {len} mesh result(s).");
                                 for (int i = 0; i < len; i++)
                                 {
                                     PyObject item = outputObj[i];

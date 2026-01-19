@@ -1160,6 +1160,8 @@ def infer_dust3r(images_bytes_list):
     if not model:
         return []
 
+    report_progress("inference", 0.05, f"Dust3r input images: {len(images_bytes_list)}")
+
     from dust3r.inference import inference
     from dust3r.image_pairs import make_pairs
     from dust3r.utils.image import load_images
@@ -1199,6 +1201,8 @@ def infer_dust3r(images_bytes_list):
             return np.array(img) / 255.0
 
         for i, img_bytes in enumerate(images_bytes_list):
+            if i == 0:
+                print(f"[Py] Dust3r first image bytes: {len(img_bytes)}")
             img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
 
             # Pre-resize images to target size (512) to avoid resize inside load_images
@@ -1251,6 +1255,7 @@ def infer_dust3r(images_bytes_list):
         report_progress("inference", 0.2, f"Created {len(pairs)} image pairs (scene_graph={scene_graph})")
 
         output = inference(pairs, model, device, batch_size=1)
+        report_progress("inference", 0.4, "Dust3r inference forward pass complete")
         report_progress("inference", 0.5, "Running global alignment...")
 
         results = []
@@ -1385,6 +1390,8 @@ def infer_mast3r(images_bytes_list, use_retrieval=True):
     if not model:
         return []
 
+    report_progress("inference", 0.05, f"MASt3R input images: {len(images_bytes_list)}")
+
     from mast3r.fast_nn import fast_reciprocal_NNs
     from dust3r.inference import inference
     from dust3r.image_pairs import make_pairs
@@ -1424,6 +1431,8 @@ def infer_mast3r(images_bytes_list, use_retrieval=True):
             return np.array(img) / 255.0
 
         for i, img_bytes in enumerate(images_bytes_list):
+            if i == 0:
+                print(f"[Py] MASt3R first image bytes: {len(img_bytes)}")
             img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
 
             # Pre-resize images to target size (512) to avoid resize inside load_images
@@ -1463,7 +1472,12 @@ def infer_mast3r(images_bytes_list, use_retrieval=True):
         gc.collect()
         clear_gpu_memory()
 
+        print(f"[Py] MASt3R temp files count: {len(temp_files)}")
+        if temp_files:
+            print(f"[Py] MASt3R first temp file: {temp_files[0]}")
+        report_progress("inference", 0.12, "MASt3R calling load_images...")
         mast3r_images = load_images(temp_files, size=512)
+        report_progress("inference", 0.14, "MASt3R load_images complete")
         report_progress("inference", 0.15, f"Loaded {len(mast3r_images)} images for MASt3R")
 
         image_count = len(mast3r_images)
@@ -1490,7 +1504,9 @@ def infer_mast3r(images_bytes_list, use_retrieval=True):
 
         report_progress("inference", 0.2, f"Created {len(pairs)} image pairs for MASt3R")
 
+        report_progress("inference", 0.35, "MASt3R calling inference()...")
         output = inference(pairs, model, device, batch_size=1)
+        report_progress("inference", 0.4, "MASt3R inference forward pass complete")
         report_progress("inference", 0.5, "Running MASt3R global alignment...")
 
         results = []
@@ -1626,6 +1642,8 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
     if not model:
         return []
 
+    report_progress("inference", 0.05, f"MUSt3R input images: {len(images_bytes_list)}")
+
     from dust3r.utils.image import load_images
 
     try:
@@ -1666,6 +1684,8 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
             return np.array(img) / 255.0
 
         for i, img_bytes in enumerate(images_bytes_list):
+            if i == 0:
+                print(f"[Py] MUSt3R first image bytes: {len(img_bytes)}")
             img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
 
             # Pre-resize images to target size (512) to avoid resize inside load_images
@@ -1732,6 +1752,7 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
                         device=device,
                         post_process_function=lambda x: {'pts3d': x},
                     )
+                    report_progress("inference", 0.45, "MUSt3R batch inference complete")
 
                     # Clean up tensors used in batch inference
                     del imgs_tensor, true_shape_tensor

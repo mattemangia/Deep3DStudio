@@ -261,6 +261,9 @@ namespace Deep3DStudio.Model
                     return result;
                 }
 
+                Log($"[Mast3r] Starting inference for {imagesBytes.Count} image(s). Use retrieval: {useRetrieval}.");
+                Log($"[Mast3r] Managed thread: {Environment.CurrentManagedThreadId}.");
+
                 PythonService.Instance.ExecuteWithGIL((scope) =>
                 {
                     using(var pyList = new PyList())
@@ -277,12 +280,19 @@ namespace Deep3DStudio.Model
                                 pyList.Append(pyBytes);
                             }
 
+                            Console.WriteLine($"[Mast3r] Prepared PyList with {pyList.Length()} image(s).");
+                            if (imagesBytes.Count > 0)
+                            {
+                                Console.WriteLine($"[Mast3r] First image byte length: {imagesBytes[0].Length}.");
+                            }
+
                             // Pass use_retrieval parameter for optimal pairing of unordered images
                             // CRITICAL: Use PyObject explicitly so we can dispose it properly
                             PyObject outputObj = _bridgeModule.infer_mast3r(pyList, use_retrieval: useRetrieval);
                             try
                             {
                                 int len = (int)outputObj.Length();
+                                Log($"[Mast3r] Python returned {len} mesh result(s).");
                                 for (int i = 0; i < len; i++)
                                 {
                                     PyObject item = outputObj[i];
