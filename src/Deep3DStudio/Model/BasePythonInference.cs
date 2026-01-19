@@ -79,7 +79,9 @@ namespace Deep3DStudio.Model
 
                 PythonService.Instance.ExecuteWithGIL((scope) =>
                 {
-                    ReportProgress("init", 0.05f, "Loading inference bridge...");
+                    // CRITICAL: Don't call ReportProgress inside GIL - it triggers GTK callbacks
+                    // Console.WriteLine is safe inside GIL
+                    Console.WriteLine($"[{_modelName}] Loading inference bridge...");
                     dynamic sys = Py.Import("sys");
                     if (sys.modules.__contains__("deep3dstudio_bridge"))
                     {
@@ -176,7 +178,8 @@ namespace Deep3DStudio.Model
                     string weightsPath = GetModelPath();
                     string device = GetDeviceString();
 
-                    ReportProgress("load", 0.1f, $"Loading {_modelName} model...");
+                    // CRITICAL: Don't call ReportProgress inside GIL - Console is safe
+                    Console.WriteLine($"[{_modelName}] Loading model from: {weightsPath}");
 
                     // Load the model with configured device
                     bool success = _bridgeModule.load_model(_modelName, weightsPath, device);
@@ -188,6 +191,7 @@ namespace Deep3DStudio.Model
                 });
 
                 _isLoaded = true;
+                // Report progress AFTER GIL is released to prevent GTK/GIL interaction issues
                 ReportProgress("load", 1.0f, $"{_modelName} loaded successfully");
             }
             catch (Exception ex)

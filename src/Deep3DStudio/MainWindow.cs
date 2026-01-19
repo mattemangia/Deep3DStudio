@@ -193,9 +193,72 @@ namespace Deep3DStudio
             // Initialize inference engine
             _inference = new Model.Dust3rInference();
 
-            // Hook up AI model loading progress to status bar
+            // Set up ProgressDialog parent
+            UI.ProgressDialog.Instance.SetParent(this);
+
+            // Hook up Python extraction progress to ProgressDialog
+            Python.PythonService.Instance.OnExtractionProgress += (message, progress) => {
+                Application.Invoke((s, e) => {
+                    // Start dialog if this is the beginning of extraction
+                    if (progress < 0.1f && !UI.ProgressDialog.Instance.IsVisible)
+                    {
+                        UI.ProgressDialog.Instance.Start("Extracting Python Environment", UI.OperationType.Extraction);
+                    }
+
+                    // Update progress
+                    if (UI.ProgressDialog.Instance.IsVisible)
+                    {
+                        UI.ProgressDialog.Instance.Update(progress, message);
+                    }
+
+                    // Complete when done
+                    if (progress >= 1.0f && UI.ProgressDialog.Instance.IsVisible &&
+                        UI.ProgressDialog.Instance.State == UI.ProgressState.Running)
+                    {
+                        UI.ProgressDialog.Instance.Complete();
+                    }
+
+                    _statusLabel.Text = message;
+                });
+            };
+
+            // Hook up Python log output to ProgressDialog (when visible)
+            Python.PythonService.Instance.OnLogOutput += (message) => {
+                Application.Invoke((s, e) => {
+                    if (UI.ProgressDialog.Instance.IsVisible)
+                    {
+                        UI.ProgressDialog.Instance.Log(message);
+                    }
+                });
+            };
+
+            // Hook up AI model loading progress to both status bar and ProgressDialog
             AIModels.AIModelManager.Instance.ModelLoadProgress += (stage, progress, message) => {
                 Application.Invoke((s, e) => {
+                    // Start progress dialog if not visible and we're starting to load
+                    if (!UI.ProgressDialog.Instance.IsVisible && stage == "init")
+                    {
+                        UI.ProgressDialog.Instance.Start("Loading AI Model...", UI.OperationType.Processing);
+                    }
+
+                    // Update progress dialog if visible
+                    if (UI.ProgressDialog.Instance.IsVisible)
+                    {
+                        UI.ProgressDialog.Instance.Update(progress, message);
+                        UI.ProgressDialog.Instance.Log($"[{stage}] {message}");
+
+                        // Complete dialog when fully loaded
+                        if (stage == "load" && progress >= 1.0f)
+                        {
+                            UI.ProgressDialog.Instance.Complete();
+                        }
+                        else if (stage == "error")
+                        {
+                            UI.ProgressDialog.Instance.Fail(new Exception(message));
+                        }
+                    }
+
+                    // Always update status bar
                     _statusLabel.Text = $"[{(int)(progress * 100)}%] {message}";
                 });
             };

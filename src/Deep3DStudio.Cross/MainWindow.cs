@@ -183,7 +183,31 @@ namespace Deep3DStudio
             // Configure ImGui style
             ConfigureImGuiStyle();
 
-            // Init Python service hook
+            // Init Python extraction progress hook
+            PythonService.Instance.OnExtractionProgress += (message, progress) => {
+                EnqueueAction(() => {
+                    // Start dialog if this is the beginning of extraction
+                    if (progress < 0.1f && !ProgressDialog.Instance.IsVisible)
+                    {
+                        ProgressDialog.Instance.Start("Extracting Python Environment", OperationType.Processing);
+                    }
+
+                    // Update progress
+                    if (ProgressDialog.Instance.IsVisible)
+                    {
+                        ProgressDialog.Instance.Update(progress, message);
+                    }
+
+                    // Complete when done
+                    if (progress >= 1.0f && ProgressDialog.Instance.IsVisible &&
+                        ProgressDialog.Instance.State == ProgressState.Running)
+                    {
+                        ProgressDialog.Instance.Complete();
+                    }
+                });
+            };
+
+            // Init Python service log hook
             PythonService.Instance.OnLogOutput += (msg) => {
                 _logBuffer += msg + "\n";
                 // Also forward to progress dialog if active
