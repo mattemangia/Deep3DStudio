@@ -299,12 +299,12 @@ namespace Deep3DStudio.Model
                                             using (PyObject cRow = colorsObj[v])
                                             {
                                                 // Use Python's float() to convert numpy scalars to native float
-                                                float vx = (float)(double)builtins.float(vRow[0]);
-                                                float vy = (float)(double)builtins.float(vRow[1]);
-                                                float vz = (float)(double)builtins.float(vRow[2]);
-                                                float cx = (float)(double)builtins.float(cRow[0]);
-                                                float cy = (float)(double)builtins.float(cRow[1]);
-                                                float cz = (float)(double)builtins.float(cRow[2]);
+                                                float vx = (float)(double)builtins.@float(vRow[0]);
+                                                float vy = (float)(double)builtins.@float(vRow[1]);
+                                                float vz = (float)(double)builtins.@float(vRow[2]);
+                                                float cx = (float)(double)builtins.@float(cRow[0]);
+                                                float cy = (float)(double)builtins.@float(cRow[1]);
+                                                float cz = (float)(double)builtins.@float(cRow[2]);
                                                 mesh.Vertices.Add(new Vector3(vx, vy, vz));
                                                 mesh.Colors.Add(new Vector3(cx, cy, cz));
                                             }
@@ -315,9 +315,9 @@ namespace Deep3DStudio.Model
                                         {
                                             using (PyObject fRow = facesObj[f])
                                             {
-                                                mesh.Indices.Add((int)(long)builtins.int(fRow[0]));
-                                                mesh.Indices.Add((int)(long)builtins.int(fRow[1]));
-                                                mesh.Indices.Add((int)(long)builtins.int(fRow[2]));
+                                                mesh.Indices.Add((int)(long)builtins.@int(fRow[0]));
+                                                mesh.Indices.Add((int)(long)builtins.@int(fRow[1]));
+                                                mesh.Indices.Add((int)(long)builtins.@int(fRow[2]));
                                             }
                                         }
                                     }
@@ -450,12 +450,12 @@ namespace Deep3DStudio.Model
                                         using (PyObject cRow = colorsObj[v])
                                         {
                                             // Use Python's float() to convert numpy scalars to native float
-                                            float vx = (float)(double)builtins.float(vRow[0]);
-                                            float vy = (float)(double)builtins.float(vRow[1]);
-                                            float vz = (float)(double)builtins.float(vRow[2]);
-                                            float cx = (float)(double)builtins.float(cRow[0]);
-                                            float cy = (float)(double)builtins.float(cRow[1]);
-                                            float cz = (float)(double)builtins.float(cRow[2]);
+                                            float vx = (float)(double)builtins.@float(vRow[0]);
+                                            float vy = (float)(double)builtins.@float(vRow[1]);
+                                            float vz = (float)(double)builtins.@float(vRow[2]);
+                                            float cx = (float)(double)builtins.@float(cRow[0]);
+                                            float cy = (float)(double)builtins.@float(cRow[1]);
+                                            float cz = (float)(double)builtins.@float(cRow[2]);
                                             mesh.Vertices.Add(new Vector3(vx, vy, vz));
                                             mesh.Colors.Add(new Vector3(cx, cy, cz));
                                         }
@@ -466,9 +466,9 @@ namespace Deep3DStudio.Model
                                     {
                                         using (PyObject fRow = facesObj[f])
                                         {
-                                            mesh.Indices.Add((int)(long)builtins.int(fRow[0]));
-                                            mesh.Indices.Add((int)(long)builtins.int(fRow[1]));
-                                            mesh.Indices.Add((int)(long)builtins.int(fRow[2]));
+                                            mesh.Indices.Add((int)(long)builtins.@int(fRow[0]));
+                                            mesh.Indices.Add((int)(long)builtins.@int(fRow[1]));
+                                            mesh.Indices.Add((int)(long)builtins.@int(fRow[2]));
                                         }
                                     }
                                 }
