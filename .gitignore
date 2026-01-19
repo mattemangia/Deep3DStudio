@@ -1,2 +1,6 @@
 src/Deep3DStudio/bin/
 src/Deep3DStudio/obj/
+
+# Python cache
+__pycache__/
+*.pyc
