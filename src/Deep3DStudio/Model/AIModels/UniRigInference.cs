@@ -12,7 +12,7 @@ namespace Deep3DStudio.Model.AIModels
     /// UniRig - Automatic mesh rigging/skinning.
     /// Uses subprocess-based Python inference for complete process isolation.
     /// </summary>
-    public class UniRigInference : IDisposable
+    public class UniRigInference : IDisposable, IInferenceWithProgress
     {
         private SubprocessInference? _inference;
         private bool _disposed = false;
@@ -33,6 +33,7 @@ namespace Deep3DStudio.Model.AIModels
         }
 
         public event Action<string, float, string>? OnProgress;
+        public event Action<string, float, string>? OnLoadProgress;
 
         private void Log(string message)
         {
@@ -60,7 +61,11 @@ namespace Deep3DStudio.Model.AIModels
                 Log("[UniRig] Initializing subprocess inference...");
                 _inference = new SubprocessInference("unirig");
                 _inference.OnLog += msg => Log(msg);
-                _inference.OnProgress += (stage, progress, message) => OnProgress?.Invoke(stage, progress, message);
+                _inference.OnProgress += (stage, progress, message) =>
+                {
+                    OnProgress?.Invoke(stage, progress, message);
+                    OnLoadProgress?.Invoke(stage, progress, message);
+                };
 
                 var settings = IniSettings.Instance;
                 string weightsPath = settings.UniRigModelPath;

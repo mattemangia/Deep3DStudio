@@ -11,7 +11,7 @@ namespace Deep3DStudio.Model.AIModels
     /// TripoSF - Single image to 3D mesh with refinement.
     /// Uses subprocess-based Python inference for complete process isolation.
     /// </summary>
-    public class TripoSFInference : IDisposable
+    public class TripoSFInference : IDisposable, IInferenceWithProgress
     {
         private SubprocessInference? _inference;
         private bool _disposed = false;
@@ -32,6 +32,7 @@ namespace Deep3DStudio.Model.AIModels
         }
 
         public event Action<string, float, string>? OnProgress;
+        public event Action<string, float, string>? OnLoadProgress;
 
         private void Log(string message)
         {
@@ -59,7 +60,11 @@ namespace Deep3DStudio.Model.AIModels
                 Log("[TripoSF] Initializing subprocess inference...");
                 _inference = new SubprocessInference("triposf");
                 _inference.OnLog += msg => Log(msg);
-                _inference.OnProgress += (stage, progress, message) => OnProgress?.Invoke(stage, progress, message);
+                _inference.OnProgress += (stage, progress, message) =>
+                {
+                    OnProgress?.Invoke(stage, progress, message);
+                    OnLoadProgress?.Invoke(stage, progress, message);
+                };
 
                 var settings = IniSettings.Instance;
                 string weightsPath = settings.TripoSFModelPath;
