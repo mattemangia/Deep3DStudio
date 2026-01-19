@@ -19,7 +19,9 @@ namespace Deep3DStudio.Model
     public class Mast3rInference : IDisposable
     {
         private bool _isLoaded = false;
-        private dynamic _bridgeModule;
+        // CRITICAL: Use PyObject instead of dynamic to prevent GC from collecting
+        // temporary PyObjects during method calls, which causes AccessViolationException
+        private PyObject? _bridgeModule;
         private bool _disposed = false;
         private Action<string>? _logCallback;
         private string? _lastError;
@@ -73,15 +75,27 @@ namespace Deep3DStudio.Model
 
                 PythonService.Instance.ExecuteWithGIL((scope) =>
                 {
-                    dynamic sys = Py.Import("sys");
-                    if (sys.modules.__contains__("deep3dstudio_bridge"))
+                    using var sys = Py.Import("sys");
+                    using var modules = sys.GetAttr("modules");
+
+                    // Check if module already exists using safe PyObject methods
+                    bool moduleExists = false;
+                    using (var containsMethod = modules.GetAttr("__contains__"))
+                    using (var moduleName = new PyString("deep3dstudio_bridge"))
+                    using (var containsResult = containsMethod.Invoke(new PyTuple(new PyObject[] { moduleName })))
                     {
-                        _bridgeModule = sys.modules["deep3dstudio_bridge"];
+                        moduleExists = containsResult.IsTrue();
+                    }
+
+                    if (moduleExists)
+                    {
+                        using var moduleName = new PyString("deep3dstudio_bridge");
+                        _bridgeModule = modules[moduleName];
                     }
                     else
                     {
                         // Try to find the embedded resource from any loaded assembly
-                        string scriptContent = null;
+                        string? scriptContent = null;
                         string[] possibleNames = new[]
                         {
                             "Deep3DStudio.Embedded.Python.inference_bridge.py",
@@ -89,7 +103,7 @@ namespace Deep3DStudio.Model
                         };
 
                         var assemblyList = new List<Assembly>();
-                        if (Assembly.GetEntryAssembly() != null) assemblyList.Add(Assembly.GetEntryAssembly());
+                        if (Assembly.GetEntryAssembly() != null) assemblyList.Add(Assembly.GetEntryAssembly()!);
                         if (Assembly.GetExecutingAssembly() != null) assemblyList.Add(Assembly.GetExecutingAssembly());
                         if (Assembly.GetCallingAssembly() != null) assemblyList.Add(Assembly.GetCallingAssembly());
                         assemblyList.AddRange(AppDomain.CurrentDomain.GetAssemblies()
@@ -107,7 +121,7 @@ namespace Deep3DStudio.Model
                                 if (allResources.Contains(resourceName))
                                 {
                                     Console.WriteLine($"[Mast3r] Found exact match: {resourceName}");
-                                    using (Stream stream = assembly.GetManifestResourceStream(resourceName))
+                                    using (Stream? stream = assembly.GetManifestResourceStream(resourceName))
                                     {
                                         if (stream != null)
                                         {
@@ -127,7 +141,7 @@ namespace Deep3DStudio.Model
                             if (match != null)
                             {
                                 Console.WriteLine($"[Mast3r] Found by suffix: {match}");
-                                using (Stream stream = assembly.GetManifestResourceStream(match))
+                                using (Stream? stream = assembly.GetManifestResourceStream(match))
                                 {
                                     if (stream != null)
                                     {
@@ -146,11 +160,22 @@ namespace Deep3DStudio.Model
                             throw new FileNotFoundException("Could not find embedded resource 'inference_bridge.py' in any assembly.");
                         }
 
-                        dynamic types = Py.Import("types");
-                        _bridgeModule = types.ModuleType("deep3dstudio_bridge");
-                        dynamic builtins = Py.Import("builtins");
-                        builtins.exec(scriptContent, _bridgeModule.__dict__);
-                        sys.modules["deep3dstudio_bridge"] = _bridgeModule;
+                        // Create module using safe PyObject operations
+                        using var types = Py.Import("types");
+                        using var moduleTypeAttr = types.GetAttr("ModuleType");
+                        using var moduleNameArg = new PyString("deep3dstudio_bridge");
+                        _bridgeModule = moduleTypeAttr.Invoke(new PyTuple(new PyObject[] { moduleNameArg }));
+
+                        using var builtins = Py.Import("builtins");
+                        using var execFunc = builtins.GetAttr("exec");
+                        using var scriptPy = new PyString(scriptContent);
+                        using var moduleDict = _bridgeModule.GetAttr("__dict__");
+                        execFunc.Invoke(new PyTuple(new PyObject[] { scriptPy, moduleDict }));
+
+                        // Register in sys.modules
+                        using var setItemArgs = new PyTuple(new PyObject[] { moduleNameArg, _bridgeModule });
+                        using var setItemMethod = modules.GetAttr("__setitem__");
+                        setItemMethod.Invoke(setItemArgs);
                     }
 
                     var settings = IniSettings.Instance;
@@ -192,7 +217,14 @@ namespace Deep3DStudio.Model
                     string logMsg = $"[Mast3r] Loading model from: {weightsPath}";
                     Console.WriteLine(logMsg); // Console is safe inside GIL
 
-                    _bridgeModule.load_model("mast3r", weightsPath, device);
+                    // CRITICAL: Use explicit PyObject method calls instead of dynamic
+                    // to prevent GC from collecting temporary arguments
+                    using var loadModelMethod = _bridgeModule.GetAttr("load_model");
+                    using var modelNameArg = new PyString("mast3r");
+                    using var weightsPathArg = new PyString(weightsPath);
+                    using var deviceArg = new PyString(device);
+                    using var loadArgs = new PyTuple(new PyObject[] { modelNameArg, weightsPathArg, deviceArg });
+                    loadModelMethod.Invoke(loadArgs);
                 });
 
                 // Log AFTER GIL is released to prevent GTK/GIL interaction issues
@@ -286,99 +318,138 @@ namespace Deep3DStudio.Model
                                 Console.WriteLine($"[Mast3r] First image byte length: {imagesBytes[0].Length}.");
                             }
 
-                            // Pass use_retrieval parameter for optimal pairing of unordered images
-                            // CRITICAL: Use PyObject explicitly so we can dispose it properly
-                            PyObject outputObj = _bridgeModule.infer_mast3r(pyList, use_retrieval: useRetrieval);
+                            // CRITICAL: Use explicit PyObject method calls with kwargs
+                            // instead of dynamic calls to prevent GC from collecting temporary arguments
+                            // This is the fix for AccessViolationException during Python interop
+                            using var inferMethod = _bridgeModule!.GetAttr("infer_mast3r");
+                            using var args = new PyTuple(new PyObject[] { pyList });
+                            using var kwargs = new PyDict();
+                            using var useRetrievalPy = useRetrieval.ToPython();
+                            kwargs["use_retrieval"] = useRetrievalPy;
+
+                            Console.WriteLine($"[Mast3r] Calling infer_mast3r with use_retrieval={useRetrieval}...");
+                            PyObject outputObj = inferMethod.Invoke(args, kwargs);
                             try
                             {
                                 int len = (int)outputObj.Length();
                                 Log($"[Mast3r] Python returned {len} mesh result(s).");
+
+                                // Import builtins once and keep reference alive
+                                using var builtins = Py.Import("builtins");
+                                using var floatFunc = builtins.GetAttr("float");
+                                using var intFunc = builtins.GetAttr("int");
+
                                 for (int i = 0; i < len; i++)
                                 {
-                                    PyObject item = outputObj[i];
-                                    try
+                                    using PyObject item = outputObj[i];
+                                    var mesh = new MeshData();
+
+                                    int imageIndex = i;
+
+                                    // Extract data immediately to primitive types, disposing PyObjects ASAP
+                                    using (PyObject verticesObj = item["vertices"])
+                                    using (PyObject colorsObj = item["colors"])
+                                    using (PyObject facesObj = item["faces"])
                                     {
-                                        var mesh = new MeshData();
-
-                                        int imageIndex = i;
-
-                                        // Extract data immediately to primitive types, disposing PyObjects ASAP
-                                        using (PyObject verticesObj = item["vertices"])
-                                        using (PyObject colorsObj = item["colors"])
-                                        using (PyObject facesObj = item["faces"])
+                                        try
                                         {
-                                            try
+                                            using (var keyStr = new PyString("image_index"))
+                                            using (PyObject containsResult = item.InvokeMethod("__contains__", keyStr))
                                             {
-                                                using (PyObject containsResult = item.InvokeMethod("__contains__", new PyString("image_index")))
+                                                if (containsResult.IsTrue())
                                                 {
-                                                    if (containsResult.IsTrue())
+                                                    using (PyObject idxObj = item["image_index"])
                                                     {
-                                                        using (PyObject idxObj = item["image_index"])
-                                                        {
-                                                            imageIndex = idxObj.As<int>();
-                                                        }
+                                                        imageIndex = idxObj.As<int>();
                                                     }
                                                 }
                                             }
-                                            catch (Exception)
-                                            {
-                                                imageIndex = i;
-                                            }
+                                        }
+                                        catch (Exception)
+                                        {
+                                            imageIndex = i;
+                                        }
 
-                                            // Get shapes as primitives immediately
-                                            long vCount, fCount;
-                                            using (PyObject vShapeObj = verticesObj.GetAttr("shape"))
-                                            {
-                                                vCount = vShapeObj[0].As<long>();
-                                            }
-                                            using (PyObject fShapeObj = facesObj.GetAttr("shape"))
-                                            {
-                                                fCount = fShapeObj[0].As<long>();
-                                            }
+                                        // Get shapes as primitives immediately
+                                        long vCount, fCount;
+                                        using (PyObject vShapeObj = verticesObj.GetAttr("shape"))
+                                        {
+                                            vCount = vShapeObj[0].As<long>();
+                                        }
+                                        using (PyObject fShapeObj = facesObj.GetAttr("shape"))
+                                        {
+                                            fCount = fShapeObj[0].As<long>();
+                                        }
 
-                                            // Convert numpy arrays to Python lists for safe extraction
-                                            // numpy scalars don't convert properly with As<float>()
-                                            dynamic builtins = Py.Import("builtins");
-
-                                            // Extract vertex and color data
-                                            for(int v=0; v<vCount; v++)
+                                        // Extract vertex and color data using safe PyObject calls
+                                        for(int v=0; v<vCount; v++)
+                                        {
+                                            using (PyObject vRow = verticesObj[v])
+                                            using (PyObject cRow = colorsObj[v])
                                             {
-                                                using (PyObject vRow = verticesObj[v])
-                                                using (PyObject cRow = colorsObj[v])
-                                                {
-                                                    // Use Python's float() to convert numpy scalars to native float
-                                                    float vx = (float)(double)builtins.@float(vRow[0]);
-                                                    float vy = (float)(double)builtins.@float(vRow[1]);
-                                                    float vz = (float)(double)builtins.@float(vRow[2]);
-                                                    float cx = (float)(double)builtins.@float(cRow[0]);
-                                                    float cy = (float)(double)builtins.@float(cRow[1]);
-                                                    float cz = (float)(double)builtins.@float(cRow[2]);
-                                                    mesh.Vertices.Add(new Vector3(vx, vy, vz));
-                                                    mesh.Colors.Add(new Vector3(cx, cy, cz));
-                                                }
-                                            }
+                                                // Use Python's float() to convert numpy scalars to native float
+                                                // Keep intermediate PyObjects in using blocks
+                                                using var vx0 = vRow[0];
+                                                using var vy0 = vRow[1];
+                                                using var vz0 = vRow[2];
+                                                using var cx0 = cRow[0];
+                                                using var cy0 = cRow[1];
+                                                using var cz0 = cRow[2];
 
-                                            // Extract face indices
-                                            for(int f=0; f<fCount; f++)
-                                            {
-                                                using (PyObject fRow = facesObj[f])
-                                                {
-                                                    mesh.Indices.Add((int)(long)builtins.@int(fRow[0]));
-                                                    mesh.Indices.Add((int)(long)builtins.@int(fRow[1]));
-                                                    mesh.Indices.Add((int)(long)builtins.@int(fRow[2]));
-                                                }
+                                                using var vxArgs = new PyTuple(new PyObject[] { vx0 });
+                                                using var vyArgs = new PyTuple(new PyObject[] { vy0 });
+                                                using var vzArgs = new PyTuple(new PyObject[] { vz0 });
+                                                using var cxArgs = new PyTuple(new PyObject[] { cx0 });
+                                                using var cyArgs = new PyTuple(new PyObject[] { cy0 });
+                                                using var czArgs = new PyTuple(new PyObject[] { cz0 });
+
+                                                using var vxPy = floatFunc.Invoke(vxArgs);
+                                                using var vyPy = floatFunc.Invoke(vyArgs);
+                                                using var vzPy = floatFunc.Invoke(vzArgs);
+                                                using var cxPy = floatFunc.Invoke(cxArgs);
+                                                using var cyPy = floatFunc.Invoke(cyArgs);
+                                                using var czPy = floatFunc.Invoke(czArgs);
+
+                                                float vx = (float)vxPy.As<double>();
+                                                float vy = (float)vyPy.As<double>();
+                                                float vz = (float)vzPy.As<double>();
+                                                float cx = (float)cxPy.As<double>();
+                                                float cy = (float)cyPy.As<double>();
+                                                float cz = (float)czPy.As<double>();
+
+                                                mesh.Vertices.Add(new Vector3(vx, vy, vz));
+                                                mesh.Colors.Add(new Vector3(cx, cy, cz));
                                             }
                                         }
 
-                                        result.Meshes.Add(mesh);
-                                        if (imageIndex >= 0 && imageIndex < validImagePaths.Count)
+                                        // Extract face indices
+                                        for(int f=0; f<fCount; f++)
                                         {
-                                            result.Poses.Add(new CameraPose { ImageIndex = imageIndex, ImagePath = validImagePaths[imageIndex] });
+                                            using (PyObject fRow = facesObj[f])
+                                            {
+                                                using var f0 = fRow[0];
+                                                using var f1 = fRow[1];
+                                                using var f2 = fRow[2];
+
+                                                using var f0Args = new PyTuple(new PyObject[] { f0 });
+                                                using var f1Args = new PyTuple(new PyObject[] { f1 });
+                                                using var f2Args = new PyTuple(new PyObject[] { f2 });
+
+                                                using var i0Py = intFunc.Invoke(f0Args);
+                                                using var i1Py = intFunc.Invoke(f1Args);
+                                                using var i2Py = intFunc.Invoke(f2Args);
+
+                                                mesh.Indices.Add((int)i0Py.As<long>());
+                                                mesh.Indices.Add((int)i1Py.As<long>());
+                                                mesh.Indices.Add((int)i2Py.As<long>());
+                                            }
                                         }
                                     }
-                                    finally
+
+                                    result.Meshes.Add(mesh);
+                                    if (imageIndex >= 0 && imageIndex < validImagePaths.Count)
                                     {
-                                        item.Dispose();
+                                        result.Poses.Add(new CameraPose { ImageIndex = imageIndex, ImagePath = validImagePaths[imageIndex] });
                                     }
                                 }
                             }
@@ -429,18 +500,21 @@ namespace Deep3DStudio.Model
                         {
                             PythonService.Instance.ExecuteWithGIL((scope) =>
                             {
-                                // Release the reference within GIL context
+                                // Dispose the PyObject within GIL context
+                                _bridgeModule?.Dispose();
                                 _bridgeModule = null;
                             });
                         }
                         catch (Exception)
                         {
-                            // If GIL acquisition fails, just clear the reference
+                            // If GIL acquisition fails, try to dispose anyway
+                            try { _bridgeModule?.Dispose(); } catch { }
                             _bridgeModule = null;
                         }
                     }
                     else
                     {
+                        try { _bridgeModule?.Dispose(); } catch { }
                         _bridgeModule = null;
                     }
 

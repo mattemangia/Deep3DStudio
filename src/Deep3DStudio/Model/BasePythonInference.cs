@@ -9,7 +9,9 @@ namespace Deep3DStudio.Model
 {
     public abstract class BasePythonInference : IDisposable
     {
-        protected dynamic _bridgeModule;
+        // CRITICAL: Use PyObject instead of dynamic to prevent GC from collecting
+        // temporary PyObjects during method calls, which causes AccessViolationException
+        protected PyObject? _bridgeModule;
         protected bool _isLoaded = false;
         protected string _modelName;
         protected bool _disposed = false;
@@ -82,15 +84,28 @@ namespace Deep3DStudio.Model
                     // CRITICAL: Don't call ReportProgress inside GIL - it triggers GTK callbacks
                     // Console.WriteLine is safe inside GIL
                     Console.WriteLine($"[{_modelName}] Loading inference bridge...");
-                    dynamic sys = Py.Import("sys");
-                    if (sys.modules.__contains__("deep3dstudio_bridge"))
+
+                    using var sys = Py.Import("sys");
+                    using var modules = sys.GetAttr("modules");
+
+                    // Check if module already exists using safe PyObject methods
+                    bool moduleExists = false;
+                    using (var containsMethod = modules.GetAttr("__contains__"))
+                    using (var moduleName = new PyString("deep3dstudio_bridge"))
+                    using (var containsResult = containsMethod.Invoke(new PyTuple(new PyObject[] { moduleName })))
                     {
-                        _bridgeModule = sys.modules["deep3dstudio_bridge"];
+                        moduleExists = containsResult.IsTrue();
+                    }
+
+                    if (moduleExists)
+                    {
+                        using var moduleName = new PyString("deep3dstudio_bridge");
+                        _bridgeModule = modules[moduleName];
                     }
                     else
                     {
                         // Try to find the embedded resource from any loaded assembly
-                        string scriptContent = null;
+                        string? scriptContent = null;
                         string[] possibleNames = new[]
                         {
                             "Deep3DStudio.Embedded.Python.inference_bridge.py",
@@ -99,7 +114,7 @@ namespace Deep3DStudio.Model
 
                         // Try all loaded assemblies, starting with entry and executing
                         var assemblyList = new List<Assembly>();
-                        if (Assembly.GetEntryAssembly() != null) assemblyList.Add(Assembly.GetEntryAssembly());
+                        if (Assembly.GetEntryAssembly() != null) assemblyList.Add(Assembly.GetEntryAssembly()!);
                         if (Assembly.GetExecutingAssembly() != null) assemblyList.Add(Assembly.GetExecutingAssembly());
                         if (Assembly.GetCallingAssembly() != null) assemblyList.Add(Assembly.GetCallingAssembly());
                         assemblyList.AddRange(AppDomain.CurrentDomain.GetAssemblies()
@@ -118,7 +133,7 @@ namespace Deep3DStudio.Model
                                 if (allResources.Contains(resourceName))
                                 {
                                     Console.WriteLine($"[{_modelName}] Found exact match: {resourceName}");
-                                    using (Stream stream = assembly.GetManifestResourceStream(resourceName))
+                                    using (Stream? stream = assembly.GetManifestResourceStream(resourceName))
                                     {
                                         if (stream != null)
                                         {
@@ -139,7 +154,7 @@ namespace Deep3DStudio.Model
                             if (match != null)
                             {
                                 Console.WriteLine($"[{_modelName}] Found by suffix: {match}");
-                                using (Stream stream = assembly.GetManifestResourceStream(match))
+                                using (Stream? stream = assembly.GetManifestResourceStream(match))
                                 {
                                     if (stream != null)
                                     {
@@ -164,12 +179,22 @@ namespace Deep3DStudio.Model
                             throw new FileNotFoundException("Could not find embedded resource 'inference_bridge.py' in any assembly. Check that it's included as EmbeddedResource in the .csproj file.");
                         }
 
-                        dynamic types = Py.Import("types");
-                        _bridgeModule = types.ModuleType("deep3dstudio_bridge");
-                        // Use Python's built-in exec instead of PythonEngine.Exec to avoid protection level issues
-                        dynamic builtins = Py.Import("builtins");
-                        builtins.exec(scriptContent, _bridgeModule.__dict__);
-                        sys.modules["deep3dstudio_bridge"] = _bridgeModule;
+                        // Create module using safe PyObject operations
+                        using var types = Py.Import("types");
+                        using var moduleTypeAttr = types.GetAttr("ModuleType");
+                        using var moduleNameArg = new PyString("deep3dstudio_bridge");
+                        _bridgeModule = moduleTypeAttr.Invoke(new PyTuple(new PyObject[] { moduleNameArg }));
+
+                        using var builtins = Py.Import("builtins");
+                        using var execFunc = builtins.GetAttr("exec");
+                        using var scriptPy = new PyString(scriptContent);
+                        using var moduleDict = _bridgeModule.GetAttr("__dict__");
+                        execFunc.Invoke(new PyTuple(new PyObject[] { scriptPy, moduleDict }));
+
+                        // Register in sys.modules
+                        using var setItemArgs = new PyTuple(new PyObject[] { moduleNameArg, _bridgeModule });
+                        using var setItemMethod = modules.GetAttr("__setitem__");
+                        setItemMethod.Invoke(setItemArgs);
                     }
 
                     // Set up progress callback from Python to C#
@@ -181,10 +206,16 @@ namespace Deep3DStudio.Model
                     // CRITICAL: Don't call ReportProgress inside GIL - Console is safe
                     Console.WriteLine($"[{_modelName}] Loading model from: {weightsPath}");
 
-                    // Load the model with configured device
-                    bool success = _bridgeModule.load_model(_modelName, weightsPath, device);
+                    // CRITICAL: Use explicit PyObject method calls instead of dynamic
+                    // to prevent GC from collecting temporary arguments
+                    using var loadModelMethod = _bridgeModule.GetAttr("load_model");
+                    using var modelNamePy = new PyString(_modelName);
+                    using var weightsPathPy = new PyString(weightsPath);
+                    using var devicePy = new PyString(device);
+                    using var loadArgs = new PyTuple(new PyObject[] { modelNamePy, weightsPathPy, devicePy });
+                    using var loadResult = loadModelMethod.Invoke(loadArgs);
 
-                    if (!success)
+                    if (!loadResult.IsTrue())
                     {
                         throw new Exception($"Failed to load model {_modelName}");
                     }
@@ -233,7 +264,11 @@ namespace Deep3DStudio.Model
             {
                 PythonService.Instance.ExecuteWithGIL((scope) =>
                 {
-                    _bridgeModule.unload_model(_modelName);
+                    // CRITICAL: Use explicit PyObject method calls instead of dynamic
+                    using var unloadMethod = _bridgeModule.GetAttr("unload_model");
+                    using var modelNamePy = new PyString(_modelName);
+                    using var args = new PyTuple(new PyObject[] { modelNamePy });
+                    unloadMethod.Invoke(args);
                 });
                 _isLoaded = false;
             }
@@ -255,8 +290,12 @@ namespace Deep3DStudio.Model
                 (float, float) result = (0, 0);
                 PythonService.Instance.ExecuteWithGIL((scope) =>
                 {
-                    dynamic memInfo = _bridgeModule.get_gpu_memory_info();
-                    result = ((float)memInfo[0], (float)memInfo[1]);
+                    // CRITICAL: Use explicit PyObject method calls instead of dynamic
+                    using var getMemInfoMethod = _bridgeModule.GetAttr("get_gpu_memory_info");
+                    using var memInfo = getMemInfoMethod.Invoke(new PyTuple());
+                    using var used = memInfo[0];
+                    using var total = memInfo[1];
+                    result = (used.As<float>(), total.As<float>());
                 });
                 return result;
             }
@@ -286,18 +325,21 @@ namespace Deep3DStudio.Model
                         {
                             PythonService.Instance.ExecuteWithGIL((scope) =>
                             {
-                                // Release the reference within GIL context
+                                // Dispose the PyObject within GIL context
+                                _bridgeModule?.Dispose();
                                 _bridgeModule = null;
                             });
                         }
                         catch (Exception)
                         {
-                            // If GIL acquisition fails, just clear the reference
+                            // If GIL acquisition fails, try to dispose anyway
+                            try { _bridgeModule?.Dispose(); } catch { }
                             _bridgeModule = null;
                         }
                     }
                     else
                     {
+                        try { _bridgeModule?.Dispose(); } catch { }
                         _bridgeModule = null;
                     }
 
