@@ -246,6 +246,9 @@ namespace Deep3DStudio
             // Process pending GTK events before starting to ensure clean state
             while (Application.EventsPending()) Application.RunIteration();
 
+            // Start the progress dialog
+            UI.ProgressDialog.Instance.Start($"Running {pipeline.Name}...", UI.OperationType.Processing);
+
             try
             {
                 var manager = AIModels.AIModelManager.Instance;
@@ -253,7 +256,13 @@ namespace Deep3DStudio
                     pipeline,
                     _imagePaths,
                     _lastSceneResult,
-                    (message, _) => Application.Invoke((s, e) => _statusLabel.Text = message)
+                    (message, progress) => Application.Invoke((s, e) => {
+                        _statusLabel.Text = message;
+                        if (UI.ProgressDialog.Instance.IsVisible)
+                        {
+                            UI.ProgressDialog.Instance.Update(progress, message);
+                        }
+                    })
                 );
 
                 // Process pending GTK events after workflow to ensure queued Application.Invoke calls
@@ -267,6 +276,14 @@ namespace Deep3DStudio
                         _lastSceneResult = result;
                         UpdateSceneFromResult(result);
                         _statusLabel.Text = $"Workflow '{pipeline.Name}' completed successfully.";
+                        UI.ProgressDialog.Instance.Complete();
+                    });
+                }
+                else
+                {
+                    Application.Invoke((s, e) =>
+                    {
+                        UI.ProgressDialog.Instance.Fail(new Exception("Workflow completed but no result was generated."));
                     });
                 }
             }
@@ -274,7 +291,7 @@ namespace Deep3DStudio
             {
                 Application.Invoke((s, e) =>
                 {
-                    ShowMessage("Workflow Error", $"Error running workflow: {ex.Message}");
+                    UI.ProgressDialog.Instance.Fail(ex);
                     _statusLabel.Text = "Workflow failed.";
                 });
             }
@@ -348,6 +365,9 @@ namespace Deep3DStudio
             // Process pending GTK events before starting to ensure clean state
             while (Application.EventsPending()) Application.RunIteration();
 
+            // Start the progress dialog
+            UI.ProgressDialog.Instance.Start($"Running {stepName}...", UI.OperationType.Processing);
+
             try
             {
                 // Create a single-step pipeline
@@ -362,7 +382,13 @@ namespace Deep3DStudio
                     pipeline,
                     _imagePaths,
                     _lastSceneResult,
-                    (message, _) => Application.Invoke((s, e) => _statusLabel.Text = message)
+                    (message, progress) => Application.Invoke((s, e) => {
+                        _statusLabel.Text = message;
+                        if (UI.ProgressDialog.Instance.IsVisible)
+                        {
+                            UI.ProgressDialog.Instance.Update(progress, message);
+                        }
+                    })
                 );
 
                 // Process pending GTK events after workflow to ensure queued Application.Invoke calls
@@ -376,6 +402,14 @@ namespace Deep3DStudio
                         _lastSceneResult = result;
                         UpdateSceneFromResult(result);
                         _statusLabel.Text = $"{stepName} completed successfully.";
+                        UI.ProgressDialog.Instance.Complete();
+                    });
+                }
+                else
+                {
+                    Application.Invoke((s, e) =>
+                    {
+                        UI.ProgressDialog.Instance.Fail(new Exception($"{stepName} completed but no result was generated."));
                     });
                 }
             }
@@ -383,7 +417,7 @@ namespace Deep3DStudio
             {
                 Application.Invoke((s, e) =>
                 {
-                    ShowMessage($"{stepName} Error", $"Error: {ex.Message}");
+                    UI.ProgressDialog.Instance.Fail(ex);
                     _statusLabel.Text = $"{stepName} failed.";
                 });
             }

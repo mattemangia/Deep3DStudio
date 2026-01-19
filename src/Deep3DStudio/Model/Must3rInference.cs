@@ -189,11 +189,14 @@ namespace Deep3DStudio.Model
                     }
 
                     string device = GetDeviceString();
-                    Log($"[Must3r] Loading model from: {weightsPath}");
+                    // CRITICAL: Don't call Log inside GIL - Console is safe inside GIL
+                    Console.WriteLine($"[Must3r] Loading model from: {weightsPath}");
 
                     _bridgeModule.load_model("must3r", weightsPath, device);
                 });
 
+                // Log AFTER GIL is released to prevent GTK/GIL interaction issues
+                Log($"[Must3r] Model loaded successfully");
                 _isLoaded = true;
             }
             catch (Exception ex)
@@ -285,18 +288,23 @@ namespace Deep3DStudio.Model
                                             fCount = fShapeObj[0].As<long>();
                                         }
 
+                                        // Convert numpy arrays to Python lists for safe extraction
+                                        // numpy scalars don't convert properly with As<float>()
+                                        dynamic builtins = Py.Import("builtins");
+
                                         // Extract vertex and color data
                                         for(int v=0; v<vCount; v++)
                                         {
                                             using (PyObject vRow = verticesObj[v])
                                             using (PyObject cRow = colorsObj[v])
                                             {
-                                                float vx = vRow[0].As<float>();
-                                                float vy = vRow[1].As<float>();
-                                                float vz = vRow[2].As<float>();
-                                                float cx = cRow[0].As<float>();
-                                                float cy = cRow[1].As<float>();
-                                                float cz = cRow[2].As<float>();
+                                                // Use Python's float() to convert numpy scalars to native float
+                                                float vx = (float)(double)builtins.float(vRow[0]);
+                                                float vy = (float)(double)builtins.float(vRow[1]);
+                                                float vz = (float)(double)builtins.float(vRow[2]);
+                                                float cx = (float)(double)builtins.float(cRow[0]);
+                                                float cy = (float)(double)builtins.float(cRow[1]);
+                                                float cz = (float)(double)builtins.float(cRow[2]);
                                                 mesh.Vertices.Add(new Vector3(vx, vy, vz));
                                                 mesh.Colors.Add(new Vector3(cx, cy, cz));
                                             }
@@ -307,9 +315,9 @@ namespace Deep3DStudio.Model
                                         {
                                             using (PyObject fRow = facesObj[f])
                                             {
-                                                mesh.Indices.Add(fRow[0].As<int>());
-                                                mesh.Indices.Add(fRow[1].As<int>());
-                                                mesh.Indices.Add(fRow[2].As<int>());
+                                                mesh.Indices.Add((int)(long)builtins.int(fRow[0]));
+                                                mesh.Indices.Add((int)(long)builtins.int(fRow[1]));
+                                                mesh.Indices.Add((int)(long)builtins.int(fRow[2]));
                                             }
                                         }
                                     }
@@ -431,18 +439,23 @@ namespace Deep3DStudio.Model
                                         fCount = fShapeObj[0].As<long>();
                                     }
 
+                                    // Convert numpy arrays to Python lists for safe extraction
+                                    // numpy scalars don't convert properly with As<float>()
+                                    dynamic builtins = Py.Import("builtins");
+
                                     // Extract vertex and color data
                                     for(int v=0; v<vCount; v++)
                                     {
                                         using (PyObject vRow = verticesObj[v])
                                         using (PyObject cRow = colorsObj[v])
                                         {
-                                            float vx = vRow[0].As<float>();
-                                            float vy = vRow[1].As<float>();
-                                            float vz = vRow[2].As<float>();
-                                            float cx = cRow[0].As<float>();
-                                            float cy = cRow[1].As<float>();
-                                            float cz = cRow[2].As<float>();
+                                            // Use Python's float() to convert numpy scalars to native float
+                                            float vx = (float)(double)builtins.float(vRow[0]);
+                                            float vy = (float)(double)builtins.float(vRow[1]);
+                                            float vz = (float)(double)builtins.float(vRow[2]);
+                                            float cx = (float)(double)builtins.float(cRow[0]);
+                                            float cy = (float)(double)builtins.float(cRow[1]);
+                                            float cz = (float)(double)builtins.float(cRow[2]);
                                             mesh.Vertices.Add(new Vector3(vx, vy, vz));
                                             mesh.Colors.Add(new Vector3(cx, cy, cz));
                                         }
@@ -453,9 +466,9 @@ namespace Deep3DStudio.Model
                                     {
                                         using (PyObject fRow = facesObj[f])
                                         {
-                                            mesh.Indices.Add(fRow[0].As<int>());
-                                            mesh.Indices.Add(fRow[1].As<int>());
-                                            mesh.Indices.Add(fRow[2].As<int>());
+                                            mesh.Indices.Add((int)(long)builtins.int(fRow[0]));
+                                            mesh.Indices.Add((int)(long)builtins.int(fRow[1]));
+                                            mesh.Indices.Add((int)(long)builtins.int(fRow[2]));
                                         }
                                     }
                                 }

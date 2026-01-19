@@ -23,6 +23,9 @@ namespace Deep3DStudio.Python
         // Event to capture Python stdout/stderr
         public event Action<string>? OnLogOutput;
 
+        // Event fired during Python environment extraction with (message, progress 0-1)
+        public event Action<string, float>? OnExtractionProgress;
+
         public static PythonService Instance
         {
             get
@@ -356,6 +359,7 @@ namespace Deep3DStudio.Python
             string targetDir = Path.Combine(appData, "Deep3DStudio", "python");
             string sourceZip = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "python_env.zip");
 
+            ReportExtractionProgress("Checking Python environment...", 0.0f);
             Log($"Looking for Python environment...");
             Log($"  App base directory: {AppDomain.CurrentDomain.BaseDirectory}");
             Log($"  python_env.zip path: {sourceZip}");
@@ -369,10 +373,12 @@ namespace Deep3DStudio.Python
                 if (Directory.Exists(localPython))
                 {
                     Log($"Using local 'python' directory at: {localPython}");
+                    ReportExtractionProgress("Using local Python environment", 1.0f);
                     return;
                 }
                 Log("Warning: python_env.zip not found and no local python dir.");
                 Log("  AI features will be disabled. Please ensure python_env.zip is in the application directory.");
+                ReportExtractionProgress("Python environment not found", 1.0f);
                 return;
             }
 
@@ -397,6 +403,7 @@ namespace Deep3DStudio.Python
                 {
                     shouldExtract = true;
                     Log("Update detected. Re-extracting python environment...");
+                    ReportExtractionProgress("Update detected, re-extracting...", 0.1f);
                 }
             }
 
@@ -406,17 +413,78 @@ namespace Deep3DStudio.Python
                 {
                     if (Directory.Exists(targetDir))
                     {
+                        ReportExtractionProgress("Removing old Python environment...", 0.15f);
                         Directory.Delete(targetDir, true);
                     }
 
                     Log($"Extracting {sourceZip} to {targetDir}...");
-                    ZipFile.ExtractToDirectory(sourceZip, targetDir);
+                    ReportExtractionProgress("Extracting Python environment (this may take a moment)...", 0.2f);
+
+                    // Extract with progress reporting
+                    ExtractZipWithProgress(sourceZip, targetDir);
+
+                    ReportExtractionProgress("Python environment ready", 1.0f);
                 }
                 catch (Exception ex)
                 {
                     Log($"Failed to extract python env: {ex.Message}");
+                    ReportExtractionProgress($"Extraction failed: {ex.Message}", 1.0f);
                 }
             }
+            else
+            {
+                ReportExtractionProgress("Python environment ready", 1.0f);
+            }
+        }
+
+        private void ExtractZipWithProgress(string sourceZip, string targetDir)
+        {
+            using (var archive = ZipFile.OpenRead(sourceZip))
+            {
+                int totalEntries = archive.Entries.Count;
+                int processedEntries = 0;
+                int lastReportedPercent = 0;
+
+                Directory.CreateDirectory(targetDir);
+
+                foreach (var entry in archive.Entries)
+                {
+                    string destPath = Path.Combine(targetDir, entry.FullName);
+
+                    // Handle directories
+                    if (string.IsNullOrEmpty(entry.Name))
+                    {
+                        Directory.CreateDirectory(destPath);
+                    }
+                    else
+                    {
+                        // Ensure directory exists for file
+                        string? dirPath = Path.GetDirectoryName(destPath);
+                        if (!string.IsNullOrEmpty(dirPath) && !Directory.Exists(dirPath))
+                        {
+                            Directory.CreateDirectory(dirPath);
+                        }
+
+                        entry.ExtractToFile(destPath, overwrite: true);
+                    }
+
+                    processedEntries++;
+
+                    // Report progress every 5%
+                    int currentPercent = (processedEntries * 100) / totalEntries;
+                    if (currentPercent >= lastReportedPercent + 5)
+                    {
+                        lastReportedPercent = currentPercent;
+                        float progress = 0.2f + (0.8f * processedEntries / totalEntries);
+                        ReportExtractionProgress($"Extracting Python environment... {currentPercent}%", progress);
+                    }
+                }
+            }
+        }
+
+        private void ReportExtractionProgress(string message, float progress)
+        {
+            OnExtractionProgress?.Invoke(message, progress);
         }
 
         private string GetPythonHome()
