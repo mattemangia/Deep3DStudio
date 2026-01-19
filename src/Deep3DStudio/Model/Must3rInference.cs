@@ -249,12 +249,13 @@ namespace Deep3DStudio.Model
                                 {
                                     var mesh = new MeshData();
 
+                                    int imageIndex = i;
+
                                     // Extract data immediately to primitive types, disposing PyObjects ASAP
                                     using (PyObject verticesObj = item["vertices"])
                                     using (PyObject colorsObj = item["colors"])
                                     using (PyObject facesObj = item["faces"])
                                     {
-                                        int imageIndex = i;
                                         try
                                         {
                                             using (PyObject containsResult = item.InvokeMethod("__contains__", new PyString("image_index")))
@@ -394,12 +395,13 @@ namespace Deep3DStudio.Model
                             {
                                 var mesh = new MeshData();
 
+                                int imageIndex = i;
+
                                 // Extract data immediately to primitive types, disposing PyObjects ASAP
                                 using (PyObject verticesObj = item["vertices"])
                                 using (PyObject colorsObj = item["colors"])
                                 using (PyObject facesObj = item["faces"])
                                 {
-                                    int imageIndex = i;
                                     try
                                     {
                                         using (PyObject containsResult = item.InvokeMethod("__contains__", new PyString("image_index")))
