@@ -1,115 +1,129 @@
 using System;
 using System.IO;
-using Python.Runtime;
-using Deep3DStudio.Python;
-using Deep3DStudio.Configuration;
+using System.Collections.Generic;
 using OpenTK.Mathematics;
+using Deep3DStudio.Configuration;
+using Deep3DStudio.Python;
 
 namespace Deep3DStudio.Model.AIModels
 {
-    public class LGMInference : BasePythonInference
+    /// <summary>
+    /// LGM (Large Gaussian Model) - Fast 3D Gaussian generation from images.
+    /// Uses subprocess-based Python inference for complete process isolation.
+    /// </summary>
+    public class LGMInference : IDisposable
     {
-        public LGMInference() : base("lgm") { }
+        private SubprocessInference? _inference;
+        private bool _disposed = false;
+        private Action<string>? _logCallback;
+
+        public LGMInference() { }
+
+        public bool IsLoaded => _inference?.IsLoaded ?? false;
+
+        public Action<string>? LogCallback
+        {
+            set
+            {
+                _logCallback = value;
+                if (_inference != null)
+                    _inference.OnLog += msg => _logCallback?.Invoke(msg);
+            }
+        }
+
+        public event Action<string, float, string>? OnProgress;
+
+        private void Log(string message)
+        {
+            Console.WriteLine(message);
+            _logCallback?.Invoke(message);
+        }
+
+        private string GetDeviceString()
+        {
+            var settings = IniSettings.Instance;
+            return settings.AIDevice switch
+            {
+                AIComputeDevice.CUDA => "cuda",
+                AIComputeDevice.MPS => "mps",
+                _ => "cpu"
+            };
+        }
+
+        private void Initialize()
+        {
+            if (_inference != null && _inference.IsLoaded) return;
+
+            try
+            {
+                Log("[LGM] Initializing subprocess inference...");
+                _inference = new SubprocessInference("lgm");
+                _inference.OnLog += msg => Log(msg);
+                _inference.OnProgress += (stage, progress, message) => OnProgress?.Invoke(stage, progress, message);
+
+                var settings = IniSettings.Instance;
+                string weightsPath = settings.LGMModelPath;
+                if (string.IsNullOrEmpty(weightsPath))
+                    weightsPath = "ashawkey/LGM";
+
+                string device = GetDeviceString();
+                Log($"[LGM] Loading model from: {weightsPath}");
+
+                if (_inference.Load(weightsPath, device))
+                    Log("[LGM] Model loaded successfully");
+                else
+                    Log("[LGM] Failed to load model");
+            }
+            catch (Exception ex)
+            {
+                Log($"[LGM] Error: {ex.Message}");
+            }
+        }
 
         public MeshData GenerateFromImage(string imagePath)
         {
             Initialize();
             var mesh = new MeshData();
-            if (!_isLoaded) return mesh;
+
+            if (_inference == null || !_inference.IsLoaded)
+            {
+                Log("[LGM] Model not loaded");
+                return mesh;
+            }
 
             try
             {
-                byte[] imgBytes = File.ReadAllBytes(imagePath);
-
-                // Get settings for model parameters
-                var settings = IniSettings.Instance;
-                int resolution = settings.LGMResolution;
-                int flowSteps = settings.LGMFlowSteps;
-
-                PythonService.Instance.ExecuteWithGIL((scope) =>
+                if (!File.Exists(imagePath))
                 {
-                    // CRITICAL: Use explicit PyObject method calls instead of dynamic
-                    // to prevent GC from collecting temporary arguments
-                    using var inferMethod = _bridgeModule!.GetAttr("infer_lgm");
-                    using var imgBytesPy = imgBytes.ToPython();
-                    using var resolutionPy = resolution.ToPython();
-                    using var flowStepsPy = flowSteps.ToPython();
-                    using var args = new PyTuple(new PyObject[] { imgBytesPy, resolutionPy, flowStepsPy });
+                    Log($"[LGM] Image not found: {imagePath}");
+                    return mesh;
+                }
 
-                    using var output = inferMethod.Invoke(args);
-                    if (output != null && !output.IsNone())
-                    {
-                        using var vertices = output["vertices"];
-                        using var faces = output["faces"];
-                        using var colors = output["colors"];
+                var imagesBytes = new List<byte[]> { File.ReadAllBytes(imagePath) };
+                Log($"[LGM] Processing image...");
 
-                        using var vShapeObj = vertices.GetAttr("shape");
-                        using var fShapeObj = faces.GetAttr("shape");
-                        long vCount = vShapeObj[0].As<long>();
-                        long fCount = fShapeObj[0].As<long>();
+                var meshes = _inference.Infer(imagesBytes, false);
 
-                        // Import builtins once for conversions
-                        using var builtins = Py.Import("builtins");
-                        using var floatFunc = builtins.GetAttr("float");
-                        using var intFunc = builtins.GetAttr("int");
-
-                        for(int i=0; i<vCount; i++)
-                        {
-                            using var vRow = vertices[i];
-                            using var cRow = colors[i];
-
-                            using var vx0 = vRow[0];
-                            using var vy0 = vRow[1];
-                            using var vz0 = vRow[2];
-                            using var cx0 = cRow[0];
-                            using var cy0 = cRow[1];
-                            using var cz0 = cRow[2];
-
-                            using var vxArgs = new PyTuple(new PyObject[] { vx0 });
-                            using var vyArgs = new PyTuple(new PyObject[] { vy0 });
-                            using var vzArgs = new PyTuple(new PyObject[] { vz0 });
-                            using var cxArgs = new PyTuple(new PyObject[] { cx0 });
-                            using var cyArgs = new PyTuple(new PyObject[] { cy0 });
-                            using var czArgs = new PyTuple(new PyObject[] { cz0 });
-
-                            using var vxPy = floatFunc.Invoke(vxArgs);
-                            using var vyPy = floatFunc.Invoke(vyArgs);
-                            using var vzPy = floatFunc.Invoke(vzArgs);
-                            using var cxPy = floatFunc.Invoke(cxArgs);
-                            using var cyPy = floatFunc.Invoke(cyArgs);
-                            using var czPy = floatFunc.Invoke(czArgs);
-
-                            mesh.Vertices.Add(new Vector3((float)vxPy.As<double>(), (float)vyPy.As<double>(), (float)vzPy.As<double>()));
-                            mesh.Colors.Add(new Vector3((float)cxPy.As<double>(), (float)cyPy.As<double>(), (float)czPy.As<double>()));
-                        }
-
-                        for(int i=0; i<fCount; i++)
-                        {
-                            using var fRow = faces[i];
-                            using var f0 = fRow[0];
-                            using var f1 = fRow[1];
-                            using var f2 = fRow[2];
-
-                            using var f0Args = new PyTuple(new PyObject[] { f0 });
-                            using var f1Args = new PyTuple(new PyObject[] { f1 });
-                            using var f2Args = new PyTuple(new PyObject[] { f2 });
-
-                            using var i0Py = intFunc.Invoke(f0Args);
-                            using var i1Py = intFunc.Invoke(f1Args);
-                            using var i2Py = intFunc.Invoke(f2Args);
-
-                            mesh.Indices.Add((int)i0Py.As<long>());
-                            mesh.Indices.Add((int)i1Py.As<long>());
-                            mesh.Indices.Add((int)i2Py.As<long>());
-                        }
-                    }
-                });
+                if (meshes.Count > 0)
+                {
+                    mesh = meshes[0];
+                    Log($"[LGM] Generated mesh with {mesh.Vertices.Count} vertices");
+                }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"LGM Inference failed: {ex.Message}");
+                Log($"[LGM] Error: {ex.Message}");
             }
+
             return mesh;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _inference?.Dispose();
+            _inference = null;
+            _disposed = true;
         }
     }
 }
