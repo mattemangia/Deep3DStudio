@@ -58,23 +58,34 @@ namespace Deep3DStudio.Model
         private string GetWeightsPath()
         {
             var settings = IniSettings.Instance;
-            string configuredPath = settings.Must3rModelPath;
+            string configuredPath = settings.Must3rModelPath; // Default: "models/must3r"
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
 
-            if (configuredPath.Contains("/") && !Path.IsPathRooted(configuredPath))
-                return configuredPath;
-
-            if (Path.IsPathRooted(configuredPath) && File.Exists(configuredPath))
-                return configuredPath;
-
+            // Check common locations for local weights file
             string[] possiblePaths = new[]
             {
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, configuredPath),
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "must3r_weights.pth"),
+                // Primary: configured path + weights file (models/must3r/must3r_weights.pth)
+                Path.Combine(baseDir, configuredPath, "must3r_weights.pth"),
+                // Direct models folder
+                Path.Combine(baseDir, "models", "must3r", "must3r_weights.pth"),
+                Path.Combine(baseDir, "models", "must3r_weights.pth"),
+                // Alternative name
+                Path.Combine(baseDir, "models", "MUSt3R_512.pth"),
+                // If configuredPath is a direct file path
+                Path.IsPathRooted(configuredPath) ? configuredPath : Path.Combine(baseDir, configuredPath),
             };
 
             foreach (var path in possiblePaths)
-                if (File.Exists(path)) return path;
+            {
+                if (File.Exists(path))
+                {
+                    Log($"[Must3r] Found weights at: {path}");
+                    return path;
+                }
+            }
 
+            // Fallback to HuggingFace model identifier
+            Log("[Must3r] Local weights not found, using HuggingFace model identifier");
             return "naver/MUSt3R";
         }
 
