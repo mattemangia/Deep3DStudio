@@ -1201,29 +1201,32 @@ def infer_dust3r(images_bytes_list):
         for i, img_bytes in enumerate(images_bytes_list):
             img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
 
-            # Pre-resize large images to prevent memory crashes
-            max_dim = 1024
+            # Pre-resize images to target size (512) to avoid resize inside load_images
+            # which can cause memory corruption with certain image sizes
+            target_size = 512
             w, h = img.size
-            if max(w, h) > max_dim:
-                scale = max_dim / max(w, h)
-                new_w, new_h = int(w * scale), int(h * scale)
-                print(f"[Py] Pre-resizing image {i} from {w}x{h} to {new_w}x{new_h}")
+            if w != target_size or h != target_size:
+                # Maintain aspect ratio, resize so longest side is target_size
+                if w > h:
+                    new_w = target_size
+                    new_h = int(h * target_size / w)
+                else:
+                    new_h = target_size
+                    new_w = int(w * target_size / h)
+                # Ensure dimensions are at least 1
+                new_w = max(1, new_w)
+                new_h = max(1, new_h)
+                print(f"[Py] Pre-resizing Dust3r image {i} from {w}x{h} to {new_w}x{new_h}")
                 img = img.resize((new_w, new_h), Image.LANCZOS)
 
-            # Save to temp file first
+            # Save to temp file
             fd, path = tempfile.mkstemp(suffix='.png')
             os.close(fd)
             img.save(path)
             temp_files.append(path)
 
-            # Keep a smaller reference for color extraction later (downscaled copy)
-            # This reduces memory pressure from keeping full-res PIL images
-            small_size = min(img.size[0], 512), min(img.size[1], 512)
-            if img.size != small_size:
-                pil_images.append(img.resize(small_size, Image.LANCZOS))
-                del img  # Release original full-res image
-            else:
-                pil_images.append(img)
+            # Keep reference for color extraction later
+            pil_images.append(img)
 
         if isinstance(model, dict) and 'encoder' in model:
             device = next(model['encoder'].parameters()).device
@@ -1423,28 +1426,32 @@ def infer_mast3r(images_bytes_list, use_retrieval=True):
         for i, img_bytes in enumerate(images_bytes_list):
             img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
 
-            max_dim = 1024
+            # Pre-resize images to target size (512) to avoid resize inside load_images
+            # which can cause memory corruption with certain image sizes
+            target_size = 512
             w, h = img.size
-            if max(w, h) > max_dim:
-                scale = max_dim / max(w, h)
-                new_w, new_h = int(w * scale), int(h * scale)
-                print(f"[Py] - adding {temp_files[-1] if temp_files else 'image'} with resolution {w}x{h} --> {new_w}x{new_h}")
+            if w != target_size or h != target_size:
+                # Maintain aspect ratio, resize so longest side is target_size
+                if w > h:
+                    new_w = target_size
+                    new_h = int(h * target_size / w)
+                else:
+                    new_h = target_size
+                    new_w = int(w * target_size / h)
+                # Ensure dimensions are at least 1
+                new_w = max(1, new_w)
+                new_h = max(1, new_h)
+                print(f"[Py] Pre-resizing MASt3R image {i} from {w}x{h} to {new_w}x{new_h}")
                 img = img.resize((new_w, new_h), Image.LANCZOS)
 
-            # Save to temp file first
+            # Save to temp file
             fd, path = tempfile.mkstemp(suffix='.png')
             os.close(fd)
             img.save(path)
             temp_files.append(path)
 
-            # Keep a smaller reference for color extraction later (downscaled copy)
-            # This reduces memory pressure from keeping full-res PIL images
-            small_size = min(img.size[0], 512), min(img.size[1], 512)
-            if img.size != small_size:
-                pil_images.append(img.resize(small_size, Image.LANCZOS))
-                del img  # Release original full-res image
-            else:
-                pil_images.append(img)
+            # Keep reference for color extraction later
+            pil_images.append(img)
 
         if isinstance(model, dict) and 'encoder' in model:
             device = next(model['encoder'].parameters()).device
@@ -1661,28 +1668,32 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
         for i, img_bytes in enumerate(images_bytes_list):
             img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
 
-            max_dim = 1024
+            # Pre-resize images to target size (512) to avoid resize inside load_images
+            # which can cause memory corruption with certain image sizes
+            target_size = 512
             w, h = img.size
-            if max(w, h) > max_dim:
-                scale = max_dim / max(w, h)
-                new_w, new_h = int(w * scale), int(h * scale)
+            if w != target_size or h != target_size:
+                # Maintain aspect ratio, resize so longest side is target_size
+                if w > h:
+                    new_w = target_size
+                    new_h = int(h * target_size / w)
+                else:
+                    new_h = target_size
+                    new_w = int(w * target_size / h)
+                # Ensure dimensions are at least 1
+                new_w = max(1, new_w)
+                new_h = max(1, new_h)
                 print(f"[Py] Pre-resizing MUSt3R image {i} from {w}x{h} to {new_w}x{new_h}")
                 img = img.resize((new_w, new_h), Image.LANCZOS)
 
-            # Save to temp file first
+            # Save to temp file
             fd, path = tempfile.mkstemp(suffix='.png')
             os.close(fd)
             img.save(path)
             temp_files.append(path)
 
-            # Keep a smaller reference for color extraction later (downscaled copy)
-            # This reduces memory pressure from keeping full-res PIL images
-            small_size = min(img.size[0], 512), min(img.size[1], 512)
-            if img.size != small_size:
-                pil_images.append(img.resize(small_size, Image.LANCZOS))
-                del img  # Release original full-res image
-            else:
-                pil_images.append(img)
+            # Keep reference for color extraction later
+            pil_images.append(img)
 
         if isinstance(model, dict) and 'encoder' in model:
             device = next(model['encoder'].parameters()).device
