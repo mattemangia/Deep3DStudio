@@ -52,6 +52,39 @@ namespace Deep3DStudio.Model.AIModels
             };
         }
 
+        private string GetWeightsPath()
+        {
+            var settings = IniSettings.Instance;
+            string configuredPath = settings.UniRigModelPath; // Default: "models"
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+
+            // Check common locations for local weights file
+            string[] possiblePaths = new[]
+            {
+                // Primary: configured path + weights file (models/unirig_weights.pth)
+                Path.Combine(baseDir, configuredPath, "unirig_weights.pth"),
+                // Direct models folder
+                Path.Combine(baseDir, "models", "unirig_weights.pth"),
+                // Alternative names
+                Path.Combine(baseDir, "models", "unirig", "unirig_weights.pth"),
+                // If configuredPath is a direct file path
+                Path.IsPathRooted(configuredPath) ? configuredPath : Path.Combine(baseDir, configuredPath),
+            };
+
+            foreach (var path in possiblePaths)
+            {
+                if (File.Exists(path))
+                {
+                    Log($"[UniRig] Found weights at: {path}");
+                    return path;
+                }
+            }
+
+            // Fallback to default path
+            Log("[UniRig] Local weights not found");
+            return Path.Combine(baseDir, "models", "unirig_weights.pth");
+        }
+
         private void Initialize()
         {
             if (_inference != null && _inference.IsLoaded) return;
@@ -67,11 +100,7 @@ namespace Deep3DStudio.Model.AIModels
                     OnLoadProgress?.Invoke(stage, progress, message);
                 };
 
-                var settings = IniSettings.Instance;
-                string weightsPath = settings.UniRigModelPath;
-                if (string.IsNullOrEmpty(weightsPath))
-                    weightsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "unirig_weights.pth");
-
+                string weightsPath = GetWeightsPath();
                 string device = GetDeviceString();
                 Log($"[UniRig] Loading model from: {weightsPath}");
 

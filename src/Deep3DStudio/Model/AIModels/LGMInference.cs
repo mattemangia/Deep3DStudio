@@ -51,6 +51,40 @@ namespace Deep3DStudio.Model.AIModels
             };
         }
 
+        private string GetWeightsPath()
+        {
+            var settings = IniSettings.Instance;
+            string configuredPath = settings.LGMModelPath; // Default: "models"
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+
+            // Check common locations for local weights file
+            string[] possiblePaths = new[]
+            {
+                // Primary: configured path + weights file (models/model_fp16_fixrot.safetensors)
+                Path.Combine(baseDir, configuredPath, "model_fp16_fixrot.safetensors"),
+                // Direct models folder
+                Path.Combine(baseDir, "models", "model_fp16_fixrot.safetensors"),
+                // Alternative names
+                Path.Combine(baseDir, "models", "lgm_weights.safetensors"),
+                Path.Combine(baseDir, "models", "lgm", "model_fp16_fixrot.safetensors"),
+                // If configuredPath is a direct file path
+                Path.IsPathRooted(configuredPath) ? configuredPath : Path.Combine(baseDir, configuredPath),
+            };
+
+            foreach (var path in possiblePaths)
+            {
+                if (File.Exists(path))
+                {
+                    Log($"[LGM] Found weights at: {path}");
+                    return path;
+                }
+            }
+
+            // Fallback to HuggingFace model identifier
+            Log("[LGM] Local weights not found, using HuggingFace model identifier");
+            return "ashawkey/LGM";
+        }
+
         private void Initialize()
         {
             if (_inference != null && _inference.IsLoaded) return;
@@ -66,11 +100,7 @@ namespace Deep3DStudio.Model.AIModels
                     OnLoadProgress?.Invoke(stage, progress, message);
                 };
 
-                var settings = IniSettings.Instance;
-                string weightsPath = settings.LGMModelPath;
-                if (string.IsNullOrEmpty(weightsPath))
-                    weightsPath = "ashawkey/LGM";
-
+                string weightsPath = GetWeightsPath();
                 string device = GetDeviceString();
                 Log($"[LGM] Loading model from: {weightsPath}");
 

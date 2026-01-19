@@ -51,6 +51,39 @@ namespace Deep3DStudio.Model.AIModels
             };
         }
 
+        private string GetWeightsPath()
+        {
+            var settings = IniSettings.Instance;
+            string configuredPath = settings.TripoSFModelPath; // Default: "models"
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+
+            // Check common locations for local weights file
+            string[] possiblePaths = new[]
+            {
+                // Primary: configured path + weights file (models/triposf_weights.pth)
+                Path.Combine(baseDir, configuredPath, "triposf_weights.pth"),
+                // Direct models folder
+                Path.Combine(baseDir, "models", "triposf_weights.pth"),
+                // Alternative name
+                Path.Combine(baseDir, "models", "pretrained_TripoSFVAE_256i1024o.safetensors"),
+                // If configuredPath is a direct file path
+                Path.IsPathRooted(configuredPath) ? configuredPath : Path.Combine(baseDir, configuredPath),
+            };
+
+            foreach (var path in possiblePaths)
+            {
+                if (File.Exists(path))
+                {
+                    Log($"[TripoSF] Found weights at: {path}");
+                    return path;
+                }
+            }
+
+            // Fallback to HuggingFace model identifier
+            Log("[TripoSF] Local weights not found, using HuggingFace model identifier");
+            return "VAST-AI/TripoSF";
+        }
+
         private void Initialize()
         {
             if (_inference != null && _inference.IsLoaded) return;
@@ -66,11 +99,7 @@ namespace Deep3DStudio.Model.AIModels
                     OnLoadProgress?.Invoke(stage, progress, message);
                 };
 
-                var settings = IniSettings.Instance;
-                string weightsPath = settings.TripoSFModelPath;
-                if (string.IsNullOrEmpty(weightsPath))
-                    weightsPath = "stabilityai/TripoSF";
-
+                string weightsPath = GetWeightsPath();
                 string device = GetDeviceString();
                 Log($"[TripoSF] Loading model from: {weightsPath}");
 

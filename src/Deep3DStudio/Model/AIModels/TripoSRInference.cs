@@ -51,6 +51,39 @@ namespace Deep3DStudio.Model.AIModels
             };
         }
 
+        private string GetWeightsPath()
+        {
+            var settings = IniSettings.Instance;
+            string configuredPath = settings.TripoSRModelPath; // Default: "models"
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+
+            // Check common locations for local weights file
+            string[] possiblePaths = new[]
+            {
+                // Primary: configured path + weights file (models/triposr_weights.pth)
+                Path.Combine(baseDir, configuredPath, "triposr_weights.pth"),
+                // Direct models folder
+                Path.Combine(baseDir, "models", "triposr_weights.pth"),
+                // Alternative name
+                Path.Combine(baseDir, "models", "model.ckpt"),
+                // If configuredPath is a direct file path
+                Path.IsPathRooted(configuredPath) ? configuredPath : Path.Combine(baseDir, configuredPath),
+            };
+
+            foreach (var path in possiblePaths)
+            {
+                if (File.Exists(path))
+                {
+                    Log($"[TripoSR] Found weights at: {path}");
+                    return path;
+                }
+            }
+
+            // Fallback to HuggingFace model identifier
+            Log("[TripoSR] Local weights not found, using HuggingFace model identifier");
+            return "stabilityai/TripoSR";
+        }
+
         private void Initialize()
         {
             if (_inference != null && _inference.IsLoaded) return;
@@ -66,11 +99,7 @@ namespace Deep3DStudio.Model.AIModels
                     OnLoadProgress?.Invoke(stage, progress, message);
                 };
 
-                var settings = IniSettings.Instance;
-                string weightsPath = settings.TripoSRModelPath;
-                if (string.IsNullOrEmpty(weightsPath))
-                    weightsPath = "stabilityai/TripoSR";
-
+                string weightsPath = GetWeightsPath();
                 string device = GetDeviceString();
                 Log($"[TripoSR] Loading model from: {weightsPath}");
 

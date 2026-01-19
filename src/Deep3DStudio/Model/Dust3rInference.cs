@@ -57,23 +57,33 @@ namespace Deep3DStudio.Model
         private string GetWeightsPath()
         {
             var settings = IniSettings.Instance;
-            string configuredPath = settings.Dust3rModelPath;
+            string configuredPath = settings.Dust3rModelPath; // Default: "models"
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
 
-            if (configuredPath.Contains("/") && !Path.IsPathRooted(configuredPath))
-                return configuredPath;
-
-            if (Path.IsPathRooted(configuredPath) && File.Exists(configuredPath))
-                return configuredPath;
-
+            // Check common locations for local weights file
             string[] possiblePaths = new[]
             {
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, configuredPath),
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "dust3r_weights.pth"),
+                // Primary: configured path + weights file (models/dust3r_weights.pth)
+                Path.Combine(baseDir, configuredPath, "dust3r_weights.pth"),
+                // Direct models folder
+                Path.Combine(baseDir, "models", "dust3r_weights.pth"),
+                // Alternative name
+                Path.Combine(baseDir, "models", "DUSt3R_ViTLarge_BaseDecoder_512_dpt.pth"),
+                // If configuredPath is a direct file path
+                Path.IsPathRooted(configuredPath) ? configuredPath : Path.Combine(baseDir, configuredPath),
             };
 
             foreach (var path in possiblePaths)
-                if (File.Exists(path)) return path;
+            {
+                if (File.Exists(path))
+                {
+                    Log($"[Dust3r] Found weights at: {path}");
+                    return path;
+                }
+            }
 
+            // Fallback to HuggingFace model identifier
+            Log("[Dust3r] Local weights not found, using HuggingFace model identifier");
             return "naver/DUSt3R_ViTLarge_BaseDecoder_512_dpt";
         }
 

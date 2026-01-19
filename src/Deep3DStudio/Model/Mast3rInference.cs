@@ -63,37 +63,34 @@ namespace Deep3DStudio.Model
         private string GetWeightsPath()
         {
             var settings = IniSettings.Instance;
-            string configuredPath = settings.Mast3rModelPath;
+            string configuredPath = settings.Mast3rModelPath; // Default: "models/mast3r"
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
 
-            // Handle HuggingFace-style path
-            if (configuredPath.Contains("/") && !Path.IsPathRooted(configuredPath) && !configuredPath.StartsWith("models"))
-            {
-                return configuredPath; // Return as-is for from_pretrained
-            }
-
-            // Handle local path
-            if (Path.IsPathRooted(configuredPath) && File.Exists(configuredPath))
-            {
-                return configuredPath;
-            }
-
-            // Check common locations
+            // Check common locations for local weights file
             string[] possiblePaths = new[]
             {
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, configuredPath),
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "mast3r_weights.pth"),
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth"),
+                // Primary: configured path + weights file (models/mast3r/mast3r_weights.pth)
+                Path.Combine(baseDir, configuredPath, "mast3r_weights.pth"),
+                // Alternative names
+                Path.Combine(baseDir, configuredPath, "MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth"),
+                // Direct file paths
+                Path.Combine(baseDir, "models", "mast3r", "mast3r_weights.pth"),
+                Path.Combine(baseDir, "models", "mast3r_weights.pth"),
+                // If configuredPath is a direct file path
+                Path.IsPathRooted(configuredPath) ? configuredPath : Path.Combine(baseDir, configuredPath),
             };
 
             foreach (var path in possiblePaths)
             {
                 if (File.Exists(path))
                 {
+                    Log($"[Mast3r] Found weights at: {path}");
                     return path;
                 }
             }
 
-            // Return default HuggingFace path
+            // Fallback to HuggingFace model identifier (will download if not cached)
+            Log("[Mast3r] Local weights not found, using HuggingFace model identifier");
             return "naver/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric";
         }
 

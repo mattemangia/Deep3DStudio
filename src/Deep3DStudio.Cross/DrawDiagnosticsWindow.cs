@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -141,9 +142,99 @@ namespace Deep3DStudio
                         Log($"[FAIL] {name}: Missing {file} (expected at {fullPath})");
                 }
 
-                SetProgress(0.5f, "Initializing Python...");
+                SetProgress(0.4f, "Checking Subprocess Inference...");
 
-                // 3. Import Libs
+                // 3. Check Subprocess Inference System (new subprocess-based approach)
+                try
+                {
+                    Log("[INFO] Checking subprocess inference system...");
+
+                    // Check for subprocess_inference.py script
+                    string exeDir = AppDomain.CurrentDomain.BaseDirectory;
+                    string[] scriptPaths = new[]
+                    {
+                        Path.Combine(exeDir, "subprocess_inference.py"),
+                        Path.Combine(exeDir, "Embedded", "Python", "subprocess_inference.py")
+                    };
+
+                    bool scriptFound = false;
+                    foreach (var scriptPath in scriptPaths)
+                    {
+                        if (File.Exists(scriptPath))
+                        {
+                            Log($"[OK] Subprocess script found: {scriptPath}");
+                            scriptFound = true;
+                            break;
+                        }
+                    }
+
+                    if (!scriptFound)
+                    {
+                        Log("[INFO] Subprocess script not found in filesystem, checking embedded resources...");
+                        var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+                        var resources = assembly.GetManifestResourceNames();
+                        bool embeddedFound = resources.Any(r => r.EndsWith("subprocess_inference.py"));
+                        if (embeddedFound)
+                            Log("[OK] Subprocess script found as embedded resource.");
+                        else
+                            Log("[WARN] Subprocess script not found. It may be embedded in main assembly.");
+                    }
+
+                    // Test subprocess Python execution
+                    string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                    string appDataPythonDir = Path.Combine(appData, "Deep3DStudio", "python");
+                    string localPythonDir = Path.Combine(exeDir, "python");
+
+                    string? pythonExe = FindPythonExecutable(appDataPythonDir) ??
+                                        FindPythonExecutable(localPythonDir);
+
+                    if (pythonExe != null)
+                    {
+                        Log($"[OK] Python executable for subprocess: {pythonExe}");
+
+                        // Test Python can run
+                        try
+                        {
+                            var psi = new ProcessStartInfo
+                            {
+                                FileName = pythonExe,
+                                Arguments = "--version",
+                                RedirectStandardOutput = true,
+                                RedirectStandardError = true,
+                                UseShellExecute = false,
+                                CreateNoWindow = true
+                            };
+
+                            using var proc = Process.Start(psi);
+                            if (proc != null)
+                            {
+                                string output = proc.StandardOutput.ReadToEnd() + proc.StandardError.ReadToEnd();
+                                proc.WaitForExit(5000);
+                                if (proc.ExitCode == 0)
+                                    Log($"[OK] Python subprocess test: {output.Trim()}");
+                                else
+                                    Log($"[WARN] Python subprocess returned exit code {proc.ExitCode}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"[FAIL] Could not test Python subprocess: {ex.Message}");
+                        }
+                    }
+                    else
+                    {
+                        Log("[WARN] Could not find Python executable for subprocess inference.");
+                        Log("       Subprocess-based AI models may not work.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log($"[ERROR] Subprocess inference check: {ex.Message}");
+                }
+
+                SetProgress(0.5f, "Initializing Python (pythonnet)...");
+
+                // 4. Import Libs (pythonnet - used for some features)
                 try
                 {
                     PythonService.Instance.Initialize();
@@ -262,6 +353,53 @@ namespace Deep3DStudio
             {
                 File.WriteAllText(path, _logText);
             }
+        }
+
+        /// <summary>
+        /// Recursively search for Python executable in the given directory.
+        /// </summary>
+        private string? FindPythonExecutable(string rootDir)
+        {
+            if (!Directory.Exists(rootDir)) return null;
+
+            bool isWindows = Environment.OSVersion.Platform == PlatformID.Win32NT;
+
+            var stack = new Stack<string>();
+            stack.Push(rootDir);
+            int safetyCounter = 0;
+
+            while (stack.Count > 0 && safetyCounter++ < 500)
+            {
+                string currentDir = stack.Pop();
+
+                string[] candidates = isWindows
+                    ? new[] { Path.Combine(currentDir, "python.exe") }
+                    : new[] {
+                        Path.Combine(currentDir, "bin", "python3"),
+                        Path.Combine(currentDir, "bin", "python"),
+                        Path.Combine(currentDir, "python3"),
+                        Path.Combine(currentDir, "python")
+                    };
+
+                foreach (var candidate in candidates)
+                {
+                    if (File.Exists(candidate))
+                        return candidate;
+                }
+
+                try
+                {
+                    foreach (string dir in Directory.GetDirectories(currentDir))
+                    {
+                        string dirName = Path.GetFileName(dir);
+                        if (dirName != "__pycache__" && dirName != "site-packages" && !dirName.StartsWith("."))
+                            stack.Push(dir);
+                    }
+                }
+                catch { }
+            }
+
+            return null;
         }
     }
 }

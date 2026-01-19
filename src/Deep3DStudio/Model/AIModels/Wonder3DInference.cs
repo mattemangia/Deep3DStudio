@@ -51,6 +51,39 @@ namespace Deep3DStudio.Model.AIModels
             };
         }
 
+        private string GetWeightsPath()
+        {
+            var settings = IniSettings.Instance;
+            string configuredPath = settings.Wonder3DModelPath; // Default: "models/wonder3d"
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+
+            // Check common locations for local model folder (Wonder3D uses a folder structure)
+            string[] possiblePaths = new[]
+            {
+                // Primary: configured path (models/wonder3d)
+                Path.Combine(baseDir, configuredPath),
+                // Direct models folder
+                Path.Combine(baseDir, "models", "wonder3d"),
+                // If configuredPath is rooted
+                configuredPath,
+            };
+
+            foreach (var path in possiblePaths)
+            {
+                // Check for model_index.json which indicates a valid Wonder3D model folder
+                string modelIndex = Path.Combine(path, "model_index.json");
+                if (File.Exists(modelIndex))
+                {
+                    Log($"[Wonder3D] Found model at: {path}");
+                    return path;
+                }
+            }
+
+            // Fallback to HuggingFace model identifier
+            Log("[Wonder3D] Local model not found, using HuggingFace model identifier");
+            return "flamehaze1115/wonder3d-v1.0";
+        }
+
         private void Initialize()
         {
             if (_inference != null && _inference.IsLoaded) return;
@@ -66,11 +99,7 @@ namespace Deep3DStudio.Model.AIModels
                     OnLoadProgress?.Invoke(stage, progress, message);
                 };
 
-                var settings = IniSettings.Instance;
-                string weightsPath = settings.Wonder3DModelPath;
-                if (string.IsNullOrEmpty(weightsPath))
-                    weightsPath = "flamehaze1115/wonder3d-v1.0";
-
+                string weightsPath = GetWeightsPath();
                 string device = GetDeviceString();
                 Log($"[Wonder3D] Loading model from: {weightsPath}");
 
