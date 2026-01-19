@@ -51,40 +51,50 @@ namespace Deep3DStudio.Python
 
         private string GetPythonPath()
         {
-            var settings = IniSettings.Instance;
-            string condaEnv = settings.CondaEnvironment;
+            bool isWindows = Environment.OSVersion.Platform == PlatformID.Win32NT;
 
-            // Try common locations
-            string[] paths = new[]
+            // 1. First check LocalApplicationData/Deep3DStudio/python (where PythonService extracts it)
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string appDataPythonDir = Path.Combine(appData, "Deep3DStudio", "python");
+
+            string? pythonExe = FindPythonExecutable(appDataPythonDir, isWindows);
+            if (pythonExe != null)
             {
-                // Windows conda
-                $@"C:\Users\{Environment.UserName}\miniconda3\envs\{condaEnv}\python.exe",
-                $@"C:\Users\{Environment.UserName}\anaconda3\envs\{condaEnv}\python.exe",
-                $@"C:\ProgramData\miniconda3\envs\{condaEnv}\python.exe",
-                $@"C:\ProgramData\anaconda3\envs\{condaEnv}\python.exe",
-                // Linux/macOS conda
-                $"/home/{Environment.UserName}/miniconda3/envs/{condaEnv}/bin/python",
-                $"/home/{Environment.UserName}/anaconda3/envs/{condaEnv}/bin/python",
-                $"/opt/conda/envs/{condaEnv}/bin/python",
-                // Fallback to system python
-                "python3",
-                "python"
-            };
+                Log($"Found Python in AppData: {pythonExe}");
+                return pythonExe;
+            }
 
-            foreach (var path in paths)
+            // 2. Check for local python directory (dev mode)
+            string exeDir = AppDomain.CurrentDomain.BaseDirectory;
+            string localPythonDir = Path.Combine(exeDir, "python");
+
+            pythonExe = FindPythonExecutable(localPythonDir, isWindows);
+            if (pythonExe != null)
+            {
+                Log($"Found local Python: {pythonExe}");
+                return pythonExe;
+            }
+
+            // 3. Try system Python
+            string[] systemPaths = isWindows
+                ? new[] { "python.exe", "python3.exe" }
+                : new[] { "/usr/bin/python3", "/usr/local/bin/python3" };
+
+            foreach (var path in systemPaths)
             {
                 if (File.Exists(path))
                 {
+                    Log($"Using system Python: {path}");
                     return path;
                 }
             }
 
-            // Try using 'which' or 'where' to find python
+            // 4. Try using 'which' or 'where' to find python
             try
             {
                 var psi = new ProcessStartInfo
                 {
-                    FileName = Environment.OSVersion.Platform == PlatformID.Win32NT ? "where" : "which",
+                    FileName = isWindows ? "where" : "which",
                     Arguments = "python3",
                     RedirectStandardOutput = true,
                     UseShellExecute = false,
@@ -98,13 +108,66 @@ namespace Deep3DStudio.Python
                     proc.WaitForExit();
                     if (!string.IsNullOrEmpty(output) && File.Exists(output))
                     {
+                        Log($"Found Python via which/where: {output}");
                         return output;
                     }
                 }
             }
             catch { }
 
-            return "python"; // Last resort
+            Log("Warning: Could not find Python. Please ensure python_env.zip is extracted.");
+            return isWindows ? "python.exe" : "python3"; // Last resort
+        }
+
+        /// <summary>
+        /// Recursively search for Python executable in the given directory.
+        /// This handles the nested structure of indygreg python-build-standalone.
+        /// </summary>
+        private string? FindPythonExecutable(string rootDir, bool isWindows)
+        {
+            if (!Directory.Exists(rootDir)) return null;
+
+            string exeName = isWindows ? "python.exe" : "python3";
+
+            // Search for the executable using a DFS
+            var stack = new Stack<string>();
+            stack.Push(rootDir);
+            int safetyCounter = 0;
+
+            while (stack.Count > 0 && safetyCounter++ < 500)
+            {
+                string currentDir = stack.Pop();
+
+                // Check common locations in this directory
+                string[] candidates = isWindows
+                    ? new[] { Path.Combine(currentDir, "python.exe") }
+                    : new[] {
+                        Path.Combine(currentDir, "bin", "python3"),
+                        Path.Combine(currentDir, "bin", "python"),
+                        Path.Combine(currentDir, "python3"),
+                        Path.Combine(currentDir, "python")
+                    };
+
+                foreach (var candidate in candidates)
+                {
+                    if (File.Exists(candidate))
+                        return candidate;
+                }
+
+                try
+                {
+                    foreach (string dir in Directory.GetDirectories(currentDir))
+                    {
+                        string dirName = Path.GetFileName(dir);
+                        // Skip common non-python directories
+                        if (dirName != "__pycache__" && dirName != "site-packages" && !dirName.StartsWith("."))
+                            stack.Push(dir);
+                    }
+                }
+                catch { /* Ignore access errors */ }
+            }
+
+            return null;
         }
 
         private string GetScriptPath()
@@ -214,17 +277,31 @@ namespace Deep3DStudio.Python
                 StandardErrorEncoding = Encoding.UTF8
             };
 
-            // Set up environment
-            var settings = IniSettings.Instance;
-            if (!string.IsNullOrEmpty(settings.CondaEnvironment))
+            // Set up environment - add Python directory to PATH
+            string pythonDir = Path.GetDirectoryName(_pythonPath) ?? "";
+            if (!string.IsNullOrEmpty(pythonDir))
             {
-                // Add conda environment to PATH
-                string condaBase = Path.GetDirectoryName(Path.GetDirectoryName(_pythonPath)) ?? "";
-                if (!string.IsNullOrEmpty(condaBase))
+                string currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+                string pathSep = Environment.OSVersion.Platform == PlatformID.Win32NT ? ";" : ":";
+                string scriptsDir = Environment.OSVersion.Platform == PlatformID.Win32NT
+                    ? Path.Combine(pythonDir, "Scripts")
+                    : pythonDir; // On Unix, scripts are in the same bin directory
+                string libDir = Path.Combine(pythonDir, "Library", "bin");
+
+                psi.Environment["PATH"] = $"{pythonDir}{pathSep}{scriptsDir}{pathSep}{libDir}{pathSep}{currentPath}";
+
+                // Set PYTHONHOME for the standalone Python distribution
+                string pythonHome = Path.GetDirectoryName(pythonDir) ?? pythonDir;
+                if (Environment.OSVersion.Platform != PlatformID.Win32NT)
                 {
-                    string currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
-                    psi.Environment["PATH"] = $"{condaBase};{Path.Combine(condaBase, "Scripts")};{Path.Combine(condaBase, "Library", "bin")};{currentPath}";
+                    // On Unix, python binary is in bin/, so go up one level
+                    pythonHome = Path.GetDirectoryName(pythonDir) ?? pythonDir;
                 }
+                else
+                {
+                    pythonHome = pythonDir;
+                }
+                psi.Environment["PYTHONHOME"] = pythonHome;
             }
 
             using var process = new Process { StartInfo = psi };

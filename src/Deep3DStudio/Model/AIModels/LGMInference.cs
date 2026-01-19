@@ -11,7 +11,7 @@ namespace Deep3DStudio.Model.AIModels
     /// LGM (Large Gaussian Model) - Fast 3D Gaussian generation from images.
     /// Uses subprocess-based Python inference for complete process isolation.
     /// </summary>
-    public class LGMInference : IDisposable
+    public class LGMInference : IDisposable, IInferenceWithProgress
     {
         private SubprocessInference? _inference;
         private bool _disposed = false;
@@ -32,6 +32,7 @@ namespace Deep3DStudio.Model.AIModels
         }
 
         public event Action<string, float, string>? OnProgress;
+        public event Action<string, float, string>? OnLoadProgress;
 
         private void Log(string message)
         {
@@ -59,7 +60,11 @@ namespace Deep3DStudio.Model.AIModels
                 Log("[LGM] Initializing subprocess inference...");
                 _inference = new SubprocessInference("lgm");
                 _inference.OnLog += msg => Log(msg);
-                _inference.OnProgress += (stage, progress, message) => OnProgress?.Invoke(stage, progress, message);
+                _inference.OnProgress += (stage, progress, message) =>
+                {
+                    OnProgress?.Invoke(stage, progress, message);
+                    OnLoadProgress?.Invoke(stage, progress, message);
+                };
 
                 var settings = IniSettings.Instance;
                 string weightsPath = settings.LGMModelPath;

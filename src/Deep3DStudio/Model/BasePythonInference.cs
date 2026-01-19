@@ -7,7 +7,7 @@ using Deep3DStudio.Configuration;
 
 namespace Deep3DStudio.Model
 {
-    public abstract class BasePythonInference : IDisposable
+    public abstract class BasePythonInference : IDisposable, IInferenceWithProgress
     {
         // CRITICAL: Use PyObject instead of dynamic to prevent GC from collecting
         // temporary PyObjects during method calls, which causes AccessViolationException

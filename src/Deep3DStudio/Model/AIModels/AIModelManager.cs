@@ -225,7 +225,7 @@ namespace Deep3DStudio.Model.AIModels
 
         private AIModelManager() { }
 
-        private T? CreateInferenceWithProgress<T>(ref T? field, Func<T> factory) where T : BasePythonInference
+        private T? CreateInferenceWithProgress<T>(ref T? field, Func<T> factory) where T : class, IInferenceWithProgress
         {
             if (field == null)
             {
