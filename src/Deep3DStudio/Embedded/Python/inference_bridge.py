@@ -1207,14 +1207,23 @@ def infer_dust3r(images_bytes_list):
             if max(w, h) > max_dim:
                 scale = max_dim / max(w, h)
                 new_w, new_h = int(w * scale), int(h * scale)
-                print(f"Pre-resizing image {i} from {w}x{h} to {new_w}x{new_h}")
+                print(f"[Py] Pre-resizing image {i} from {w}x{h} to {new_w}x{new_h}")
                 img = img.resize((new_w, new_h), Image.LANCZOS)
 
-            pil_images.append(img)
+            # Save to temp file first
             fd, path = tempfile.mkstemp(suffix='.png')
             os.close(fd)
             img.save(path)
             temp_files.append(path)
+
+            # Keep a smaller reference for color extraction later (downscaled copy)
+            # This reduces memory pressure from keeping full-res PIL images
+            small_size = min(img.size[0], 512), min(img.size[1], 512)
+            if img.size != small_size:
+                pil_images.append(img.resize(small_size, Image.LANCZOS))
+                del img  # Release original full-res image
+            else:
+                pil_images.append(img)
 
         if isinstance(model, dict) and 'encoder' in model:
             device = next(model['encoder'].parameters()).device
@@ -1253,13 +1262,23 @@ def infer_dust3r(images_bytes_list):
                 masks = scene.get_masks()
 
                 for i, img in enumerate(pil_images):
-                    pts = pts3d[i].detach().cpu().numpy()
-                    mask = masks[i].detach().cpu().numpy()
+                    # Extract data and immediately free GPU tensors
+                    pts_tensor = pts3d[i]
+                    mask_tensor = masks[i]
+                    pts = pts_tensor.detach().cpu().numpy()
+                    mask = mask_tensor.detach().cpu().numpy()
+
+                    # Free GPU tensor references immediately
+                    del pts_tensor, mask_tensor
+
                     img_np = _fit_image(img, pts.shape[:2])
 
                     mask = _fit_mask(mask, pts.shape[:2])
                     valid_pts = pts[mask]
                     valid_colors = img_np[mask]
+
+                    # Free intermediate arrays
+                    del pts, mask, img_np
 
                     results.append({
                         'vertices': valid_pts.astype(np.float32),
@@ -1268,6 +1287,14 @@ def infer_dust3r(images_bytes_list):
                         'confidence': np.ones(len(valid_pts), dtype=np.float32),
                         'image_index': i
                     })
+
+                    # Free valid arrays after copying to result
+                    del valid_pts, valid_colors
+
+                # Clean up scene and tensors after extraction
+                del pts3d, masks, scene
+                clear_gpu_memory()
+
             except Exception as e:
                 print(f"Global alignment failed: {e}, falling back to pairwise")
 
@@ -1312,13 +1339,28 @@ def infer_dust3r(images_bytes_list):
 
     except Exception as e:
         print(f"Dust3r Inference Error: {e}")
+        import traceback
+        traceback.print_exc()
         return []
     finally:
+        # Clean up temp files
         for path in temp_files:
             try:
                 os.remove(path)
             except Exception:
                 pass
+
+        # Explicitly clear PIL images to free memory
+        for img in pil_images:
+            try:
+                img.close()
+            except Exception:
+                pass
+        pil_images.clear()
+
+        # Force garbage collection and GPU cleanup
+        gc.collect()
+        clear_gpu_memory()
 
 
 def infer_mast3r(images_bytes_list, use_retrieval=True):
@@ -1382,14 +1424,23 @@ def infer_mast3r(images_bytes_list, use_retrieval=True):
             if max(w, h) > max_dim:
                 scale = max_dim / max(w, h)
                 new_w, new_h = int(w * scale), int(h * scale)
-                print(f"Pre-resizing MASt3R image {i} from {w}x{h} to {new_w}x{new_h}")
+                print(f"[Py] - adding {temp_files[-1] if temp_files else 'image'} with resolution {w}x{h} --> {new_w}x{new_h}")
                 img = img.resize((new_w, new_h), Image.LANCZOS)
 
-            pil_images.append(img)
+            # Save to temp file first
             fd, path = tempfile.mkstemp(suffix='.png')
             os.close(fd)
             img.save(path)
             temp_files.append(path)
+
+            # Keep a smaller reference for color extraction later (downscaled copy)
+            # This reduces memory pressure from keeping full-res PIL images
+            small_size = min(img.size[0], 512), min(img.size[1], 512)
+            if img.size != small_size:
+                pil_images.append(img.resize(small_size, Image.LANCZOS))
+                del img  # Release original full-res image
+            else:
+                pil_images.append(img)
 
         if isinstance(model, dict) and 'encoder' in model:
             device = next(model['encoder'].parameters()).device
@@ -1443,13 +1494,23 @@ def infer_mast3r(images_bytes_list, use_retrieval=True):
                 masks = scene.get_masks()
 
                 for i, img in enumerate(pil_images):
-                    pts = pts3d[i].detach().cpu().numpy()
-                    mask = masks[i].detach().cpu().numpy()
+                    # Extract data and immediately free GPU tensors
+                    pts_tensor = pts3d[i]
+                    mask_tensor = masks[i]
+                    pts = pts_tensor.detach().cpu().numpy()
+                    mask = mask_tensor.detach().cpu().numpy()
+
+                    # Free GPU tensor references immediately
+                    del pts_tensor, mask_tensor
+
                     img_np = _fit_image(img, pts.shape[:2])
 
                     mask = _fit_mask(mask, pts.shape[:2])
                     valid_pts = pts[mask]
                     valid_colors = img_np[mask]
+
+                    # Free intermediate arrays
+                    del pts, mask, img_np
 
                     results.append({
                         'vertices': valid_pts.astype(np.float32),
@@ -1458,6 +1519,14 @@ def infer_mast3r(images_bytes_list, use_retrieval=True):
                         'confidence': np.ones(len(valid_pts), dtype=np.float32),
                         'image_index': i
                     })
+
+                    # Free valid arrays after copying to result
+                    del valid_pts, valid_colors
+
+                # Clean up scene and tensors after extraction
+                del pts3d, masks, scene
+                clear_gpu_memory()
+
             except Exception as e:
                 print(f"MASt3R global alignment failed: {e}, falling back to pairwise")
 
@@ -1506,11 +1575,24 @@ def infer_mast3r(images_bytes_list, use_retrieval=True):
         traceback.print_exc()
         return []
     finally:
+        # Clean up temp files
         for path in temp_files:
             try:
                 os.remove(path)
             except Exception:
                 pass
+
+        # Explicitly clear PIL images to free memory
+        for img in pil_images:
+            try:
+                img.close()
+            except Exception:
+                pass
+        pil_images.clear()
+
+        # Force garbage collection and GPU cleanup
+        gc.collect()
+        clear_gpu_memory()
 
 
 def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
@@ -1576,14 +1658,23 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
             if max(w, h) > max_dim:
                 scale = max_dim / max(w, h)
                 new_w, new_h = int(w * scale), int(h * scale)
-                print(f"Pre-resizing MUSt3R image {i} from {w}x{h} to {new_w}x{new_h}")
+                print(f"[Py] Pre-resizing MUSt3R image {i} from {w}x{h} to {new_w}x{new_h}")
                 img = img.resize((new_w, new_h), Image.LANCZOS)
 
-            pil_images.append(img)
+            # Save to temp file first
             fd, path = tempfile.mkstemp(suffix='.png')
             os.close(fd)
             img.save(path)
             temp_files.append(path)
+
+            # Keep a smaller reference for color extraction later (downscaled copy)
+            # This reduces memory pressure from keeping full-res PIL images
+            small_size = min(img.size[0], 512), min(img.size[1], 512)
+            if img.size != small_size:
+                pil_images.append(img.resize(small_size, Image.LANCZOS))
+                del img  # Release original full-res image
+            else:
+                pil_images.append(img)
 
         if isinstance(model, dict) and 'encoder' in model:
             device = next(model['encoder'].parameters()).device
@@ -1619,6 +1710,9 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
                         post_process_function=lambda x: {'pts3d': x},
                     )
 
+                    # Clean up tensors used in batch inference
+                    del imgs_tensor, true_shape_tensor
+
                     if pointmaps:
                         pointmaps_dict = pointmaps[0]
                         pts3d = pointmaps_dict.get('pts3d') if isinstance(pointmaps_dict, dict) else None
@@ -1627,17 +1721,26 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
                         if pts3d is not None:
                             for i, img in enumerate(pil_images):
                                 if i < len(pts3d):
-                                    pts = pts3d[i].detach().cpu().numpy()
+                                    # Extract and free GPU tensors immediately
+                                    pts_tensor = pts3d[i]
+                                    pts = pts_tensor.detach().cpu().numpy()
+                                    del pts_tensor
+
                                     img_np = _fit_image(img, pts.shape[:2])
 
                                     if conf is not None and i < len(conf):
-                                        mask = conf[i].detach().cpu().numpy() > 1.0
+                                        conf_tensor = conf[i]
+                                        mask = conf_tensor.detach().cpu().numpy() > 1.0
+                                        del conf_tensor
                                     else:
                                         mask = np.ones(pts.shape[:2], dtype=bool)
 
                                     mask = _fit_mask(mask, pts.shape[:2])
                                     valid_pts = pts[mask]
                                     valid_colors = img_np[mask]
+
+                                    # Free intermediate arrays
+                                    del pts, mask, img_np
 
                                     results.append({
                                         'vertices': valid_pts.astype(np.float32),
@@ -1646,6 +1749,13 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
                                         'confidence': np.ones(len(valid_pts), dtype=np.float32),
                                         'image_index': i
                                     })
+
+                                    # Free valid arrays after copying
+                                    del valid_pts, valid_colors
+
+                            # Clean up pointmaps
+                            del pts3d, conf, pointmaps_dict, pointmaps
+                            clear_gpu_memory()
                 else:
                     imgs_tensor = []
                     for must3r_img in must3r_images:
@@ -1724,13 +1834,23 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
                     masks = scene.get_masks()
 
                     for i, img in enumerate(pil_images):
-                        pts = pts3d[i].detach().cpu().numpy()
-                        mask = masks[i].detach().cpu().numpy()
+                        # Extract data and immediately free GPU tensors
+                        pts_tensor = pts3d[i]
+                        mask_tensor = masks[i]
+                        pts = pts_tensor.detach().cpu().numpy()
+                        mask = mask_tensor.detach().cpu().numpy()
+
+                        # Free GPU tensor references immediately
+                        del pts_tensor, mask_tensor
+
                         img_np = _fit_image(img, pts.shape[:2])
 
                         mask = _fit_mask(mask, pts.shape[:2])
                         valid_pts = pts[mask]
                         valid_colors = img_np[mask]
+
+                        # Free intermediate arrays
+                        del pts, mask, img_np
 
                         results.append({
                             'vertices': valid_pts.astype(np.float32),
@@ -1739,6 +1859,14 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
                             'confidence': np.ones(len(valid_pts), dtype=np.float32),
                             'image_index': i
                         })
+
+                        # Free valid arrays after copying to result
+                        del valid_pts, valid_colors
+
+                    # Clean up scene and tensors after extraction
+                    del pts3d, masks, scene
+                    clear_gpu_memory()
+
             except Exception as e2:
                 print(f"MUSt3R fallback also failed: {e2}")
 
@@ -1756,11 +1884,24 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
         traceback.print_exc()
         return []
     finally:
+        # Clean up temp files
         for path in temp_files:
             try:
                 os.remove(path)
             except Exception:
                 pass
+
+        # Explicitly clear PIL images to free memory
+        for img in pil_images:
+            try:
+                img.close()
+            except Exception:
+                pass
+        pil_images.clear()
+
+        # Force garbage collection and GPU cleanup
+        gc.collect()
+        clear_gpu_memory()
 
 
 def infer_must3r_video(video_path, max_frames=100, frame_interval=5):
