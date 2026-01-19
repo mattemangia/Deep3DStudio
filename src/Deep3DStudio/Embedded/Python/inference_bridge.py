@@ -262,6 +262,88 @@ def clear_gpu_memory():
     # For MPS, just do garbage collection
     gc.collect()
 
+
+def safe_load_images(pil_images, size=512, device='cpu'):
+    """
+    Safely load PIL images into the format expected by dust3r/mast3r inference.
+    This is a replacement for dust3r.utils.image.load_images that avoids
+    heap corruption issues when called from embedded Python (pythonnet).
+
+    Args:
+        pil_images: List of PIL.Image objects (already loaded and in RGB format)
+        size: Target size for the longest edge (default 512)
+        device: Device to place tensors on
+
+    Returns:
+        List of dicts with format:
+        {
+            'img': torch.Tensor shape (1, 3, H, W), normalized to [0, 1]
+            'true_shape': np.int32([[H, W]])
+            'idx': int
+            'instance': str
+        }
+    """
+    print(f"[Py] safe_load_images: START with {len(pil_images)} images, size={size}, device={device}")
+    result = []
+
+    for idx, img in enumerate(pil_images):
+        print(f"[Py] safe_load_images: processing image {idx}...")
+        # Get original size
+        W, H = img.size
+        print(f"[Py] safe_load_images: image {idx} original size: {W}x{H}")
+
+        # Calculate new size maintaining aspect ratio
+        # Resize so longest edge is 'size', and ensure dimensions are multiples of 16
+        if W > H:
+            new_W = size
+            new_H = int(H * size / W)
+        else:
+            new_H = size
+            new_W = int(W * size / H)
+
+        # Round to multiples of 16 (required by transformer architectures)
+        new_W = max(16, (new_W + 8) // 16 * 16)
+        new_H = max(16, (new_H + 8) // 16 * 16)
+        print(f"[Py] safe_load_images: image {idx} target size: {new_W}x{new_H}")
+
+        # Resize image
+        if img.size != (new_W, new_H):
+            print(f"[Py] safe_load_images: image {idx} resizing...")
+            img_resized = img.resize((new_W, new_H), Image.LANCZOS)
+            print(f"[Py] safe_load_images: image {idx} resize complete")
+        else:
+            img_resized = img
+
+        # Convert to numpy array and normalize to [0, 1]
+        print(f"[Py] safe_load_images: image {idx} converting to numpy...")
+        img_np = np.array(img_resized, dtype=np.float32) / 255.0
+        print(f"[Py] safe_load_images: image {idx} numpy shape: {img_np.shape}")
+
+        # Convert to tensor with shape (1, C, H, W)
+        # img_np is (H, W, C), we need (1, C, H, W)
+        print(f"[Py] safe_load_images: image {idx} converting to tensor...")
+        img_tensor = torch.from_numpy(img_np).permute(2, 0, 1).unsqueeze(0)
+        print(f"[Py] safe_load_images: image {idx} tensor shape: {img_tensor.shape}")
+
+        # Move to device
+        print(f"[Py] safe_load_images: image {idx} moving to device {device}...")
+        img_tensor = img_tensor.to(device)
+        print(f"[Py] safe_load_images: image {idx} on device: {img_tensor.device}")
+
+        # Create the dict in the format expected by dust3r
+        result.append({
+            'img': img_tensor,
+            'true_shape': np.int32([[new_H, new_W]]),
+            'idx': idx,
+            'instance': str(idx)
+        })
+
+        print(f"[Py] safe_load_images: image {idx} complete - shape {new_H}x{new_W}")
+
+    print(f"[Py] safe_load_images: DONE - returning {len(result)} images")
+    return result
+
+
 def check_memory_before_load(model_name, required_mb=2000):
     """Check if there's enough GPU memory before loading a model.
     Returns True if OK to proceed, False if should warn/fail."""
@@ -1156,26 +1238,31 @@ def infer_dust3r(images_bytes_list):
     Infer 3D point clouds from multiple images using Dust3r.
     Works with 2 or more images using pairwise processing and global alignment.
     """
+    print(f"[Py] infer_dust3r: START with {len(images_bytes_list)} images")
     model = loaded_models.get('dust3r')
     if not model:
+        print("[Py] infer_dust3r: ERROR - model not loaded")
         return []
 
     report_progress("inference", 0.05, f"Dust3r input images: {len(images_bytes_list)}")
 
+    print("[Py] infer_dust3r: importing dust3r modules...")
     from dust3r.inference import inference
     from dust3r.image_pairs import make_pairs
-    from dust3r.utils.image import load_images
+    # NOTE: We don't use dust3r.utils.image.load_images because it causes
+    # heap corruption when called from embedded Python (pythonnet).
+    # Instead we use our safe_load_images function.
+    print("[Py] infer_dust3r: imports complete")
 
     # Try to import global_aligner (handles multi-image case)
     try:
         from dust3r.cloud_opt import global_aligner, GlobalAlignerMode
         has_global_aligner = True
+        print("[Py] infer_dust3r: global_aligner available")
     except ImportError:
         has_global_aligner = False
         print("Warning: global_aligner not available, using pairwise mode")
 
-    import tempfile
-    temp_files = []
     pil_images = []
     try:
         def _fit_mask(mask, target_shape):
@@ -1200,49 +1287,36 @@ def infer_dust3r(images_bytes_list):
                 img = img.resize((w, h), Image.LANCZOS)
             return np.array(img) / 255.0
 
+        # Load images from bytes directly - no temp files needed
+        print("[Py] infer_dust3r: loading images from bytes...")
         for i, img_bytes in enumerate(images_bytes_list):
-            if i == 0:
-                print(f"[Py] Dust3r first image bytes: {len(img_bytes)}")
+            print(f"[Py] infer_dust3r: loading image {i}, bytes length: {len(img_bytes)}")
             img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
-
-            # Pre-resize images to target size (512) to avoid resize inside load_images
-            # which can cause memory corruption with certain image sizes
-            target_size = 512
-            w, h = img.size
-            if w != target_size or h != target_size:
-                # Maintain aspect ratio, resize so longest side is target_size
-                if w > h:
-                    new_w = target_size
-                    new_h = int(h * target_size / w)
-                else:
-                    new_h = target_size
-                    new_w = int(w * target_size / h)
-                # Ensure dimensions are at least 1
-                new_w = max(1, new_w)
-                new_h = max(1, new_h)
-                print(f"[Py] Pre-resizing Dust3r image {i} from {w}x{h} to {new_w}x{new_h}")
-                img = img.resize((new_w, new_h), Image.LANCZOS)
-
-            # Save to temp file
-            fd, path = tempfile.mkstemp(suffix='.png')
-            os.close(fd)
-            img.save(path)
-            temp_files.append(path)
-
-            # Keep reference for color extraction later
             pil_images.append(img)
+            print(f"[Py] infer_dust3r: loaded image {i} with size {img.size}")
+
+        print(f"[Py] infer_dust3r: all {len(pil_images)} images loaded from bytes")
 
         if isinstance(model, dict) and 'encoder' in model:
             device = next(model['encoder'].parameters()).device
         else:
             device = next(model.parameters()).device
+        print(f"[Py] infer_dust3r: using device {device}")
         report_progress("inference", 0.1, f"Processing {len(pil_images)} images with Dust3r...")
 
-        # Clear memory before loading images to prevent corruption
+        # Clear memory before processing
+        print("[Py] infer_dust3r: clearing GPU memory...")
         gc.collect()
         clear_gpu_memory()
+        print("[Py] infer_dust3r: GPU memory cleared")
 
-        dust3r_images = load_images(temp_files, size=512)
+        # Use our safe_load_images instead of dust3r's load_images
+        # This avoids heap corruption issues when called from embedded Python
+        print("[Py] infer_dust3r: calling safe_load_images...")
+        report_progress("inference", 0.12, "Dust3r calling safe_load_images...")
+        dust3r_images = safe_load_images(pil_images, size=512, device=device)
+        print(f"[Py] infer_dust3r: safe_load_images complete, got {len(dust3r_images)} images")
+        report_progress("inference", 0.14, "Dust3r safe_load_images complete")
         report_progress("inference", 0.15, f"Loaded {len(dust3r_images)} images for Dust3r")
 
         image_count = len(dust3r_images)
@@ -1350,18 +1424,12 @@ def infer_dust3r(images_bytes_list):
         return results
 
     except Exception as e:
-        print(f"Dust3r Inference Error: {e}")
+        print(f"[Py] infer_dust3r: ERROR - {e}")
         import traceback
         traceback.print_exc()
         return []
     finally:
-        # Clean up temp files
-        for path in temp_files:
-            try:
-                os.remove(path)
-            except Exception:
-                pass
-
+        print("[Py] infer_dust3r: cleanup starting...")
         # Explicitly clear PIL images to free memory
         for img in pil_images:
             try:
@@ -1373,6 +1441,7 @@ def infer_dust3r(images_bytes_list):
         # Force garbage collection and GPU cleanup
         gc.collect()
         clear_gpu_memory()
+        print("[Py] infer_dust3r: cleanup complete")
 
 
 def infer_mast3r(images_bytes_list, use_retrieval=True):
@@ -1386,26 +1455,31 @@ def infer_mast3r(images_bytes_list, use_retrieval=True):
         use_retrieval: If True and retrieval model available, use it for optimal pairing
                        (useful for unordered image collections)
     """
+    print(f"[Py] infer_mast3r: START with {len(images_bytes_list)} images")
     model = loaded_models.get('mast3r')
     if not model:
+        print("[Py] infer_mast3r: ERROR - model not loaded")
         return []
 
     report_progress("inference", 0.05, f"MASt3R input images: {len(images_bytes_list)}")
 
+    print("[Py] infer_mast3r: importing modules...")
     from mast3r.fast_nn import fast_reciprocal_NNs
     from dust3r.inference import inference
     from dust3r.image_pairs import make_pairs
-    from dust3r.utils.image import load_images
+    # NOTE: We don't use dust3r.utils.image.load_images because it causes
+    # heap corruption when called from embedded Python (pythonnet).
+    # Instead we use our safe_load_images function.
+    print("[Py] infer_mast3r: imports complete")
 
     try:
         from dust3r.cloud_opt import global_aligner, GlobalAlignerMode
         has_global_aligner = True
+        print("[Py] infer_mast3r: global_aligner available")
     except ImportError:
         has_global_aligner = False
         print("Warning: global_aligner not available for MASt3R, using pairwise mode")
 
-    import tempfile
-    temp_files = []
     pil_images = []
     try:
         def _fit_mask(mask, target_shape):
@@ -1430,82 +1504,72 @@ def infer_mast3r(images_bytes_list, use_retrieval=True):
                 img = img.resize((w, h), Image.LANCZOS)
             return np.array(img) / 255.0
 
+        # Load images from bytes directly - no temp files needed
+        print("[Py] infer_mast3r: loading images from bytes...")
         for i, img_bytes in enumerate(images_bytes_list):
-            if i == 0:
-                print(f"[Py] MASt3R first image bytes: {len(img_bytes)}")
+            print(f"[Py] infer_mast3r: loading image {i}, bytes length: {len(img_bytes)}")
             img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
-
-            # Pre-resize images to target size (512) to avoid resize inside load_images
-            # which can cause memory corruption with certain image sizes
-            target_size = 512
-            w, h = img.size
-            if w != target_size or h != target_size:
-                # Maintain aspect ratio, resize so longest side is target_size
-                if w > h:
-                    new_w = target_size
-                    new_h = int(h * target_size / w)
-                else:
-                    new_h = target_size
-                    new_w = int(w * target_size / h)
-                # Ensure dimensions are at least 1
-                new_w = max(1, new_w)
-                new_h = max(1, new_h)
-                print(f"[Py] Pre-resizing MASt3R image {i} from {w}x{h} to {new_w}x{new_h}")
-                img = img.resize((new_w, new_h), Image.LANCZOS)
-
-            # Save to temp file
-            fd, path = tempfile.mkstemp(suffix='.png')
-            os.close(fd)
-            img.save(path)
-            temp_files.append(path)
-
-            # Keep reference for color extraction later
             pil_images.append(img)
+            print(f"[Py] infer_mast3r: loaded image {i} with size {img.size}")
+
+        print(f"[Py] infer_mast3r: all {len(pil_images)} images loaded from bytes")
 
         if isinstance(model, dict) and 'encoder' in model:
             device = next(model['encoder'].parameters()).device
         else:
             device = next(model.parameters()).device
+        print(f"[Py] infer_mast3r: using device {device}")
         report_progress("inference", 0.1, f"Processing {len(pil_images)} images with MASt3R...")
 
-        # Clear memory before loading images to prevent corruption
+        # Clear memory before processing
+        print("[Py] infer_mast3r: clearing GPU memory...")
         gc.collect()
         clear_gpu_memory()
+        print("[Py] infer_mast3r: GPU memory cleared")
 
-        print(f"[Py] MASt3R temp files count: {len(temp_files)}")
-        if temp_files:
-            print(f"[Py] MASt3R first temp file: {temp_files[0]}")
-        report_progress("inference", 0.12, "MASt3R calling load_images...")
-        mast3r_images = load_images(temp_files, size=512)
-        report_progress("inference", 0.14, "MASt3R load_images complete")
+        # Use our safe_load_images instead of dust3r's load_images
+        # This avoids heap corruption issues when called from embedded Python
+        print("[Py] infer_mast3r: calling safe_load_images...")
+        report_progress("inference", 0.12, "MASt3R calling safe_load_images...")
+        mast3r_images = safe_load_images(pil_images, size=512, device=device)
+        print(f"[Py] infer_mast3r: safe_load_images complete, got {len(mast3r_images)} images")
+        report_progress("inference", 0.14, "MASt3R safe_load_images complete")
         report_progress("inference", 0.15, f"Loaded {len(mast3r_images)} images for MASt3R")
 
         image_count = len(mast3r_images)
+        print(f"[Py] infer_mast3r: image_count = {image_count}")
 
         # Try to use retrieval for optimal pairing if available and enabled
         # This is particularly useful for unordered image collections
         pairs = None
         if use_retrieval and image_count > 2:
+            print("[Py] infer_mast3r: trying retrieval for optimal pairing...")
             models_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
             models_dir = os.path.join(models_dir, 'models')
             retrieval_model, codebook = load_retrieval_model('mast3r', models_dir, device)
             if retrieval_model is not None:
                 report_progress("inference", 0.18, "Using retrieval for optimal image pairing...")
                 pairs = get_optimal_pairs_with_retrieval(mast3r_images, retrieval_model, codebook, device)
+                print(f"[Py] infer_mast3r: retrieval created {len(pairs) if pairs else 0} pairs")
 
         # Fallback to standard pairing
         if pairs is None:
             scene_graph = 'complete' if image_count <= 8 else 'sparse'
+            print(f"[Py] infer_mast3r: calling make_pairs with scene_graph={scene_graph}...")
             pairs = make_pairs(mast3r_images, scene_graph=scene_graph, prefilter=None, symmetrize=True)
+            print(f"[Py] infer_mast3r: make_pairs returned {len(pairs)} pairs")
             if image_count > 8:
                 max_pairs = image_count * 6
                 if len(pairs) > max_pairs:
                     pairs = pairs[:max_pairs]
 
         report_progress("inference", 0.2, f"Created {len(pairs)} image pairs for MASt3R")
+        print(f"[Py] infer_mast3r: total pairs = {len(pairs)}")
 
+        print("[Py] infer_mast3r: calling inference()...")
         report_progress("inference", 0.35, "MASt3R calling inference()...")
         output = inference(pairs, model, device, batch_size=1)
+        print("[Py] infer_mast3r: inference() complete")
         report_progress("inference", 0.4, "MASt3R inference forward pass complete")
         report_progress("inference", 0.5, "Running MASt3R global alignment...")
 
@@ -1514,11 +1578,16 @@ def infer_mast3r(images_bytes_list, use_retrieval=True):
         if has_global_aligner:
             try:
                 mode = GlobalAlignerMode.PointCloudOptimizer if len(pil_images) > 2 else GlobalAlignerMode.PairViewer
+                print(f"[Py] infer_mast3r: calling global_aligner with mode={mode}...")
                 scene = global_aligner(output, device=device, mode=mode)
+                print("[Py] infer_mast3r: global_aligner created scene")
                 if mode == GlobalAlignerMode.PointCloudOptimizer:
+                    print("[Py] infer_mast3r: computing global alignment...")
                     loss = scene.compute_global_alignment(init="mst", niter=300, schedule='cosine', lr=0.01)
+                    print(f"[Py] infer_mast3r: global alignment complete, loss={loss:.4f}")
                     report_progress("inference", 0.8, f"MASt3R global alignment complete (loss: {loss:.4f})")
                 else:
+                    print("[Py] infer_mast3r: pairwise alignment complete")
                     report_progress("inference", 0.8, "MASt3R pairwise alignment complete")
 
                 pts3d = scene.get_pts3d()
@@ -1593,26 +1662,23 @@ def infer_mast3r(images_bytes_list, use_retrieval=True):
                 })
 
         if len(pil_images) > 2:
+            print("[Py] infer_mast3r: merging point clouds...")
             merged = _merge_point_clouds(results)
             if merged is not None:
                 results.append(merged)
+                print("[Py] infer_mast3r: point clouds merged")
 
+        print(f"[Py] infer_mast3r: returning {len(results)} results")
         report_progress("inference", 1.0, "MASt3R inference complete")
         return results
 
     except Exception as e:
-        print(f"MASt3R Inference Error: {e}")
+        print(f"[Py] infer_mast3r: ERROR - {e}")
         import traceback
         traceback.print_exc()
         return []
     finally:
-        # Clean up temp files
-        for path in temp_files:
-            try:
-                os.remove(path)
-            except Exception:
-                pass
-
+        print("[Py] infer_mast3r: cleanup starting...")
         # Explicitly clear PIL images to free memory
         for img in pil_images:
             try:
@@ -1624,6 +1690,7 @@ def infer_mast3r(images_bytes_list, use_retrieval=True):
         # Force garbage collection and GPU cleanup
         gc.collect()
         clear_gpu_memory()
+        print("[Py] infer_mast3r: cleanup complete")
 
 
 def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
@@ -1638,27 +1705,34 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
         use_retrieval: If True and retrieval model available, use it for optimal pairing
                        (useful for unordered image collections)
     """
+    print(f"[Py] infer_must3r: START with {len(images_bytes_list)} images")
     model = loaded_models.get('must3r')
     if not model:
+        print("[Py] infer_must3r: ERROR - model not loaded")
         return []
 
     report_progress("inference", 0.05, f"MUSt3R input images: {len(images_bytes_list)}")
 
-    from dust3r.utils.image import load_images
+    # NOTE: We don't use dust3r.utils.image.load_images because it causes
+    # heap corruption when called from embedded Python (pythonnet).
+    # Instead we use our safe_load_images function.
+    print("[Py] infer_must3r: importing modules...")
 
     try:
         from must3r.cloud_opt import global_aligner, GlobalAlignerMode
         has_global_aligner = True
+        print("[Py] infer_must3r: global_aligner from must3r available")
     except ImportError:
         try:
             from dust3r.cloud_opt import global_aligner, GlobalAlignerMode
             has_global_aligner = True
+            print("[Py] infer_must3r: global_aligner from dust3r available")
         except ImportError:
             has_global_aligner = False
             print("Warning: global_aligner not available for MUSt3R")
 
-    import tempfile
-    temp_files = []
+    print("[Py] infer_must3r: imports complete")
+
     pil_images = []
     try:
         def _fit_mask(mask, target_shape):
@@ -1683,49 +1757,33 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
                 img = img.resize((w, h), Image.LANCZOS)
             return np.array(img) / 255.0
 
+        # Load images from bytes directly - no temp files needed
+        print("[Py] infer_must3r: loading images from bytes...")
         for i, img_bytes in enumerate(images_bytes_list):
-            if i == 0:
-                print(f"[Py] MUSt3R first image bytes: {len(img_bytes)}")
+            print(f"[Py] infer_must3r: loading image {i}, bytes length: {len(img_bytes)}")
             img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
-
-            # Pre-resize images to target size (512) to avoid resize inside load_images
-            # which can cause memory corruption with certain image sizes
-            target_size = 512
-            w, h = img.size
-            if w != target_size or h != target_size:
-                # Maintain aspect ratio, resize so longest side is target_size
-                if w > h:
-                    new_w = target_size
-                    new_h = int(h * target_size / w)
-                else:
-                    new_h = target_size
-                    new_w = int(w * target_size / h)
-                # Ensure dimensions are at least 1
-                new_w = max(1, new_w)
-                new_h = max(1, new_h)
-                print(f"[Py] Pre-resizing MUSt3R image {i} from {w}x{h} to {new_w}x{new_h}")
-                img = img.resize((new_w, new_h), Image.LANCZOS)
-
-            # Save to temp file
-            fd, path = tempfile.mkstemp(suffix='.png')
-            os.close(fd)
-            img.save(path)
-            temp_files.append(path)
-
-            # Keep reference for color extraction later
             pil_images.append(img)
+            print(f"[Py] infer_must3r: loaded image {i} with size {img.size}")
+
+        print(f"[Py] infer_must3r: all {len(pil_images)} images loaded from bytes")
 
         if isinstance(model, dict) and 'encoder' in model:
             device = next(model['encoder'].parameters()).device
         else:
             device = next(model.parameters()).device
+        print(f"[Py] infer_must3r: using device {device}")
         report_progress("inference", 0.1, f"Processing {len(pil_images)} images with MUSt3R (multi-view)...")
 
-        # Clear memory before loading images to prevent corruption
+        # Clear memory before processing
+        print("[Py] infer_must3r: clearing GPU memory...")
         gc.collect()
         clear_gpu_memory()
+        print("[Py] infer_must3r: GPU memory cleared")
 
-        must3r_images = load_images(temp_files, size=512)
+        # Use our safe_load_images instead of dust3r's load_images
+        print("[Py] infer_must3r: calling safe_load_images...")
+        must3r_images = safe_load_images(pil_images, size=512, device=device)
+        print(f"[Py] infer_must3r: safe_load_images complete, got {len(must3r_images)} images")
         report_progress("inference", 0.15, f"Loaded {len(must3r_images)} images for MUSt3R")
 
         # MUSt3R processes all views directly without pair creation
@@ -1736,14 +1794,19 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
 
         try:
             # MUSt3R forward pass - processes all images together
+            print("[Py] infer_must3r: starting forward pass...")
             with torch.no_grad():
                 if isinstance(model, dict) and 'encoder' in model and 'decoder' in model:
+                    print("[Py] infer_must3r: using encoder/decoder model...")
                     from must3r.engine.inference import inference_multi_ar_batch
 
+                    print("[Py] infer_must3r: preparing tensors...")
                     imgs_tensor = torch.cat([img['img'] for img in must3r_images], dim=0).to(device)
                     true_shape = np.concatenate([img['true_shape'] for img in must3r_images], axis=0)
                     true_shape_tensor = torch.from_numpy(true_shape).to(device)
+                    print(f"[Py] infer_must3r: tensors prepared, imgs_tensor shape: {imgs_tensor.shape}")
 
+                    print("[Py] infer_must3r: calling inference_multi_ar_batch...")
                     _, pointmaps = inference_multi_ar_batch(
                         model['encoder'],
                         model['decoder'],
@@ -1752,6 +1815,7 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
                         device=device,
                         post_process_function=lambda x: {'pts3d': x},
                     )
+                    print("[Py] infer_must3r: inference_multi_ar_batch complete")
                     report_progress("inference", 0.45, "MUSt3R batch inference complete")
 
                     # Clean up tensors used in batch inference
@@ -1919,22 +1983,17 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
             if merged is not None:
                 results.append(merged)
 
+        print(f"[Py] infer_must3r: returning {len(results)} results")
         report_progress("inference", 1.0, "MUSt3R inference complete")
         return results
 
     except Exception as e:
-        print(f"MUSt3R Inference Error: {e}")
+        print(f"[Py] infer_must3r: ERROR - {e}")
         import traceback
         traceback.print_exc()
         return []
     finally:
-        # Clean up temp files
-        for path in temp_files:
-            try:
-                os.remove(path)
-            except Exception:
-                pass
-
+        print("[Py] infer_must3r: cleanup starting...")
         # Explicitly clear PIL images to free memory
         for img in pil_images:
             try:
@@ -1946,6 +2005,7 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
         # Force garbage collection and GPU cleanup
         gc.collect()
         clear_gpu_memory()
+        print("[Py] infer_must3r: cleanup complete")
 
 
 def infer_must3r_video(video_path, max_frames=100, frame_interval=5):
