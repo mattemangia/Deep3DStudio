@@ -1231,6 +1231,10 @@ def infer_dust3r(images_bytes_list):
             device = next(model.parameters()).device
         report_progress("inference", 0.1, f"Processing {len(pil_images)} images with Dust3r...")
 
+        # Clear memory before loading images to prevent corruption
+        gc.collect()
+        clear_gpu_memory()
+
         dust3r_images = load_images(temp_files, size=512)
         report_progress("inference", 0.15, f"Loaded {len(dust3r_images)} images for Dust3r")
 
@@ -1447,6 +1451,10 @@ def infer_mast3r(images_bytes_list, use_retrieval=True):
         else:
             device = next(model.parameters()).device
         report_progress("inference", 0.1, f"Processing {len(pil_images)} images with MASt3R...")
+
+        # Clear memory before loading images to prevent corruption
+        gc.collect()
+        clear_gpu_memory()
 
         mast3r_images = load_images(temp_files, size=512)
         report_progress("inference", 0.15, f"Loaded {len(mast3r_images)} images for MASt3R")
@@ -1681,6 +1689,10 @@ def infer_must3r(images_bytes_list, use_memory=True, use_retrieval=True):
         else:
             device = next(model.parameters()).device
         report_progress("inference", 0.1, f"Processing {len(pil_images)} images with MUSt3R (multi-view)...")
+
+        # Clear memory before loading images to prevent corruption
+        gc.collect()
+        clear_gpu_memory()
 
         must3r_images = load_images(temp_files, size=512)
         report_progress("inference", 0.15, f"Loaded {len(must3r_images)} images for MUSt3R")

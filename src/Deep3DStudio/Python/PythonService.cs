@@ -359,7 +359,8 @@ namespace Deep3DStudio.Python
             string targetDir = Path.Combine(appData, "Deep3DStudio", "python");
             string sourceZip = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "python_env.zip");
 
-            ReportExtractionProgress("Checking Python environment...", 0.0f);
+            // Note: Don't report progress here - only report when actual extraction is needed
+            // This prevents the progress dialog from showing on every startup
             Log($"Looking for Python environment...");
             Log($"  App base directory: {AppDomain.CurrentDomain.BaseDirectory}");
             Log($"  python_env.zip path: {sourceZip}");
@@ -373,12 +374,12 @@ namespace Deep3DStudio.Python
                 if (Directory.Exists(localPython))
                 {
                     Log($"Using local 'python' directory at: {localPython}");
-                    ReportExtractionProgress("Using local Python environment", 1.0f);
+                    // No progress report needed - environment already exists
                     return;
                 }
                 Log("Warning: python_env.zip not found and no local python dir.");
                 Log("  AI features will be disabled. Please ensure python_env.zip is in the application directory.");
-                ReportExtractionProgress("Python environment not found", 1.0f);
+                // No progress report needed - this is an error state
                 return;
             }
 
@@ -431,10 +432,7 @@ namespace Deep3DStudio.Python
                     ReportExtractionProgress($"Extraction failed: {ex.Message}", 1.0f);
                 }
             }
-            else
-            {
-                ReportExtractionProgress("Python environment ready", 1.0f);
-            }
+            // else: No extraction needed, no progress report needed
         }
 
         private void ExtractZipWithProgress(string sourceZip, string targetDir)

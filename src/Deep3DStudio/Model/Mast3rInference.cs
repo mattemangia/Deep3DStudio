@@ -228,7 +228,7 @@ namespace Deep3DStudio.Model
 
             try
             {
-                // Load image bytes - will be cleared after conversion to Python objects
+                // Load image bytes - kept alive during Python call to prevent GC issues
                 List<byte[]> imagesBytes = new List<byte[]>();
                 foreach (var path in imagePaths)
                     imagesBytes.Add(File.ReadAllBytes(path));
@@ -237,14 +237,10 @@ namespace Deep3DStudio.Model
                 {
                     using(var pyList = new PyList())
                     {
-                        // Convert each image to Python and immediately clear the C# reference
-                        // This prevents holding duplicate data in both C# and Python memory
-                        for (int idx = 0; idx < imagesBytes.Count; idx++)
-                        {
-                            pyList.Append(imagesBytes[idx].ToPython());
-                            imagesBytes[idx] = null; // Release C# reference immediately
-                        }
-                        imagesBytes.Clear(); // Clear the list to allow GC
+                        // Convert each image to Python - keep C# references alive until Python call completes
+                        // to prevent GC from collecting data that Python might still be copying
+                        foreach(var b in imagesBytes)
+                            pyList.Append(b.ToPython());
 
                         // Pass use_retrieval parameter for optimal pairing of unordered images
                         // CRITICAL: Use PyObject explicitly so we can dispose it properly
