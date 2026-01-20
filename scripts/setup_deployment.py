@@ -230,39 +230,56 @@ def setup_python_embed(target_dir, target_platform):
     if not os.path.exists(target_dir):
         os.makedirs(target_dir)
 
-    url = PYTHON_URLS.get(target_platform)
-    if not url:
-        print(f"Error: Unsupported platform {target_platform}")
-        return False
-
-    archive_name = "python.tar.gz"
-    archive_path = os.path.join(target_dir, archive_name)
-
-    if not os.path.exists(archive_path):
-        print(f"Downloading Python for {target_platform}...")
-        if not download_with_progress(url, archive_path, f"Python {PYTHON_VERSION}"):
-            return False
-
-    print("Extracting...")
-    try:
-        if archive_path.endswith(".zip"):
-            with zipfile.ZipFile(archive_path, 'r') as zip_ref:
-                zip_ref.extractall(target_dir)
-        else:
-            with tarfile.open(archive_path, "r:gz") as tar:
-                tar.extractall(path=target_dir)
-    except Exception as e:
-        print(f"Extraction failed: {e}")
-        return False
-
+    # Determine paths early
     if "win" in target_platform:
         python_exe = os.path.join(target_dir, "python", "python.exe")
         python_root = os.path.join(target_dir, "python")
     else:
         python_exe = os.path.join(target_dir, "python", "bin", "python3")
         python_root = os.path.join(target_dir, "python")
-        if os.path.exists(python_exe):
-            os.chmod(python_exe, 0o755)
+
+    archive_name = "python.tar.gz"
+    archive_path = os.path.join(target_dir, archive_name)
+
+    # Check if already installed
+    needs_install = True
+    if os.path.exists(python_exe):
+        print(f"Python executable found at {python_exe}. Skipping download and extraction.")
+        needs_install = False
+
+    if needs_install:
+        url = PYTHON_URLS.get(target_platform)
+        if not url:
+            print(f"Error: Unsupported platform {target_platform}")
+            return False
+
+        if os.path.exists(archive_path) and os.path.getsize(archive_path) == 0:
+            print(f"Found empty archive {archive_path}. Deleting...")
+            os.remove(archive_path)
+
+        if not os.path.exists(archive_path):
+            print(f"Downloading Python for {target_platform}...")
+            if not download_with_progress(url, archive_path, f"Python {PYTHON_VERSION}"):
+                return False
+
+        print("Extracting...")
+        try:
+            if archive_path.endswith(".zip"):
+                with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+                    zip_ref.extractall(target_dir)
+            else:
+                with tarfile.open(archive_path, "r:gz") as tar:
+                    tar.extractall(path=target_dir)
+        except Exception as e:
+            print(f"Extraction failed: {e}")
+            if os.path.exists(archive_path):
+                print(f"Removing corrupted archive {archive_path}")
+                os.remove(archive_path)
+            return False
+
+        if "win" not in target_platform:
+            if os.path.exists(python_exe):
+                os.chmod(python_exe, 0o755)
 
     # CRITICAL: Enable site module in ._pth file BEFORE installing pip
     # Reference: https://dev.to/fpim/setting-up-python-s-windows-embeddable-distribution-properly-1081
