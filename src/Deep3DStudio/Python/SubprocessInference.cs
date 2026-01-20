@@ -316,6 +316,10 @@ namespace Deep3DStudio.Python
                 if (e.Data != null)
                 {
                     stdout.AppendLine(e.Data);
+                    // Log stdout in real-time so it appears in TUI
+                    // Filter out some noise if necessary, but generally we want to see it
+                    if (!e.Data.StartsWith("{") && !e.Data.Trim().StartsWith("{")) // Don't log JSON payloads if they are huge
+                         Log($"[Py] {e.Data}");
                 }
             };
 
