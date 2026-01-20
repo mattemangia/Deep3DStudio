@@ -36,6 +36,16 @@ namespace Deep3DStudio
                 Logger.Info("CLI mode detected");
                 return RunCLI(cliOptions);
             }
+            else
+            {
+                // Start TUI Status Monitor for GUI mode
+                TuiStatusMonitor.Instance.Start();
+
+                // Hook Python extraction progress to TUI
+                PythonService.Instance.OnExtractionProgress += (msg, prog) => {
+                    TuiStatusMonitor.Instance.UpdateProgress(msg, prog);
+                };
+            }
 
             // Set up global exception handlers for crash logging
             AppDomain.CurrentDomain.UnhandledException += (sender, e) =>

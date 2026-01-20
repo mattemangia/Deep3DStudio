@@ -22,6 +22,16 @@ namespace Deep3DStudio
                 Console.WriteLine("CLI mode detected");
                 return RunCLI(cliOptions);
             }
+            else
+            {
+                // Start TUI Status Monitor for GUI mode
+                TuiStatusMonitor.Instance.Start();
+                
+                // Hook Python extraction progress to TUI
+                PythonService.Instance.OnExtractionProgress += (msg, prog) => {
+                    TuiStatusMonitor.Instance.UpdateProgress(msg, prog);
+                };
+            }
 
             // Try to force MESA to give a compatibility profile (legacy GL support)
             // This is critical for GL.Begin/GL.End calls in the viewport.
