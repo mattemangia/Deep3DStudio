@@ -149,8 +149,34 @@ namespace Deep3DStudio.CLI
             }
             else
             {
-                Console.WriteLine("Skipping TripoSF/UniRig: no mesh with faces produced by earlier models.");
+                Console.WriteLine("Skipping TripoSF: no mesh with faces produced by earlier models.");
                 allOk = false;
+
+                var unirigExample = FindUniRigExampleMesh();
+                if (!string.IsNullOrEmpty(unirigExample))
+                {
+                    Console.WriteLine("=== Running UniRig auto-rig (example mesh) ===");
+                    try
+                    {
+                        var rig = manager.UniRig?.RigMeshFromFile(unirigExample);
+                        bool ok = rig != null && rig.Success;
+                        Console.WriteLine(ok
+                            ? $"OK: UniRig produced {rig!.JointPositions?.Length ?? 0} joints."
+                            : $"FAIL: UniRig rigging failed ({rig?.StatusMessage ?? "no result"}).");
+                        if (!ok)
+                            allOk = false;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"FAIL: UniRig rigging threw: {ex.Message}");
+                        allOk = false;
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("Skipping UniRig: no example mesh found.");
+                    allOk = false;
+                }
             }
 
             manager.UnloadAllModels();
@@ -231,6 +257,34 @@ namespace Deep3DStudio.CLI
                 var full = Path.GetFullPath(candidate);
                 if (Directory.Exists(full))
                     return full;
+            }
+
+            return null;
+        }
+
+        private static string? FindUniRigExampleMesh()
+        {
+            var exeDir = AppDomain.CurrentDomain.BaseDirectory;
+            var candidates = new[]
+            {
+                Path.Combine(exeDir, "Unirig_examples"),
+                Path.Combine(exeDir, "..", "..", "..", "Unirig_examples"),
+                Path.Combine(exeDir, "..", "..", "..", "..", "src", "Deep3DStudio", "Unirig_examples"),
+                Path.Combine(Environment.CurrentDirectory, "Unirig_examples"),
+                Path.Combine(Environment.CurrentDirectory, "src", "Deep3DStudio", "Unirig_examples")
+            };
+
+            foreach (var candidate in candidates)
+            {
+                var full = Path.GetFullPath(candidate);
+                if (!Directory.Exists(full))
+                    continue;
+
+                var glb = Directory.GetFiles(full, "*.glb")
+                    .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+                    .FirstOrDefault();
+                if (!string.IsNullOrEmpty(glb))
+                    return glb;
             }
 
             return null;

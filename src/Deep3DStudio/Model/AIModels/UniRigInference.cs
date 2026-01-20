@@ -67,6 +67,7 @@ namespace Deep3DStudio.Model.AIModels
                 Path.Combine(baseDir, "models", "unirig_weights.pth"),
                 // Alternative names
                 Path.Combine(baseDir, "models", "unirig", "unirig_weights.pth"),
+                Path.Combine(baseDir, "models", "unirig", "skeleton", "articulation-xl_quantization_256", "model.ckpt"),
                 // If configuredPath is a direct file path
                 Path.IsPathRooted(configuredPath) ? configuredPath : Path.Combine(baseDir, configuredPath),
             };
@@ -140,24 +141,53 @@ namespace Deep3DStudio.Model.AIModels
                     return result;
                 }
 
-                // For UniRig, we need to pass mesh data differently
-                // The subprocess will need special handling for mesh input
                 Log($"[UniRig] Rigging mesh with {mesh.Vertices.Count} vertices...");
 
-                // Create mesh data for subprocess
-                var meshVertices = new List<List<float>>();
-                foreach (var v in mesh.Vertices)
-                    meshVertices.Add(new List<float> { v.X, v.Y, v.Z });
+                var settings = IniSettings.Instance;
+                result = _inference.InferRig(mesh, settings.UniRigMaxJoints, settings.UniRigMaxBonesPerVertex);
 
-                var meshFaces = new List<int>(mesh.Indices);
-
-                // Note: UniRig subprocess needs special input handling
-                // This is a simplified version - actual implementation may need
-                // to serialize mesh data to a temp file
-
+                if (result.Success)
+                {
+                    Log($"[UniRig] Rigging complete: {result.JointPositions?.Length ?? 0} joints.");
+                }
+                else
+                {
+                    Log($"[UniRig] Rigging failed: {result.StatusMessage}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"[UniRig] Error: {ex.Message}");
                 result.Success = false;
-                result.StatusMessage = "UniRig subprocess inference not fully implemented";
-                Log("[UniRig] Rigging via subprocess not fully implemented yet");
+                result.StatusMessage = ex.Message;
+            }
+
+            return result;
+        }
+
+        public RigResult RigMeshFromFile(string meshPath)
+        {
+            Initialize();
+            var result = new RigResult();
+
+            if (_inference == null || !_inference.IsLoaded)
+            {
+                Log("[UniRig] Model not loaded");
+                return result;
+            }
+
+            try
+            {
+                var settings = IniSettings.Instance;
+                result = _inference.InferRigFromFile(meshPath, settings.UniRigMaxJoints, settings.UniRigMaxBonesPerVertex);
+                if (result.Success)
+                {
+                    Log($"[UniRig] Rigging complete: {result.JointPositions?.Length ?? 0} joints.");
+                }
+                else
+                {
+                    Log($"[UniRig] Rigging failed: {result.StatusMessage}");
+                }
             }
             catch (Exception ex)
             {

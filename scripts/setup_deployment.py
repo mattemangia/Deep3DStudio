@@ -106,7 +106,7 @@ MODELS = {
         "weights": "https://huggingface.co/VAST-AI/UniRig/resolve/main/skeleton/articulation-xl_quantization_256/model.ckpt",
         "files": ["src/"],
         "target_name": "unirig",
-        "requirements": ["torch", "numpy", "scipy"]
+        "requirements": ["torch", "numpy", "scipy", "python-box", "pyyaml", "trimesh"]
     }
 }
 
@@ -729,6 +729,14 @@ def setup_models(models_dir, python_dir, target_platform):
                 print(f"Downloading weights for {name}...")
                 download_with_progress(config["weights"], weight_path, f"{name} weights")
 
+            # UniRig also needs skinning weights for full rigging
+            if name == "unirig":
+                skin_weight_path = os.path.join(models_dir, "unirig_skin.ckpt")
+                if not os.path.exists(skin_weight_path) or os.path.getsize(skin_weight_path) == 0:
+                    skin_url = "https://huggingface.co/VAST-AI/UniRig/resolve/main/skin/articulation-xl/model.ckpt"
+                    print("Downloading UniRig skin weights...")
+                    download_with_progress(skin_url, skin_weight_path, "unirig skin weights")
+
         # 1.5 Download Configs
         if "configs" in config:
             for conf_name, conf_url in config["configs"].items():
@@ -790,6 +798,22 @@ def setup_models(models_dir, python_dir, target_platform):
                 else:
                     dest = os.path.join(site_packages, os.path.basename(src))
                     shutil.copy2(src, dest)
+
+            # UniRig requires configs for inference; copy them into the package
+            if name == "unirig":
+                configs_src = os.path.join(temp_repo, "configs")
+                if os.path.exists(configs_src):
+                    configs_dest = os.path.join(site_packages, "unirig", "configs")
+                    if os.path.exists(configs_dest):
+                        shutil.rmtree(configs_dest, onerror=remove_readonly)
+                    shutil.copytree(configs_src, configs_dest)
+                    print("  Copied UniRig configs into package")
+
+                unirig_init = os.path.join(site_packages, "unirig", "__init__.py")
+                if not os.path.exists(unirig_init):
+                    with open(unirig_init, "w", encoding="utf-8") as f:
+                        f.write("# UniRig package marker for Deep3DStudio\n")
+                    print("  Created UniRig __init__.py")
 
         except Exception as e:
             print(f"Error processing {name}: {e}")
@@ -1165,6 +1189,122 @@ else:
             with open(mast3r_path, "w", encoding="utf-8") as f:
                 f.write(patched)
             print("    Patched mast3r path_to_dust3r.py for installed dust3r fallback")
+
+    # Patch UniRig typing error for Python 3.10 (Dict[str, ...] is invalid)
+    unirig_asset = os.path.join(site_packages, "unirig", "data", "asset.py")
+    if os.path.exists(unirig_asset):
+        with open(unirig_asset, "r", encoding="utf-8") as f:
+            content = f.read()
+        if "Dict[str, ...]" in content:
+            content = content.replace("Dict[str, ...]", "Dict[str, object]")
+            with open(unirig_asset, "w", encoding="utf-8") as f:
+                f.write(content)
+            print("    Patched UniRig asset typing for Python 3.10")
+
+    # Provide minimal torch_cluster.fps stub for UniRig when torch_cluster is unavailable
+    torch_cluster_dir = os.path.join(site_packages, "torch_cluster")
+    torch_cluster_init = os.path.join(torch_cluster_dir, "__init__.py")
+    if not os.path.exists(torch_cluster_init):
+        os.makedirs(torch_cluster_dir, exist_ok=True)
+        with open(torch_cluster_init, "w", encoding="utf-8") as f:
+            f.write("import math\n")
+            f.write("import torch\n\n")
+            f.write("def fps(pos, batch=None, ratio=0.25, random_start=False):\n")
+            f.write("    if batch is None:\n")
+            f.write("        batch = torch.zeros(pos.shape[0], dtype=torch.long, device=pos.device)\n")
+            f.write("    batch = batch.to(pos.device)\n")
+            f.write("    out = []\n")
+            f.write("    for b in torch.unique(batch):\n")
+            f.write("        idx = (batch == b).nonzero(as_tuple=False).view(-1)\n")
+            f.write("        if idx.numel() == 0:\n")
+            f.write("            continue\n")
+            f.write("        k = max(1, int(math.ceil(idx.numel() * float(ratio))))\n")
+            f.write("        if random_start:\n")
+            f.write("            perm = torch.randperm(idx.numel(), device=idx.device)\n")
+            f.write("            sel = idx[perm[:k]]\n")
+            f.write("        else:\n")
+            f.write("            if k == 1:\n")
+            f.write("                sel = idx[:1]\n")
+            f.write("            else:\n")
+            f.write("                step = (idx.numel() - 1) / float(k - 1)\n")
+            f.write("                pick = torch.round(torch.arange(k, device=idx.device) * step).long()\n")
+            f.write("                sel = idx[pick]\n")
+            f.write("        out.append(sel)\n")
+            f.write("    if out:\n")
+            f.write("        return torch.cat(out, dim=0)\n")
+            f.write("    return torch.zeros((0,), dtype=torch.long, device=pos.device)\n")
+        print("    Added torch_cluster.fps stub for UniRig")
+
+    # Patch UniRig parse_encoder to avoid importing pointcept when unused
+    unirig_parse_encoder = os.path.join(site_packages, "unirig", "model", "parse_encoder.py")
+    if os.path.exists(unirig_parse_encoder):
+        content = """from dataclasses import dataclass
+
+from .michelangelo.get_model import get_encoder as get_encoder_michelangelo
+from .michelangelo.get_model import AlignedShapeLatentPerceiver
+from .michelangelo.get_model import get_encoder_simplified as get_encoder_michelangelo_encoder
+from .michelangelo.get_model import ShapeAsLatentPerceiverEncoder
+try:
+    from .pointcept.models.PTv3Object import get_encoder as get_encoder_ptv3obj
+    from .pointcept.models.PTv3Object import PointTransformerV3Object
+except Exception:
+    get_encoder_ptv3obj = None
+    PointTransformerV3Object = None
+
+class PTV3OBJ_PLACEHOLDER:
+    pass
+
+@dataclass(frozen=True)
+class _MAP_MESH_ENCODER:
+    ptv3obj = PointTransformerV3Object if PointTransformerV3Object is not None else PTV3OBJ_PLACEHOLDER
+    michelangelo = AlignedShapeLatentPerceiver
+    michelangelo_encoder = ShapeAsLatentPerceiverEncoder
+
+MAP_MESH_ENCODER = _MAP_MESH_ENCODER()
+
+def get_mesh_encoder(**kwargs):
+    __target__ = kwargs['__target__']
+    del kwargs['__target__']
+    if __target__ == 'ptv3obj' and get_encoder_ptv3obj is None:
+        raise ImportError("ptv3obj encoder requires optional pointcept dependencies")
+    MAP = {
+        'ptv3obj': get_encoder_ptv3obj,
+        'michelangelo': get_encoder_michelangelo,
+        'michelangelo_encoder': get_encoder_michelangelo_encoder,
+    }
+    assert __target__ in MAP, f"expect: [{','.join(MAP.keys())}], found: {__target__}"
+    return MAP[__target__](**kwargs)
+"""
+        with open(unirig_parse_encoder, "w", encoding="utf-8") as f:
+            f.write(content)
+        print("    Patched UniRig parse_encoder to lazy-load ptv3obj")
+
+    # Patch UniRig parse.py to avoid importing unirig_skin when unused
+    unirig_parse = os.path.join(site_packages, "unirig", "model", "parse.py")
+    if os.path.exists(unirig_parse):
+        content = """from .unirig_ar import UniRigAR
+try:
+    from .unirig_skin import UniRigSkin
+except Exception:
+    UniRigSkin = None
+
+from .spec import ModelSpec
+
+def get_model(**kwargs) -> ModelSpec:
+    __target__ = kwargs['__target__']
+    del kwargs['__target__']
+    if __target__ == 'unirig_skin' and UniRigSkin is None:
+        raise ImportError("unirig_skin requires optional torch_scatter dependencies")
+    MAP = {
+        'unirig_ar': UniRigAR,
+        'unirig_skin': UniRigSkin,
+    }
+    assert __target__ in MAP, f"expect: [{','.join(MAP.keys())}], found: {__target__}"
+    return MAP[__target__](**kwargs)
+"""
+        with open(unirig_parse, "w", encoding="utf-8") as f:
+            f.write(content)
+        print("    Patched UniRig parse.py to lazy-load unirig_skin")
 
     print("  Patches applied successfully")
 

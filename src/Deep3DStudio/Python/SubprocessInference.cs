@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using OpenTK.Mathematics;
 using Deep3DStudio.Configuration;
 using Deep3DStudio.Model;
+using Deep3DStudio.Model.AIModels;
 
 namespace Deep3DStudio.Python
 {
@@ -679,6 +680,298 @@ namespace Deep3DStudio.Python
             }
 
             return results;
+        }
+
+        /// <summary>
+        /// Run UniRig inference with mesh data (vertices + faces) and return rigging result.
+        /// </summary>
+        public RigResult InferRig(MeshData mesh, int maxJoints, int maxBonesPerVertex)
+        {
+            var result = new RigResult();
+
+            if (!_isLoaded)
+            {
+                Log("Model not loaded");
+                result.StatusMessage = "Model not loaded";
+                return result;
+            }
+
+            string inputPath = "";
+            string outputPath = "";
+
+            try
+            {
+                OnProgress?.Invoke("inference", 0.1f, "Preparing UniRig mesh input...");
+
+                inputPath = Path.GetTempFileName();
+                outputPath = Path.GetTempFileName();
+
+                // Prepare mesh payload
+                var vertices = new List<float[]>(mesh.Vertices.Count);
+                foreach (var v in mesh.Vertices)
+                {
+                    vertices.Add(new[] { v.X, v.Y, v.Z });
+                }
+
+                var inputData = new Dictionary<string, object>
+                {
+                    ["mesh"] = new Dictionary<string, object>
+                    {
+                        ["vertices"] = vertices,
+                        ["faces"] = mesh.Indices.ToArray()
+                    }
+                };
+
+                File.WriteAllText(inputPath, JsonSerializer.Serialize(inputData));
+
+                OnProgress?.Invoke("inference", 0.2f, "Running UniRig inference...");
+
+                string weightsArg = !string.IsNullOrEmpty(_weightsPath) ? $"--weights \"{_weightsPath}\"" : "";
+                string deviceArg = $"--device {_device}";
+                string args = $"--command infer --model {_modelName} --input \"{inputPath}\" --output \"{outputPath}\" {weightsArg} {deviceArg} --max-joints {maxJoints} --max-bones {maxBonesPerVertex}";
+
+                var (exitCode, stdout, stderr) = RunPythonCommand(args, 600000);
+
+                OnProgress?.Invoke("inference", 0.8f, "Processing UniRig results...");
+
+                if (exitCode == 0 && File.Exists(outputPath))
+                {
+                    string outputJson = File.ReadAllText(outputPath);
+                    var outputData = JsonSerializer.Deserialize<JsonElement>(outputJson);
+
+                    if (outputData.TryGetProperty("success", out var successProp) && successProp.GetBoolean())
+                    {
+                        if (outputData.TryGetProperty("rig_result", out var rigProp))
+                        {
+                            if (rigProp.TryGetProperty("joint_positions", out var jointsProp))
+                            {
+                                var joints = new List<Vector3>();
+                                foreach (var j in jointsProp.EnumerateArray())
+                                {
+                                    var arr = j.EnumerateArray().ToArray();
+                                    if (arr.Length >= 3)
+                                    {
+                                        joints.Add(new Vector3(
+                                            (float)arr[0].GetDouble(),
+                                            (float)arr[1].GetDouble(),
+                                            (float)arr[2].GetDouble()
+                                        ));
+                                    }
+                                }
+                                result.JointPositions = joints.ToArray();
+                            }
+
+                            if (rigProp.TryGetProperty("parent_indices", out var parentsProp))
+                            {
+                                var parents = new List<int>();
+                                foreach (var p in parentsProp.EnumerateArray())
+                                {
+                                    parents.Add(p.GetInt32());
+                                }
+                                result.ParentIndices = parents.ToArray();
+                            }
+
+                            if (rigProp.TryGetProperty("joint_names", out var namesProp))
+                            {
+                                var names = new List<string>();
+                                foreach (var n in namesProp.EnumerateArray())
+                                {
+                                    names.Add(n.GetString() ?? "Joint");
+                                }
+                                result.JointNames = names.ToArray();
+                            }
+
+                            if (rigProp.TryGetProperty("skinning_weights", out var weightsProp))
+                            {
+                                int vertexCount = weightsProp.GetArrayLength();
+                                int jointCount = result.JointPositions?.Length ?? 0;
+                                var weights = new float[vertexCount, jointCount];
+
+                                int vIdx = 0;
+                                foreach (var row in weightsProp.EnumerateArray())
+                                {
+                                    int jIdx = 0;
+                                    foreach (var val in row.EnumerateArray())
+                                    {
+                                        if (jIdx < jointCount)
+                                            weights[vIdx, jIdx] = (float)val.GetDouble();
+                                        jIdx++;
+                                    }
+                                    vIdx++;
+                                }
+                                result.SkinningWeights = weights;
+                            }
+
+                            result.Success = true;
+                            result.StatusMessage = "UniRig rigging complete";
+                        }
+                    }
+                    else
+                    {
+                        string error = outputData.TryGetProperty("error", out var errProp)
+                            ? errProp.GetString() ?? "Unknown error"
+                            : "Unknown error";
+                        result.StatusMessage = error;
+                        Log($"UniRig inference failed: {error}");
+                    }
+                }
+                else
+                {
+                    result.StatusMessage = $"UniRig inference failed with exit code {exitCode}";
+                    Log(result.StatusMessage);
+                }
+
+                OnProgress?.Invoke("inference", 1.0f, "Complete");
+            }
+            catch (Exception ex)
+            {
+                result.StatusMessage = ex.Message;
+                Log($"UniRig inference exception: {ex.Message}");
+            }
+            finally
+            {
+                try { if (!string.IsNullOrEmpty(inputPath) && File.Exists(inputPath)) File.Delete(inputPath); } catch { }
+                try { if (!string.IsNullOrEmpty(outputPath) && File.Exists(outputPath)) File.Delete(outputPath); } catch { }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Run UniRig inference with a mesh file path (for GLB/GLTF etc.) and return rigging result.
+        /// </summary>
+        public RigResult InferRigFromFile(string meshPath, int maxJoints, int maxBonesPerVertex)
+        {
+            var result = new RigResult();
+
+            if (!_isLoaded)
+            {
+                Log("Model not loaded");
+                result.StatusMessage = "Model not loaded";
+                return result;
+            }
+
+            if (!File.Exists(meshPath))
+            {
+                result.StatusMessage = $"Mesh file not found: {meshPath}";
+                return result;
+            }
+
+            string outputPath = "";
+
+            try
+            {
+                OnProgress?.Invoke("inference", 0.1f, "Preparing UniRig mesh file input...");
+                outputPath = Path.GetTempFileName();
+
+                string weightsArg = !string.IsNullOrEmpty(_weightsPath) ? $"--weights \"{_weightsPath}\"" : "";
+                string deviceArg = $"--device {_device}";
+                string args = $"--command infer --model {_modelName} --mesh-input \"{meshPath}\" --output \"{outputPath}\" {weightsArg} {deviceArg} --max-joints {maxJoints} --max-bones {maxBonesPerVertex}";
+
+                var (exitCode, stdout, stderr) = RunPythonCommand(args, 600000);
+
+                OnProgress?.Invoke("inference", 0.8f, "Processing UniRig results...");
+
+                if (exitCode == 0 && File.Exists(outputPath))
+                {
+                    string outputJson = File.ReadAllText(outputPath);
+                    var outputData = JsonSerializer.Deserialize<JsonElement>(outputJson);
+
+                    if (outputData.TryGetProperty("success", out var successProp) && successProp.GetBoolean())
+                    {
+                        if (outputData.TryGetProperty("rig_result", out var rigProp))
+                        {
+                            if (rigProp.TryGetProperty("joint_positions", out var jointsProp))
+                            {
+                                var joints = new List<Vector3>();
+                                foreach (var j in jointsProp.EnumerateArray())
+                                {
+                                    var arr = j.EnumerateArray().ToArray();
+                                    if (arr.Length >= 3)
+                                    {
+                                        joints.Add(new Vector3(
+                                            (float)arr[0].GetDouble(),
+                                            (float)arr[1].GetDouble(),
+                                            (float)arr[2].GetDouble()
+                                        ));
+                                    }
+                                }
+                                result.JointPositions = joints.ToArray();
+                            }
+
+                            if (rigProp.TryGetProperty("parent_indices", out var parentsProp))
+                            {
+                                var parents = new List<int>();
+                                foreach (var p in parentsProp.EnumerateArray())
+                                {
+                                    parents.Add(p.GetInt32());
+                                }
+                                result.ParentIndices = parents.ToArray();
+                            }
+
+                            if (rigProp.TryGetProperty("joint_names", out var namesProp))
+                            {
+                                var names = new List<string>();
+                                foreach (var n in namesProp.EnumerateArray())
+                                {
+                                    names.Add(n.GetString() ?? "Joint");
+                                }
+                                result.JointNames = names.ToArray();
+                            }
+
+                            if (rigProp.TryGetProperty("skinning_weights", out var weightsProp))
+                            {
+                                int vertexCount = weightsProp.GetArrayLength();
+                                int jointCount = result.JointPositions?.Length ?? 0;
+                                var weights = new float[vertexCount, jointCount];
+
+                                int vIdx = 0;
+                                foreach (var row in weightsProp.EnumerateArray())
+                                {
+                                    int jIdx = 0;
+                                    foreach (var val in row.EnumerateArray())
+                                    {
+                                        if (jIdx < jointCount)
+                                            weights[vIdx, jIdx] = (float)val.GetDouble();
+                                        jIdx++;
+                                    }
+                                    vIdx++;
+                                }
+                                result.SkinningWeights = weights;
+                            }
+
+                            result.Success = true;
+                            result.StatusMessage = "UniRig rigging complete";
+                        }
+                    }
+                    else
+                    {
+                        string error = outputData.TryGetProperty("error", out var errProp)
+                            ? errProp.GetString() ?? "Unknown error"
+                            : "Unknown error";
+                        result.StatusMessage = error;
+                        Log($"UniRig inference failed: {error}");
+                    }
+                }
+                else
+                {
+                    result.StatusMessage = $"UniRig inference failed with exit code {exitCode}";
+                    Log(result.StatusMessage);
+                }
+
+                OnProgress?.Invoke("inference", 1.0f, "Complete");
+            }
+            catch (Exception ex)
+            {
+                result.StatusMessage = ex.Message;
+                Log($"UniRig inference exception: {ex.Message}");
+            }
+            finally
+            {
+                try { if (!string.IsNullOrEmpty(outputPath) && File.Exists(outputPath)) File.Delete(outputPath); } catch { }
+            }
+
+            return result;
         }
 
         public void Dispose()

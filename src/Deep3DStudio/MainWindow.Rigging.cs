@@ -22,8 +22,8 @@ namespace Deep3DStudio
     {
         private void OnAutoRig(object? sender, EventArgs e)
         {
-            var selectedMesh = GetSelectedMesh();
-            if (selectedMesh == null)
+            var selectedMeshObj = GetSelectedMeshObject();
+            if (selectedMeshObj == null)
             {
                 ShowMessage("No mesh selected", "Please select a mesh to rig.");
                 return;
@@ -36,7 +36,61 @@ namespace Deep3DStudio
                 return;
             }
 
-            _statusLabel.Text = $"UniRig auto-rigging not yet implemented (model path: {IniSettings.Instance.UniRigModelPath})";
+            UI.ProgressDialog.Instance.Start("Auto Rigging with UniRig...", UI.OperationType.Processing);
+
+            Task.Run(async () =>
+            {
+                try
+                {
+                    var mesh = selectedMeshObj.MeshData;
+                    UI.ProgressDialog.Instance.Update(0.1f, $"Rigging {selectedMeshObj.Name}...");
+
+                    var rigResult = await AIModels.AIModelManager.Instance.RigMeshAsync(
+                        mesh.Vertices.ToArray(),
+                        mesh.Indices.ToArray(),
+                        msg => Application.Invoke((s, e2) => UI.ProgressDialog.Instance.Log(msg)));
+
+                    SkeletonData skeleton;
+                    if (rigResult != null && rigResult.Success && rigResult.JointPositions?.Length > 0)
+                    {
+                        skeleton = SkeletonData.FromRigResult(rigResult);
+                    }
+                    else
+                    {
+                        var (min, max) = selectedMeshObj.GetWorldBounds();
+                        var center = (min + max) * 0.5f;
+                        var size = max - min;
+                        float height = Math.Max(size.Y, 0.1f);
+                        float scale = height;
+                        var rootPosition = new OpenTK.Mathematics.Vector3(center.X, min.Y + height * 0.5f, center.Z);
+                        skeleton = SkeletonData.CreateHumanoidTemplate(rootPosition, scale);
+                    }
+
+                    var skelObj = new SkeletonObject($"Rig_{selectedMeshObj.Name}", skeleton)
+                    {
+                        TargetMesh = selectedMeshObj,
+                        Position = OpenTK.Mathematics.Vector3.Zero
+                    };
+
+                    Application.Invoke((s, e2) =>
+                    {
+                        _sceneGraph.AddObject(skelObj);
+                        _activeSkeletonObject = skelObj;
+                        _riggingPanel?.SetSkeleton(skelObj);
+                        _viewport.QueueDraw();
+                        _statusLabel.Text = $"UniRig rigging complete. {skeleton.Joints.Count} joints.";
+                        UI.ProgressDialog.Instance.Complete();
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Application.Invoke((s, e2) =>
+                    {
+                        UI.ProgressDialog.Instance.Fail(ex);
+                        _statusLabel.Text = "UniRig rigging failed.";
+                    });
+                }
+            });
         }
 
         private void OnShowRiggingPanel(object? sender, EventArgs e)

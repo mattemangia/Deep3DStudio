@@ -9,6 +9,7 @@ Communication happens via JSON files.
 
 import sys
 import os
+import math
 
 # Disable xformers early to avoid compatibility issues with PyTorch versions
 # Must be set before any imports that might load xformers (like diffusers, lgm)
@@ -79,6 +80,48 @@ log(f"sys.path has {len(sys.path)} entries")
 # Global storage
 loaded_models = {}
 
+def _install_torch_cluster_stub():
+    """Provide a minimal torch_cluster.fps stub when torch_cluster isn't installed."""
+    try:
+        import torch_cluster  # noqa: F401
+        return
+    except Exception:
+        pass
+
+    import types
+    import torch
+
+    def fps(pos, batch=None, ratio=0.25, random_start=False):
+        if batch is None:
+            batch = torch.zeros(pos.shape[0], dtype=torch.long, device=pos.device)
+        batch = batch.to(pos.device)
+        out = []
+        for b in torch.unique(batch):
+            idx = (batch == b).nonzero(as_tuple=False).view(-1)
+            if idx.numel() == 0:
+                continue
+            k = max(1, int(math.ceil(idx.numel() * float(ratio))))
+            if random_start:
+                perm = torch.randperm(idx.numel(), device=idx.device)
+                sel = idx[perm[:k]]
+            else:
+                if k == 1:
+                    sel = idx[:1]
+                else:
+                    step = (idx.numel() - 1) / float(k - 1)
+                    pick = torch.round(torch.arange(k, device=idx.device) * step).long()
+                    sel = idx[pick]
+            out.append(sel)
+        if out:
+            return torch.cat(out, dim=0)
+        return torch.zeros((0,), dtype=torch.long, device=pos.device)
+
+    torch_cluster_stub = types.ModuleType("torch_cluster")
+    torch_cluster_stub.fps = fps
+    sys.modules["torch_cluster"] = torch_cluster_stub
+
+_install_torch_cluster_stub()
+
 def get_device(device_str):
     import torch
     if device_str == "cuda" and torch.cuda.is_available():
@@ -137,6 +180,299 @@ def decode_images(images_data):
         pil_images.append(img)
         log(f"Decoded image {i}: {img.size}")
     return pil_images
+
+# ===================== UNIRIG HELPERS =====================
+
+def _as_box(data):
+    """Best-effort Box wrapper for config objects."""
+    try:
+        from box import Box
+        return Box(data)
+    except Exception:
+        class SimpleBox(dict):
+            __getattr__ = dict.get
+        return SimpleBox(data)
+
+def _find_unirig_config_root(weights_path):
+    try:
+        import unirig
+        pkg_dir = os.path.dirname(unirig.__file__)
+        config_root = os.path.join(pkg_dir, "configs")
+        if os.path.isdir(config_root):
+            return config_root
+    except Exception:
+        pass
+
+    # Fallback: look for configs relative to weights
+    if weights_path:
+        base_dir = os.path.dirname(weights_path)
+        for candidate in [
+            os.path.join(base_dir, "configs"),
+            os.path.join(base_dir, "..", "configs"),
+            os.path.join(base_dir, "..", "..", "configs"),
+        ]:
+            candidate = os.path.abspath(candidate)
+            if os.path.isdir(candidate):
+                return candidate
+    return None
+
+def _find_unirig_pkg_root():
+    for base in sys.path:
+        candidate = os.path.join(base, "unirig")
+        if os.path.isdir(candidate):
+            return candidate
+    return None
+
+def _patch_unirig_parse_encoder():
+    pkg_root = _find_unirig_pkg_root()
+    if not pkg_root:
+        return
+    path = os.path.join(pkg_root, "model", "parse_encoder.py")
+    if not os.path.exists(path):
+        return
+    content = """from dataclasses import dataclass
+
+from .michelangelo.get_model import get_encoder as get_encoder_michelangelo
+from .michelangelo.get_model import AlignedShapeLatentPerceiver
+from .michelangelo.get_model import get_encoder_simplified as get_encoder_michelangelo_encoder
+from .michelangelo.get_model import ShapeAsLatentPerceiverEncoder
+try:
+    from .pointcept.models.PTv3Object import get_encoder as get_encoder_ptv3obj
+    from .pointcept.models.PTv3Object import PointTransformerV3Object
+except Exception:
+    get_encoder_ptv3obj = None
+    PointTransformerV3Object = None
+
+class PTV3OBJ_PLACEHOLDER:
+    pass
+
+@dataclass(frozen=True)
+class _MAP_MESH_ENCODER:
+    ptv3obj = PointTransformerV3Object if PointTransformerV3Object is not None else PTV3OBJ_PLACEHOLDER
+    michelangelo = AlignedShapeLatentPerceiver
+    michelangelo_encoder = ShapeAsLatentPerceiverEncoder
+
+MAP_MESH_ENCODER = _MAP_MESH_ENCODER()
+
+
+def get_mesh_encoder(**kwargs):
+    __target__ = kwargs['__target__']
+    del kwargs['__target__']
+    if __target__ == 'ptv3obj' and get_encoder_ptv3obj is None:
+        raise ImportError(\"ptv3obj encoder requires optional pointcept dependencies\")
+    MAP = {
+        'ptv3obj': get_encoder_ptv3obj,
+        'michelangelo': get_encoder_michelangelo,
+        'michelangelo_encoder': get_encoder_michelangelo_encoder,
+    }
+    assert __target__ in MAP, f\"expect: [{','.join(MAP.keys())}], found: {__target__}\"
+    return MAP[__target__](**kwargs)
+"""
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+def _patch_unirig_parse_model():
+    pkg_root = _find_unirig_pkg_root()
+    if not pkg_root:
+        return
+    path = os.path.join(pkg_root, "model", "parse.py")
+    if not os.path.exists(path):
+        return
+    content = """from .unirig_ar import UniRigAR
+try:
+    from .unirig_skin import UniRigSkin
+except Exception:
+    UniRigSkin = None
+
+from .spec import ModelSpec
+
+def get_model(**kwargs) -> ModelSpec:
+    __target__ = kwargs['__target__']
+    del kwargs['__target__']
+    if __target__ == 'unirig_skin' and UniRigSkin is None:
+        raise ImportError("unirig_skin requires optional torch_scatter dependencies")
+    MAP = {
+        'unirig_ar': UniRigAR,
+        'unirig_skin': UniRigSkin,
+    }
+    assert __target__ in MAP, f"expect: [{','.join(MAP.keys())}], found: {__target__}"
+    return MAP[__target__](**kwargs)
+"""
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+def _load_unirig_yaml(config_root, rel_path):
+    import yaml
+    path = rel_path
+    if config_root and not os.path.isabs(rel_path):
+        path = os.path.join(config_root, rel_path)
+    with open(path, "r", encoding="utf-8") as f:
+        return _as_box(yaml.safe_load(f))
+
+def _resolve_unirig_skeleton_paths(config_dict, config_root):
+    try:
+        order_cfg = None
+        if isinstance(config_dict, dict):
+            order_cfg = config_dict.get("order_config", config_dict)
+        if not order_cfg or not isinstance(order_cfg, dict):
+            return
+        skel = order_cfg.get("skeleton_path")
+        if not skel:
+            return
+        for key, rel in list(skel.items()):
+            if not os.path.isabs(rel):
+                rel_path = rel.replace("\\", "/")
+                if rel_path.startswith("./"):
+                    rel_path = rel_path[2:]
+                if rel_path.startswith("configs/"):
+                    rel_path = rel_path.split("/", 1)[1]
+                skel[key] = os.path.normpath(os.path.join(config_root, rel_path))
+    except Exception:
+        pass
+
+def _compute_vertex_normals(vertices, faces):
+    import trimesh
+    mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+    return mesh.vertex_normals.astype("float32"), mesh.face_normals.astype("float32")
+
+def _heuristic_skinning(vertices, joints, max_bones_per_vertex):
+    import numpy as np
+    if joints is None or len(joints) == 0:
+        return np.zeros((len(vertices), 0), dtype=np.float32)
+    joints = np.asarray(joints, dtype=np.float32)
+    verts = np.asarray(vertices, dtype=np.float32)
+    num_joints = joints.shape[0]
+    k = max(1, min(max_bones_per_vertex, num_joints))
+
+    # Inverse-distance weights to nearest joints
+    diff = verts[:, None, :] - joints[None, :, :]
+    dist2 = np.sum(diff * diff, axis=-1) + 1e-8
+    inv = 1.0 / dist2
+    topk = np.argpartition(-inv, k - 1, axis=1)[:, :k]
+    top_vals = np.take_along_axis(inv, topk, axis=1)
+    denom = top_vals.sum(axis=1, keepdims=True)
+    top_vals = np.divide(top_vals, denom, out=np.zeros_like(top_vals), where=denom > 0)
+
+    weights = np.zeros((verts.shape[0], num_joints), dtype=np.float32)
+    rows = np.arange(verts.shape[0])[:, None]
+    weights[rows, topk] = top_vals
+    return weights
+
+class _UniRigRunner:
+    def __init__(self, weights_path, device):
+        self.weights_path = weights_path
+        self.device = device
+        self.config_root = _find_unirig_config_root(weights_path)
+        self.ar_model = None
+        self.ar_tokenizer = None
+        self.ar_transform = None
+        self._load_ar()
+
+    def _load_ar(self):
+        import torch
+        _patch_unirig_parse_encoder()
+        _patch_unirig_parse_model()
+        from unirig.tokenizer.parse import get_tokenizer
+        from unirig.tokenizer.spec import TokenizerConfig
+        from unirig.model.parse import get_model
+        from unirig.data.transform import TransformConfig
+
+        if not self.config_root:
+            raise Exception("UniRig configs not found. Ensure unirig/configs is installed.")
+
+        model_cfg = _load_unirig_yaml(self.config_root, "model/unirig_ar_350m_1024_81920_float32.yaml")
+        tok_cfg = _load_unirig_yaml(self.config_root, "tokenizer/tokenizer_parts_articulationxl_256.yaml")
+        transform_cfg = _load_unirig_yaml(self.config_root, "transform/inference_ar_transform.yaml")
+
+        # Adjust config for CPU environments
+        if self.device.type == "cpu":
+            if "llm" in model_cfg:
+                model_cfg["llm"]["_attn_implementation"] = "eager"
+            if "mesh_encoder" in model_cfg:
+                model_cfg["mesh_encoder"]["flash"] = False
+        if "mesh_encoder" in model_cfg:
+            model_cfg["mesh_encoder"]["device"] = "cuda" if self.device.type == "cuda" else "cpu"
+
+        _resolve_unirig_skeleton_paths(tok_cfg, self.config_root)
+        tokenizer = get_tokenizer(config=TokenizerConfig.parse(config=tok_cfg))
+        model = get_model(tokenizer=tokenizer, **model_cfg)
+
+        ckpt = torch.load(self.weights_path, map_location="cpu")
+        state_dict = ckpt.get("state_dict", ckpt)
+        model_state = {k[len("model."):]: v for k, v in state_dict.items() if k.startswith("model.")}
+        if model_state:
+            state_dict = model_state
+        model.load_state_dict(state_dict, strict=False)
+
+        model = model.to(self.device).eval()
+
+        # transform config uses predict_transform_config
+        if "predict_transform_config" in transform_cfg:
+            transform_cfg = transform_cfg["predict_transform_config"]
+        _resolve_unirig_skeleton_paths(transform_cfg, self.config_root)
+        self.ar_transform = TransformConfig.parse(config=transform_cfg)
+        self.ar_model = model
+        self.ar_tokenizer = tokenizer
+
+    def infer(self, vertices, faces, max_joints, max_bones_per_vertex):
+        import numpy as np
+        import torch
+        from unirig.data.raw_data import RawData
+        from unirig.data.asset import Asset
+        from unirig.data.transform import transform_asset
+
+        verts = np.asarray(vertices, dtype=np.float32)
+        faces = np.asarray(faces, dtype=np.int64).reshape(-1, 3)
+        vnormals, fnormals = _compute_vertex_normals(verts, faces)
+
+        raw = RawData(
+            vertices=verts,
+            vertex_normals=vnormals,
+            faces=faces,
+            face_normals=fnormals,
+            joints=None,
+            tails=None,
+            skin=None,
+            no_skin=None,
+            parents=None,
+            names=None,
+            matrix_local=None,
+            path=None,
+            cls="mixamo",
+        )
+        asset = Asset.from_raw_data(raw_data=raw, cls="mixamo", path="inference", data_name="raw_data.npz")
+        transform_asset(asset=asset, transform_config=self.ar_transform)
+
+        with torch.no_grad():
+            # Ensure float32 tensors to match model weights and avoid dtype mismatch.
+            verts_t = torch.from_numpy(asset.sampled_vertices).float().to(self.device)
+            norms_t = torch.from_numpy(asset.sampled_normals).float().to(self.device)
+            max_positions = getattr(self.ar_model.transformer.config, "max_position_embeddings", 2048)
+            token_num = getattr(self.ar_model.mesh_encoder, "token_num", 1024)
+            max_new_tokens = max(1, int(max_positions) - int(token_num) - 2)
+            res = self.ar_model.generate(
+                vertices=verts_t,
+                normals=norms_t,
+                cls=asset.cls,
+                max_new_tokens=max_new_tokens,
+            )
+
+        joints = res.joints.astype(np.float32) if res.joints is not None else np.zeros((0, 3), dtype=np.float32)
+        parents = [p if p is not None else -1 for p in (res.parents or [])]
+        names = res.names or [f"Joint_{i}" for i in range(len(joints))]
+
+        if max_joints and len(joints) > max_joints:
+            joints = joints[:max_joints]
+            parents = parents[:max_joints]
+            names = names[:max_joints]
+
+        weights = _heuristic_skinning(verts, joints, max_bones_per_vertex)
+        return {
+            "joint_positions": joints.tolist(),
+            "parent_indices": [int(x) for x in parents],
+            "joint_names": names,
+            "skinning_weights": weights.tolist()
+        }
 
 # ===================== MODEL LOADERS =====================
 
@@ -425,10 +761,8 @@ def load_lgm(weights_path, device):
     return model
 
 def load_unirig(weights_path, device):
-    import torch
-    # UniRig for automatic rigging
-    checkpoint = torch.load(weights_path, map_location=device)
-    return checkpoint
+    # UniRig for automatic rigging (skeleton + skinning)
+    return _UniRigRunner(weights_path, device)
 
 def load_model(model_name, weights_path, device_str):
     global loaded_models
@@ -969,9 +1303,8 @@ def infer_lgm(images_data):
         traceback.print_exc(file=sys.stderr)
         return {"success": False, "error": str(e)}
 
-def infer_unirig(mesh_data, max_joints=50):
+def infer_unirig(mesh_data, max_joints=50, max_bones_per_vertex=4):
     """UniRig automatic rigging"""
-    import torch
     import numpy as np
 
     model = loaded_models.get('unirig')
@@ -979,28 +1312,21 @@ def infer_unirig(mesh_data, max_joints=50):
         return {"success": False, "error": "UniRig not loaded"}
 
     try:
+        if mesh_data is None:
+            return {"success": False, "error": "No mesh data provided"}
         # mesh_data contains vertices and faces
         vertices = np.array(mesh_data.get('vertices', []), dtype=np.float32)
         faces = np.array(mesh_data.get('faces', []), dtype=np.int32)
+        if faces.size > 0 and faces.ndim == 1 and faces.size % 3 == 0:
+            faces = faces.reshape(-1, 3)
 
         if len(vertices) == 0:
             return {"success": False, "error": "No vertices"}
 
-        with torch.no_grad():
-            # Run rigging inference
-            device = next(iter(model.values())).device if isinstance(model, dict) else 'cpu'
+        if not hasattr(model, "infer"):
+            return {"success": False, "error": "UniRig model wrapper missing infer()"}
 
-            verts_tensor = torch.from_numpy(vertices).to(device)
-            faces_tensor = torch.from_numpy(faces).to(device)
-
-            # This is a placeholder - actual UniRig API may differ
-            result = {
-                'joint_positions': [],
-                'parent_indices': [],
-                'skinning_weights': [],
-                'joint_names': []
-            }
-
+        result = model.infer(vertices, faces, max_joints, max_bones_per_vertex)
         return {"success": True, "rig_result": result}
 
     except Exception as e:
@@ -1028,9 +1354,18 @@ def run_inference(model_name, input_path, output_path, weights_path=None, device
                 json.dump(result, f)
             return result
 
-    # Handle mesh-input models (like triposf) that take mesh path directly
-    if mesh_input_path and model_name == 'triposf':
-        result = infer_triposf(mesh_input_path)
+    # Handle mesh-input models (like triposf/unirig) that take mesh path directly
+    if mesh_input_path and model_name in ('triposf', 'unirig'):
+        if model_name == 'triposf':
+            result = infer_triposf(mesh_input_path)
+        else:
+            import trimesh
+            mesh = trimesh.load(mesh_input_path, force='mesh')
+            mesh_data = {
+                "vertices": mesh.vertices.tolist() if hasattr(mesh.vertices, "tolist") else list(mesh.vertices),
+                "faces": mesh.faces.reshape(-1).tolist() if hasattr(mesh.faces, "reshape") else list(mesh.faces)
+            }
+            result = infer_unirig(mesh_data, kwargs.get('max_joints', 50), kwargs.get('max_bones_per_vertex', 4))
         with open(output_path, 'w') as f:
             json.dump(result, f)
         log(f"Results written to {output_path}")
@@ -1060,7 +1395,7 @@ def run_inference(model_name, input_path, output_path, weights_path=None, device
     elif model_name == 'lgm':
         result = infer_lgm(images_data)
     elif model_name == 'unirig':
-        result = infer_unirig(mesh_data, kwargs.get('max_joints', 50))
+        result = infer_unirig(mesh_data, kwargs.get('max_joints', 50), kwargs.get('max_bones_per_vertex', 4))
     else:
         result = {"success": False, "error": f"Unknown model: {model_name}"}
 
@@ -1085,6 +1420,7 @@ def main():
     parser.add_argument('--num-steps', type=int, default=50)
     parser.add_argument('--guidance-scale', type=float, default=3.0)
     parser.add_argument('--max-joints', type=int, default=50)
+    parser.add_argument('--max-bones', type=int, default=4)
 
     args = parser.parse_args()
     log(f"Command: {args.command}")
@@ -1106,7 +1442,8 @@ def main():
             mc_resolution=args.mc_resolution,
             num_steps=args.num_steps,
             guidance_scale=args.guidance_scale,
-            max_joints=args.max_joints
+            max_joints=args.max_joints,
+            max_bones_per_vertex=args.max_bones
         )
     else:
         result = {"success": False, "error": "Unknown command"}
