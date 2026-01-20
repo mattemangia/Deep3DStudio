@@ -50,6 +50,10 @@ namespace Deep3DStudio
                 };
                 PythonService.Instance.Initialize();
                 Console.WriteLine("Python environment ready.");
+                
+                // Update TUI status
+                if (!cliOptions.IsCLIMode)
+                    TuiStatusMonitor.Instance.SetStatus("Ready");
             }
             catch (Exception ex)
             {

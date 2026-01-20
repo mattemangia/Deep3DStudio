@@ -19,6 +19,7 @@ namespace Deep3DStudio.CLI
         private Label? _statusLabel;
         private bool _isRunning;
         private TuiWriter? _writer;
+        private ManualResetEvent _initEvent = new ManualResetEvent(false);
 
         // P/Invoke to allocate console on Windows
         [DllImport("kernel32.dll", SetLastError = true)]
@@ -37,6 +38,7 @@ namespace Deep3DStudio.CLI
         {
             if (_isRunning) return;
             _isRunning = true;
+            _initEvent.Reset();
 
             // Ensure we have a console window on Windows
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -63,8 +65,8 @@ namespace Deep3DStudio.CLI
             
             _tuiThread.Start();
 
-            // Give the TUI a moment to initialize
-            Thread.Sleep(500);
+            // Wait for TUI to be ready (up to 5 seconds)
+            _initEvent.WaitOne(5000);
 
             // Redirect Console Output
             _writer = new TuiWriter(this);
@@ -78,19 +80,30 @@ namespace Deep3DStudio.CLI
             {
                 Application.Init();
 
+                // Define Dark Theme
+                var darkScheme = new ColorScheme()
+                {
+                    Normal = new Terminal.Gui.Attribute(Color.Gray, Color.Black),
+                    Focus = new Terminal.Gui.Attribute(Color.White, Color.DarkGray),
+                    HotNormal = new Terminal.Gui.Attribute(Color.Cyan, Color.Black),
+                    HotFocus = new Terminal.Gui.Attribute(Color.Cyan, Color.DarkGray)
+                };
+
                 _window = new Window("Deep3DStudio Console")
                 {
                     X = 0,
                     Y = 0,
                     Width = Dim.Fill(),
-                    Height = Dim.Fill()
+                    Height = Dim.Fill(),
+                    ColorScheme = darkScheme
                 };
 
                 _statusLabel = new Label("Status: Initializing...")
                 {
                     X = 1,
                     Y = 1,
-                    Width = Dim.Fill() - 2
+                    Width = Dim.Fill() - 2,
+                    ColorScheme = darkScheme
                 };
 
                 _progressBar = new ProgressBar()
@@ -98,7 +111,8 @@ namespace Deep3DStudio.CLI
                     X = 1,
                     Y = 2,
                     Width = Dim.Fill() - 2,
-                    Fraction = 0f
+                    Fraction = 0f,
+                    ColorScheme = darkScheme
                 };
 
                 _logView = new TextView()
@@ -108,12 +122,15 @@ namespace Deep3DStudio.CLI
                     Width = Dim.Fill() - 2,
                     Height = Dim.Fill() - 1, // Leave space for border
                     ReadOnly = true,
-                    ColorScheme = Colors.Base,
+                    ColorScheme = darkScheme,
                     Text = "Deep3DStudio Log Started...\n"
                 };
 
-                _window.Add(_statusLabel, _progressBar, new Label(1, 3, "Logs:"), _logView);
+                _window.Add(_statusLabel, _progressBar, new Label(1, 3, "Logs:") { ColorScheme = darkScheme }, _logView);
                 Application.Top.Add(_window);
+
+                // Signal that UI is built
+                _initEvent.Set();
 
                 Application.Run();
             }
@@ -122,6 +139,7 @@ namespace Deep3DStudio.CLI
                 // If TUI fails to init (e.g. no console), just fail silently
                 // and let the app continue
                 _isRunning = false;
+                _initEvent.Set(); // Release waiter
                 // Write to debug output at least
                 System.Diagnostics.Debug.WriteLine($"TUI Init Failed: {ex.Message}");
             }
@@ -137,10 +155,20 @@ namespace Deep3DStudio.CLI
             Application.RequestStop();
         }
 
+        public void SetStatus(string status)
+        {
+            if (!_isRunning) return;
+            Application.MainLoop.Invoke(() =>
+            {
+                if (_statusLabel != null) _statusLabel.Text = $"Status: {status}";
+            });
+        }
+
         public void Log(string message)
         {
             if (!_isRunning || _logView == null) return;
 
+            // Ensure we are not blocking
             Application.MainLoop.Invoke(() =>
             {
                 if (_logView != null)
