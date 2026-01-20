@@ -3,6 +3,7 @@ using System;
 using System.Threading;
 using System.IO;
 using System.Text;
+using System.Runtime.InteropServices;
 
 namespace Deep3DStudio.CLI
 {
@@ -19,14 +20,47 @@ namespace Deep3DStudio.CLI
         private bool _isRunning;
         private TuiWriter? _writer;
 
+        // P/Invoke to allocate console on Windows
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool AllocConsole();
+
+        [DllImport("kernel32.dll")]
+        static extern IntPtr GetConsoleWindow();
+
+        [DllImport("user32.dll")]
+        static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        private const int SW_SHOW = 5;
+
         public void Start()
         {
             if (_isRunning) return;
             _isRunning = true;
 
+            // Ensure we have a console window on Windows
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                IntPtr handle = GetConsoleWindow();
+                if (handle == IntPtr.Zero)
+                {
+                    AllocConsole();
+                }
+                else
+                {
+                    ShowWindow(handle, SW_SHOW);
+                }
+            }
+
             // Start TUI in a separate thread to not block GTK/ImGui
             _tuiThread = new Thread(TuiLoop);
             _tuiThread.IsBackground = true;
+            
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                _tuiThread.SetApartmentState(ApartmentState.STA); // Better for UI threads on Windows
+            }
+            
             _tuiThread.Start();
 
             // Give the TUI a moment to initialize
@@ -83,11 +117,13 @@ namespace Deep3DStudio.CLI
 
                 Application.Run();
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 // If TUI fails to init (e.g. no console), just fail silently
                 // and let the app continue
                 _isRunning = false;
+                // Write to debug output at least
+                System.Diagnostics.Debug.WriteLine($"TUI Init Failed: {ex.Message}");
             }
         }
 
