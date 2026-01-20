@@ -4,6 +4,8 @@ using System.Threading;
 using System.IO;
 using System.Text;
 using System.Runtime.InteropServices;
+using SkiaSharp;
+using System.Reflection;
 
 namespace Deep3DStudio.CLI
 {
@@ -84,7 +86,10 @@ namespace Deep3DStudio.CLI
             {
                 Application.Init();
 
-                // High Contrast Dark Theme (White on Black)
+                // Show Splash Screen
+                ShowSplash();
+
+                // Define Dark Theme (High Contrast)
                 var darkScheme = new ColorScheme()
                 {
                     Normal = new Terminal.Gui.Attribute(Color.White, Color.Black),
@@ -143,6 +148,115 @@ namespace Deep3DStudio.CLI
                 _isRunning = false;
                 _initEvent.Set();
                 File.WriteAllText("tui_error.log", $"TUI Init Failed: {ex}\n");
+            }
+        }
+
+        private void ShowSplash()
+        {
+            try
+            {
+                string asciiArt = GenerateAsciiLogo();
+                if (string.IsNullOrEmpty(asciiArt)) return;
+
+                var splashWindow = new Window("Deep3DStudio")
+                {
+                    X = 0,
+                    Y = 0,
+                    Width = Dim.Fill(),
+                    Height = Dim.Fill(),
+                    ColorScheme = new ColorScheme() { Normal = new Terminal.Gui.Attribute(Color.Cyan, Color.Black) }
+                };
+
+                var logoLabel = new Label(asciiArt)
+                {
+                    X = Pos.Center(),
+                    Y = Pos.Center(),
+                    TextAlignment = TextAlignment.Left
+                };
+
+                splashWindow.Add(logoLabel);
+                Application.Top.Add(splashWindow);
+
+                // Run for 2 seconds
+                bool stopSplash = false;
+                Application.MainLoop.AddTimeout(TimeSpan.FromSeconds(2), (loop) =>
+                {
+                    stopSplash = true;
+                    Application.RequestStop();
+                    return false;
+                });
+
+                Application.Run();
+                
+                // Clean up splash
+                Application.Top.Remove(splashWindow);
+            }
+            catch (Exception ex)
+            {
+                File.AppendAllText("tui_debug.log", $"Splash failed: {ex.Message}\n");
+            }
+        }
+
+        private string GenerateAsciiLogo()
+        {
+            try
+            {
+                var assembly = Assembly.GetExecutingAssembly();
+                // Find resource ending with logo.png
+                string? resourceName = null;
+                foreach (var name in assembly.GetManifestResourceNames())
+                {
+                    if (name.EndsWith("logo.png"))
+                    {
+                        resourceName = name;
+                        break;
+                    }
+                }
+
+                if (resourceName == null) return "Deep3DStudio";
+
+                using var stream = assembly.GetManifestResourceStream(resourceName);
+                if (stream == null) return "Deep3DStudio";
+
+                using var bitmap = SKBitmap.Decode(stream);
+                if (bitmap == null) return "Deep3DStudio";
+
+                // Resize for TUI (e.g. 60 width, aspect ratio corrected)
+                // Console characters are roughly 1:2 width:height
+                int width = 60;
+                int height = (int)(bitmap.Height * ((float)width / bitmap.Width) * 0.5f);
+                
+                using var resized = bitmap.Resize(new SKImageInfo(width, height), SKFilterQuality.Medium);
+                if (resized == null) return "Deep3DStudio";
+
+                var sb = new StringBuilder();
+                string ramp = "@%#*+=-:. ";
+
+                for (int y = 0; y < resized.Height; y++)
+                {
+                    for (int x = 0; x < resized.Width; x++)
+                    {
+                        var color = resized.GetPixel(x, y);
+                        // Simple luminance
+                        float luminance = (0.299f * color.Red + 0.587f * color.Green + 0.114f * color.Blue) / 255f;
+                        if (color.Alpha < 128)
+                        {
+                            sb.Append(' ');
+                        }
+                        else
+                        {
+                            int index = (int)(luminance * (ramp.Length - 1));
+                            sb.Append(ramp[index]);
+                        }
+                    }
+                    sb.AppendLine();
+                }
+
+                return sb.ToString();
+            }
+            catch
+            {
+                return "Deep3DStudio";
             }
         }
         
