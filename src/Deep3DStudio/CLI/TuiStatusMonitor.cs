@@ -74,7 +74,8 @@ namespace Deep3DStudio.CLI
             Console.SetError(_writer);
             
             // Explicit test message
-            Log("TUI Console attached successfully.\n");
+            Console.WriteLine("TUI Console attached successfully (via Console.WriteLine).");
+            Log("TUI Direct Log Test.\n");
         }
 
         private void TuiLoop()
@@ -83,30 +84,19 @@ namespace Deep3DStudio.CLI
             {
                 Application.Init();
 
-                // Define Dark Theme
-                var darkScheme = new ColorScheme()
-                {
-                    Normal = new Terminal.Gui.Attribute(Color.Gray, Color.Black),
-                    Focus = new Terminal.Gui.Attribute(Color.White, Color.Black),
-                    HotNormal = new Terminal.Gui.Attribute(Color.Cyan, Color.Black),
-                    HotFocus = new Terminal.Gui.Attribute(Color.Cyan, Color.Black)
-                };
-
                 _window = new Window("Deep3DStudio Console")
                 {
                     X = 0,
                     Y = 0,
                     Width = Dim.Fill(),
-                    Height = Dim.Fill(),
-                    ColorScheme = darkScheme
+                    Height = Dim.Fill()
                 };
 
                 _statusLabel = new Label("Status: Initializing...")
                 {
                     X = 1,
                     Y = 1,
-                    Width = Dim.Fill() - 2,
-                    ColorScheme = darkScheme
+                    Width = Dim.Fill() - 2
                 };
 
                 _progressBar = new ProgressBar()
@@ -114,8 +104,7 @@ namespace Deep3DStudio.CLI
                     X = 1,
                     Y = 2,
                     Width = Dim.Fill() - 2,
-                    Fraction = 0f,
-                    ColorScheme = darkScheme
+                    Fraction = 0f
                 };
 
                 _logView = new TextView()
@@ -123,13 +112,13 @@ namespace Deep3DStudio.CLI
                     X = 1,
                     Y = 4,
                     Width = Dim.Fill() - 2,
-                    Height = Dim.Fill(), // Use all remaining space
+                    Height = Dim.Fill(),
                     ReadOnly = true,
-                    ColorScheme = darkScheme,
+                    ColorScheme = Colors.Base, // Use default theme to ensure visibility
                     Text = "Deep3DStudio Log Started...\n"
                 };
 
-                _window.Add(_statusLabel, _progressBar, new Label(1, 3, "Logs:") { ColorScheme = darkScheme }, _logView);
+                _window.Add(_statusLabel, _progressBar, new Label(1, 3, "Logs:"), _logView);
                 Application.Top.Add(_window);
 
                 // Signal that UI is built
@@ -139,22 +128,17 @@ namespace Deep3DStudio.CLI
             }
             catch (Exception ex)
             {
-                // If TUI fails to init (e.g. no console), just fail silently
-                // and let the app continue
                 _isRunning = false;
-                _initEvent.Set(); // Release waiter
-                // Write to debug output at least
-                System.Diagnostics.Debug.WriteLine($"TUI Init Failed: {ex.Message}");
+                _initEvent.Set();
+                File.WriteAllText("tui_error.log", $"TUI Init Failed: {ex}\n");
             }
         }
 
+        // ... (Stop and SetStatus methods remain the same) ...
         public void Stop()
         {
             if (!_isRunning) return;
             _isRunning = false;
-            
-            // Restore console? Maybe not needed if app is exiting
-            // But we should stop the TUI loop
             Application.RequestStop();
         }
 
@@ -173,9 +157,11 @@ namespace Deep3DStudio.CLI
 
         public void Log(string message)
         {
+            // Debug logging to verify data reception
+            try { File.AppendAllText("tui_debug.log", message); } catch { }
+
             if (!_isRunning || _logView == null) return;
 
-            // Ensure we are not blocking
             Application.MainLoop.Invoke(() =>
             {
                 if (_logView != null)
@@ -183,15 +169,14 @@ namespace Deep3DStudio.CLI
                     // Append text. 
                     var currentText = _logView.Text.ToString();
                     
-                    // Simple buffer limiting
                     if (currentText.Length > 20000) 
                         currentText = currentText.Substring(currentText.Length - 10000);
                         
                     _logView.Text = currentText + message;
                     
-                    // Auto-scroll attempt
                     _logView.ScrollTo(_logView.Lines - 1);
                     _logView.SetNeedsDisplay();
+                    Application.Refresh(); // Force refresh
                 }
             });
         }
@@ -213,7 +198,6 @@ namespace Deep3DStudio.CLI
             });
         }
 
-        // Custom TextWriter to redirect Console.Out/Error
         private class TuiWriter : TextWriter
         {
             private readonly TuiStatusMonitor _monitor;
@@ -239,10 +223,15 @@ namespace Deep3DStudio.CLI
                 if (value != null) _monitor.Log(value + "\n");
             }
 
-            public override void Flush()
+            public override void Write(char[] buffer, int index, int count)
             {
-                // No-op, data is sent immediately
+                if (buffer != null)
+                {
+                    _monitor.Log(new string(buffer, index, count));
+                }
             }
+
+            public override void Flush() { }
         }
     }
 }
