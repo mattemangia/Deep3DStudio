@@ -84,19 +84,30 @@ namespace Deep3DStudio.CLI
             {
                 Application.Init();
 
+                // High Contrast Dark Theme (White on Black)
+                var darkScheme = new ColorScheme()
+                {
+                    Normal = new Terminal.Gui.Attribute(Color.White, Color.Black),
+                    Focus = new Terminal.Gui.Attribute(Color.White, Color.Black),
+                    HotNormal = new Terminal.Gui.Attribute(Color.Cyan, Color.Black),
+                    HotFocus = new Terminal.Gui.Attribute(Color.Cyan, Color.Black)
+                };
+
                 _window = new Window("Deep3DStudio Console")
                 {
                     X = 0,
                     Y = 0,
                     Width = Dim.Fill(),
-                    Height = Dim.Fill()
+                    Height = Dim.Fill(),
+                    ColorScheme = darkScheme
                 };
 
                 _statusLabel = new Label("Status: Initializing...")
                 {
                     X = 1,
                     Y = 1,
-                    Width = Dim.Fill() - 2
+                    Width = Dim.Fill() - 2,
+                    ColorScheme = darkScheme
                 };
 
                 _progressBar = new ProgressBar()
@@ -104,7 +115,8 @@ namespace Deep3DStudio.CLI
                     X = 1,
                     Y = 2,
                     Width = Dim.Fill() - 2,
-                    Fraction = 0f
+                    Fraction = 0f,
+                    ColorScheme = darkScheme
                 };
 
                 _logView = new TextView()
@@ -114,11 +126,11 @@ namespace Deep3DStudio.CLI
                     Width = Dim.Fill() - 2,
                     Height = Dim.Fill(),
                     ReadOnly = true,
-                    ColorScheme = Colors.Base, // Use default theme to ensure visibility
+                    ColorScheme = darkScheme,
                     Text = "Deep3DStudio Log Started...\n"
                 };
 
-                _window.Add(_statusLabel, _progressBar, new Label(1, 3, "Logs:"), _logView);
+                _window.Add(_statusLabel, _progressBar, new Label(1, 3, "Logs:") { ColorScheme = darkScheme }, _logView);
                 Application.Top.Add(_window);
 
                 // Signal that UI is built
@@ -133,14 +145,8 @@ namespace Deep3DStudio.CLI
                 File.WriteAllText("tui_error.log", $"TUI Init Failed: {ex}\n");
             }
         }
-
-        // ... (Stop and SetStatus methods remain the same) ...
-        public void Stop()
-        {
-            if (!_isRunning) return;
-            _isRunning = false;
-            Application.RequestStop();
-        }
+        
+        // ... Stop ...
 
         public void SetStatus(string status)
         {
@@ -174,9 +180,10 @@ namespace Deep3DStudio.CLI
                         
                     _logView.Text = currentText + message;
                     
-                    _logView.ScrollTo(_logView.Lines - 1);
+                    if (_logView.Lines > 0)
+                        _logView.ScrollTo(_logView.Lines - 1);
+                        
                     _logView.SetNeedsDisplay();
-                    Application.Refresh(); // Force refresh
                 }
             });
         }
