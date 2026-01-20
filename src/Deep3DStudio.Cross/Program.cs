@@ -45,6 +45,15 @@ namespace Deep3DStudio
                 PythonService.Instance.OnExtractionProgress += (msg, prog) => {
                     TuiStatusMonitor.Instance.UpdateProgress(msg, prog);
                 };
+
+                // Hook AI Model Manager progress to TUI
+                var aiManager = Model.AIModels.AIModelManager.Instance;
+                aiManager.ProgressUpdated += (msg, prog) => {
+                     TuiStatusMonitor.Instance.UpdateProgress(msg, prog);
+                };
+                aiManager.ModelLoadProgress += (stage, prog, msg) => {
+                     TuiStatusMonitor.Instance.UpdateProgress($"{stage}: {msg}", prog);
+                };
             }
 
             // Set up global exception handlers for crash logging
