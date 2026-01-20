@@ -72,6 +72,9 @@ namespace Deep3DStudio.CLI
             _writer = new TuiWriter(this);
             Console.SetOut(_writer);
             Console.SetError(_writer);
+            
+            // Explicit test message
+            Log("TUI Console attached successfully.\n");
         }
 
         private void TuiLoop()
@@ -84,9 +87,9 @@ namespace Deep3DStudio.CLI
                 var darkScheme = new ColorScheme()
                 {
                     Normal = new Terminal.Gui.Attribute(Color.Gray, Color.Black),
-                    Focus = new Terminal.Gui.Attribute(Color.White, Color.DarkGray),
+                    Focus = new Terminal.Gui.Attribute(Color.White, Color.Black),
                     HotNormal = new Terminal.Gui.Attribute(Color.Cyan, Color.Black),
-                    HotFocus = new Terminal.Gui.Attribute(Color.Cyan, Color.DarkGray)
+                    HotFocus = new Terminal.Gui.Attribute(Color.Cyan, Color.Black)
                 };
 
                 _window = new Window("Deep3DStudio Console")
@@ -120,7 +123,7 @@ namespace Deep3DStudio.CLI
                     X = 1,
                     Y = 4,
                     Width = Dim.Fill() - 2,
-                    Height = Dim.Fill() - 1, // Leave space for border
+                    Height = Dim.Fill(), // Use all remaining space
                     ReadOnly = true,
                     ColorScheme = darkScheme,
                     Text = "Deep3DStudio Log Started...\n"
@@ -160,7 +163,11 @@ namespace Deep3DStudio.CLI
             if (!_isRunning) return;
             Application.MainLoop.Invoke(() =>
             {
-                if (_statusLabel != null) _statusLabel.Text = $"Status: {status}";
+                if (_statusLabel != null) 
+                {
+                    _statusLabel.Text = $"Status: {status}";
+                    _statusLabel.SetNeedsDisplay();
+                }
             });
         }
 
@@ -174,8 +181,6 @@ namespace Deep3DStudio.CLI
                 if (_logView != null)
                 {
                     // Append text. 
-                    // Note: TextView optimization might be needed for huge logs, 
-                    // but for now simple appending is fine.
                     var currentText = _logView.Text.ToString();
                     
                     // Simple buffer limiting
@@ -186,6 +191,7 @@ namespace Deep3DStudio.CLI
                     
                     // Auto-scroll attempt
                     _logView.ScrollTo(_logView.Lines - 1);
+                    _logView.SetNeedsDisplay();
                 }
             });
         }
@@ -196,8 +202,14 @@ namespace Deep3DStudio.CLI
 
             Application.MainLoop.Invoke(() =>
             {
-                if (_statusLabel != null) _statusLabel.Text = $"Status: {task}";
-                if (_progressBar != null) _progressBar.Fraction = Math.Clamp(progress, 0f, 1f);
+                if (_statusLabel != null) {
+                     _statusLabel.Text = $"Status: {task}";
+                     _statusLabel.SetNeedsDisplay();
+                }
+                if (_progressBar != null) {
+                    _progressBar.Fraction = Math.Clamp(progress, 0f, 1f);
+                    _progressBar.SetNeedsDisplay();
+                }
             });
         }
 
@@ -225,6 +237,11 @@ namespace Deep3DStudio.CLI
             public override void WriteLine(string? value)
             {
                 if (value != null) _monitor.Log(value + "\n");
+            }
+
+            public override void Flush()
+            {
+                // No-op, data is sent immediately
             }
         }
     }
