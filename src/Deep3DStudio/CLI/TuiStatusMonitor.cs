@@ -209,8 +209,8 @@ namespace Deep3DStudio.CLI
                 if (resized == null) return "Deep3DStudio";
 
                 var sb = new StringBuilder();
-                // Ramp from Dark (Space) to Bright (@) for black background
-                string ramp = " .:-=+*#%@";
+                // Unicode shading ramp: Space, Light, Medium, Dark, Full
+                string ramp = " ░▒▓█";
 
                 for (int y = 0; y < resized.Height; y++)
                 {
