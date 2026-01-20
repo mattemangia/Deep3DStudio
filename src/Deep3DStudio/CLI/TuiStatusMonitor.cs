@@ -157,6 +157,7 @@ namespace Deep3DStudio.CLI
                 {
                     _statusLabel.Text = $"Status: {status}";
                     _statusLabel.SetNeedsDisplay();
+                    Application.MainLoop.Driver.Wakeup(); // Force wake up to redraw immediately
                 }
             });
         }
@@ -184,6 +185,7 @@ namespace Deep3DStudio.CLI
                         _logView.ScrollTo(_logView.Lines - 1);
                         
                     _logView.SetNeedsDisplay();
+                    Application.MainLoop.Driver.Wakeup(); // Force wake up to redraw immediately
                 }
             });
         }
@@ -202,6 +204,7 @@ namespace Deep3DStudio.CLI
                     _progressBar.Fraction = Math.Clamp(progress, 0f, 1f);
                     _progressBar.SetNeedsDisplay();
                 }
+                Application.MainLoop.Driver.Wakeup(); // Force wake up to redraw immediately
             });
         }
 
