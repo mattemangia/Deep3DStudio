@@ -54,7 +54,7 @@ MODELS = {
             "must3r_retrieval_codebook.pkl": "https://download.europe.naverlabs.com/ComputerVision/MUSt3R/MUSt3R_512_retrieval_codebook.pkl"
         },
         "files": ["must3r/"],  # Uses dust3r as dependency (already included)
-        "requirements": ["torch", "torchvision", "einops", "opencv-python", "kornia", "trimesh", "roma", "xformers"]
+        "requirements": ["torch", "torchvision", "einops", "opencv-python", "kornia", "trimesh", "roma", "xformers", "faiss-cpu"]
     },
     "triposr": {
         "repo": "https://github.com/VAST-AI-Research/TripoSR.git",
@@ -63,15 +63,15 @@ MODELS = {
             "triposr_config.yaml": "https://huggingface.co/stabilityai/TripoSR/resolve/main/config.yaml"
         },
         "files": ["tsr/"],
-        "requirements": ["torch", "rembg", "omegaconf", "einops", "transformers"]
+        "requirements": ["torch", "rembg", "omegaconf", "einops", "transformers", "torchmcubes"]
     },
     "triposf": {
-        # TripoSF (SparseFlex) - High-Resolution 3D Shape Modeling
+        # TripoSF (SparseFlex) - High-Resolution mesh refinement model
         "repo": "https://github.com/VAST-AI-Research/TripoSF.git",
         "weights": "https://huggingface.co/VAST-AI/TripoSF/resolve/main/vae/pretrained_TripoSFVAE_256i1024o.safetensors",
         "configs": {},
         "files": ["triposf/"],
-        "requirements": ["torch", "numpy", "trimesh", "safetensors"]
+        "requirements": ["torch", "numpy", "trimesh", "safetensors", "torchmcubes", "easydict", "scipy"]
     },
     "lgm": {
         # LGM (Large Multi-View Gaussian Model) for Gaussian Splatting
@@ -79,7 +79,8 @@ MODELS = {
         "weights": "https://huggingface.co/ashawkey/LGM/resolve/main/model_fp16_fixrot.safetensors",
         "files": ["core/"],
         "target_name": "lgm",
-        "requirements": ["diffusers", "kiui"]
+        "requirements": ["diffusers", "kiui", "tyro", "plyfile"],
+        "post_patches": ["lgm"]  # Apply lgm patches after copying
     },
     "wonder3d": {
         "repo": "https://github.com/xxlong0/Wonder3D.git",
@@ -325,7 +326,7 @@ def setup_python_embed(target_dir, target_platform):
     elif "darwin" in host_os and "osx" in target_platform: is_compatible = True
 
     # Requirements list
-    base_reqs = ["torch", "torchvision", "numpy", "Pillow", "opencv-python", "rembg", "onnxruntime", "scipy"]
+    base_reqs = ["torch", "torchvision", "numpy", "Pillow", "opencv-python", "rembg", "onnxruntime", "scipy", "easydict"]
 
     # Add torch-directml for Windows platforms
     if "win" in target_platform:
@@ -336,6 +337,13 @@ def setup_python_embed(target_dir, target_platform):
         for r in m.get("requirements", []):
             all_reqs.add(r)
     reqs_list = sorted(list(all_reqs))
+
+    # Special packages that need git-based installation
+    git_packages = []
+    if "torchmcubes" in reqs_list:
+        reqs_list.remove("torchmcubes")
+        git_packages.append(("torchmcubes", "git+https://github.com/tatsy/torchmcubes.git"))
+
     xformers_req = None
     if "xformers" in reqs_list:
         reqs_list.remove("xformers")
@@ -445,6 +453,26 @@ def setup_python_embed(target_dir, target_platform):
                     print(f"  xformers install failed with return code {xformers_proc.returncode}")
                     return False
                 print("  xformers installation completed!")
+
+            # Install git-based packages (e.g., torchmcubes)
+            if git_packages:
+                print("=" * 60)
+                print("STEP: Installing git-based packages...")
+                print("=" * 60)
+                for pkg_name, git_url in git_packages:
+                    print(f"  Installing {pkg_name} from {git_url}...")
+                    git_cmd = pip_cmd + [git_url]
+                    git_proc = subprocess.Popen(git_cmd, env=clean_env,
+                                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                                text=True, bufsize=1)
+                    for line in git_proc.stdout:
+                        print(f"    {line.rstrip()}")
+                    git_proc.wait()
+                    if git_proc.returncode != 0:
+                        print(f"  WARNING: {pkg_name} install failed (may require build tools)")
+                    else:
+                        print(f"  {pkg_name} installation completed!")
+                print("-" * 60)
 
         except subprocess.CalledProcessError as e:
             print(f"Lib install failed with return code {e.returncode}")
@@ -782,6 +810,171 @@ def setup_models(models_dir, python_dir, target_platform):
     else:
         print(f"DEBUG: WARNING - site_packages not found!")
 
+def apply_patches(site_packages):
+    """
+    Apply necessary patches to cloned model packages.
+    These patches fix import issues and make optional dependencies actually optional.
+    """
+    print("Applying model patches...")
+
+    # Patch LGM: Fix imports from core.* to lgm.* and make diff_gaussian_rasterization optional
+    lgm_dir = os.path.join(site_packages, "lgm")
+    if os.path.exists(lgm_dir):
+        print("  Patching lgm package...")
+
+        # Files that need import fixes: core.* -> lgm.*
+        files_to_patch = ["models.py", "gs.py", "unet.py", "provider_objaverse.py"]
+        for filename in files_to_patch:
+            filepath = os.path.join(lgm_dir, filename)
+            if os.path.exists(filepath):
+                with open(filepath, "r", encoding="utf-8") as f:
+                    content = f.read()
+
+                # Replace core.* imports with lgm.*
+                new_content = content.replace("from core.", "from lgm.")
+                new_content = new_content.replace("import core.", "import lgm.")
+
+                if new_content != content:
+                    with open(filepath, "w", encoding="utf-8") as f:
+                        f.write(new_content)
+                    print(f"    Fixed imports in {filename}")
+
+        # Patch attention.py: Fix xformers import to catch AttributeError
+        attention_path = os.path.join(lgm_dir, "attention.py")
+        if os.path.exists(attention_path):
+            with open(attention_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            # Replace the exception catch to include AttributeError
+            old_except = "except ImportError:"
+            new_except = "except (ImportError, AttributeError, Exception) as e:"
+            if old_except in content and new_except not in content:
+                new_content = content.replace(old_except, new_except)
+                with open(attention_path, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+                print(f"    Fixed xformers import in attention.py")
+
+        # Patch gs.py: Make diff_gaussian_rasterization optional
+        gs_path = os.path.join(lgm_dir, "gs.py")
+        if os.path.exists(gs_path):
+            with open(gs_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            # Check if already patched
+            if "GAUSSIAN_RASTERIZATION_AVAILABLE" not in content:
+                # Replace the direct import with optional import
+                old_import = """from diff_gaussian_rasterization import (
+    GaussianRasterizationSettings,
+    GaussianRasterizer,
+)"""
+                new_import = """# Make diff_gaussian_rasterization optional - only needed for rendering, not for inference/export
+GAUSSIAN_RASTERIZATION_AVAILABLE = False
+GaussianRasterizationSettings = None
+GaussianRasterizer = None
+
+try:
+    from diff_gaussian_rasterization import (
+        GaussianRasterizationSettings,
+        GaussianRasterizer,
+    )
+    GAUSSIAN_RASTERIZATION_AVAILABLE = True
+except ImportError:
+    import warnings
+    warnings.warn("diff_gaussian_rasterization not available. Rendering will not work, but inference and PLY export will still function.")"""
+
+                new_content = content.replace(old_import, new_import)
+
+                # Add check in render method
+                old_render = """    def render(self, gaussians, cam_view, cam_view_proj, cam_pos, bg_color=None, scale_modifier=1):
+        # gaussians: [B, N, 14]
+        # cam_view, cam_view_proj: [B, V, 4, 4]
+        # cam_pos: [B, V, 3]
+
+        device = gaussians.device"""
+                new_render = """    def render(self, gaussians, cam_view, cam_view_proj, cam_pos, bg_color=None, scale_modifier=1):
+        # gaussians: [B, N, 14]
+        # cam_view, cam_view_proj: [B, V, 4, 4]
+        # cam_pos: [B, V, 3]
+
+        if not GAUSSIAN_RASTERIZATION_AVAILABLE:
+            raise ImportError("diff_gaussian_rasterization is required for rendering. "
+                            "Please install it from https://github.com/graphdeco-inria/diff-gaussian-rasterization")
+
+        device = gaussians.device"""
+                new_content = new_content.replace(old_render, new_render)
+
+                if new_content != content:
+                    with open(gs_path, "w", encoding="utf-8") as f:
+                        f.write(new_content)
+                    print(f"    Made diff_gaussian_rasterization optional in gs.py")
+
+            # Also fix hardcoded cuda device in GaussianRenderer.__init__
+            with open(gs_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            old_init = '''class GaussianRenderer:
+    def __init__(self, opt: Options):
+
+        self.opt = opt
+        self.bg_color = torch.tensor([1, 1, 1], dtype=torch.float32, device="cuda")'''
+            new_init = '''class GaussianRenderer:
+    def __init__(self, opt: Options, device=None):
+
+        self.opt = opt
+        # Use provided device, or try cuda if available, otherwise cpu
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = device
+        self.bg_color = torch.tensor([1, 1, 1], dtype=torch.float32, device=self.device)'''
+
+            if old_init in content:
+                new_content = content.replace(old_init, new_init)
+                with open(gs_path, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+                print(f"    Fixed hardcoded cuda device in gs.py")
+
+    # Patch Wonder3D: Add __init__.py files and fix diffusers API changes
+    wonder3d_dir = os.path.join(site_packages, "wonder3d")
+    if os.path.exists(wonder3d_dir):
+        print("  Patching wonder3d package...")
+
+        # Add __init__.py files for proper package structure
+        init_dirs = [
+            wonder3d_dir,
+            os.path.join(wonder3d_dir, "mvdiffusion"),
+            os.path.join(wonder3d_dir, "mvdiffusion", "data"),
+            os.path.join(wonder3d_dir, "mvdiffusion", "models"),
+            os.path.join(wonder3d_dir, "mvdiffusion", "pipelines"),
+        ]
+        for init_dir in init_dirs:
+            init_file = os.path.join(init_dir, "__init__.py")
+            if os.path.exists(init_dir) and not os.path.exists(init_file):
+                with open(init_file, "w", encoding="utf-8") as f:
+                    f.write("# Auto-generated __init__.py\n")
+                print(f"    Created __init__.py in {os.path.basename(init_dir)}")
+
+        # Fix diffusers API change: randn_tensor moved to torch_utils
+        pipeline_path = os.path.join(wonder3d_dir, "mvdiffusion", "pipelines", "pipeline_mvdiffusion_image.py")
+        if os.path.exists(pipeline_path):
+            with open(pipeline_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            old_import = "from diffusers.utils import deprecate, logging, randn_tensor"
+            new_import = """from diffusers.utils import deprecate, logging
+try:
+    from diffusers.utils import randn_tensor
+except ImportError:
+    from diffusers.utils.torch_utils import randn_tensor"""
+
+            if old_import in content:
+                new_content = content.replace(old_import, new_import)
+                with open(pipeline_path, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+                print(f"    Fixed randn_tensor import in pipeline_mvdiffusion_image.py")
+
+    print("  Patches applied successfully")
+
+
 def obfuscate_and_clean(python_dir, target_platform):
     """
     Compile Python source files to bytecode and clean up unnecessary files.
@@ -926,6 +1119,14 @@ if __name__ == "__main__":
 
         if setup_python_embed(python_dir, target_platform):
             setup_models(models_dir, python_dir, target_platform)
+
+            # Apply patches to model packages
+            if "win" in target_platform:
+                site_packages = os.path.join(python_dir, "python", "Lib", "site-packages")
+            else:
+                site_packages = os.path.join(python_dir, "python", "lib", "python3.10", "site-packages")
+            apply_patches(site_packages)
+
             obfuscate_and_clean(python_dir, target_platform)
 
             # Zip python env

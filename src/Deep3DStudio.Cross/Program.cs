@@ -9,6 +9,7 @@ using OpenTK.Windowing.Common;
 using ImGuiNET;
 using Deep3DStudio.Configuration;
 using Deep3DStudio.Python;
+using Deep3DStudio.CLI;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using SkiaSharp;
@@ -19,12 +20,22 @@ namespace Deep3DStudio
     class Program
     {
         [STAThread]
-        public static void Main(string[] args)
+        public static int Main(string[] args)
         {
             // Initialize logging first - clears log file on each run
             Logger.Initialize();
             Logger.Info("Application starting...");
             Logger.Info($"Arguments: {string.Join(", ", args)}");
+
+            // Parse command-line options
+            var cliOptions = CommandLineOptions.Parse(args);
+
+            // If CLI mode is detected, run in CLI mode without GUI
+            if (cliOptions.IsCLIMode)
+            {
+                Logger.Info("CLI mode detected");
+                return RunCLI(cliOptions);
+            }
 
             // Set up global exception handlers for crash logging
             AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
@@ -85,6 +96,29 @@ namespace Deep3DStudio
                 throw;
             }
             Logger.Info("Application exiting normally");
+            return 0;
+        }
+
+        /// <summary>
+        /// Run in CLI mode for command-line inference testing.
+        /// </summary>
+        private static int RunCLI(CommandLineOptions options)
+        {
+            try
+            {
+                var runner = new CLIRunner(options);
+                return runner.Run();
+            }
+            catch (Exception ex)
+            {
+                Logger.Exception(ex, "CLI mode crashed");
+                Console.Error.WriteLine($"Fatal error: {ex.Message}");
+                if (options.Verbose)
+                {
+                    Console.Error.WriteLine(ex.StackTrace);
+                }
+                return 1;
+            }
         }
 
         /// <summary>

@@ -3,12 +3,14 @@ using System.IO;
 using System.Collections.Generic;
 using OpenTK.Mathematics;
 using Deep3DStudio.Configuration;
+using Deep3DStudio.IO;
 using Deep3DStudio.Python;
 
 namespace Deep3DStudio.Model.AIModels
 {
     /// <summary>
-    /// TripoSF - Single image to 3D mesh with refinement.
+    /// TripoSF (SparseFlex) - High-resolution mesh refinement model.
+    /// Takes a mesh as input and produces a refined, higher-resolution mesh.
     /// Uses subprocess-based Python inference for complete process isolation.
     /// </summary>
     public class TripoSFInference : IDisposable, IInferenceWithProgress
@@ -114,34 +116,39 @@ namespace Deep3DStudio.Model.AIModels
             }
         }
 
-        public MeshData GenerateFromImage(string imagePath)
+        /// <summary>
+        /// Refine an existing mesh using TripoSF to generate a higher-resolution mesh.
+        /// </summary>
+        /// <param name="meshPath">Path to the input mesh file (.obj, .ply, .glb)</param>
+        /// <returns>Refined mesh</returns>
+        public MeshData RefineMesh(string meshPath)
         {
             Initialize();
-            var mesh = new MeshData();
+            var resultMesh = new MeshData();
 
             if (_inference == null || !_inference.IsLoaded)
             {
                 Log("[TripoSF] Model not loaded");
-                return mesh;
+                return resultMesh;
             }
 
             try
             {
-                if (!File.Exists(imagePath))
+                if (!File.Exists(meshPath))
                 {
-                    Log($"[TripoSF] Image not found: {imagePath}");
-                    return mesh;
+                    Log($"[TripoSF] Mesh not found: {meshPath}");
+                    return resultMesh;
                 }
 
-                var imagesBytes = new List<byte[]> { File.ReadAllBytes(imagePath) };
-                Log($"[TripoSF] Processing image...");
+                Log($"[TripoSF] Refining mesh: {meshPath}");
 
-                var meshes = _inference.Infer(imagesBytes, false);
+                // For TripoSF we pass the mesh path directly - the Python side handles loading
+                var meshes = _inference.InferMesh(meshPath);
 
                 if (meshes.Count > 0)
                 {
-                    mesh = meshes[0];
-                    Log($"[TripoSF] Generated mesh with {mesh.Vertices.Count} vertices");
+                    resultMesh = meshes[0];
+                    Log($"[TripoSF] Refined mesh: {resultMesh.Vertices.Count} vertices, {resultMesh.Indices.Count / 3} triangles");
                 }
             }
             catch (Exception ex)
@@ -149,12 +156,61 @@ namespace Deep3DStudio.Model.AIModels
                 Log($"[TripoSF] Error: {ex.Message}");
             }
 
-            return mesh;
+            return resultMesh;
         }
 
+        /// <summary>
+        /// Refine an existing mesh using TripoSF.
+        /// </summary>
+        /// <param name="inputMesh">Input mesh data</param>
+        /// <returns>Refined mesh</returns>
+        public MeshData RefineMesh(MeshData inputMesh)
+        {
+            Initialize();
+            var resultMesh = new MeshData();
+
+            if (_inference == null || !_inference.IsLoaded)
+            {
+                Log("[TripoSF] Model not loaded");
+                return resultMesh;
+            }
+
+            try
+            {
+                // Save input mesh to temp file
+                string tempMeshPath = Path.GetTempFileName() + ".obj";
+                MeshExporter.Save(tempMeshPath, inputMesh);
+                Log($"[TripoSF] Saved input mesh to: {tempMeshPath}");
+
+                var meshes = _inference.InferMesh(tempMeshPath);
+
+                if (meshes.Count > 0)
+                {
+                    resultMesh = meshes[0];
+                    Log($"[TripoSF] Refined mesh: {resultMesh.Vertices.Count} vertices, {resultMesh.Indices.Count / 3} triangles");
+                }
+
+                // Cleanup
+                try { File.Delete(tempMeshPath); } catch { }
+            }
+            catch (Exception ex)
+            {
+                Log($"[TripoSF] Error: {ex.Message}");
+            }
+
+            return resultMesh;
+        }
+
+        [Obsolete("TripoSF takes mesh input, not images. Use RefineMesh instead.")]
+        public MeshData GenerateFromImage(string imagePath)
+        {
+            Log("[TripoSF] Warning: GenerateFromImage is deprecated. TripoSF requires mesh input.");
+            return new MeshData();
+        }
+
+        [Obsolete("Use RefineMesh with mesh input instead")]
         public MeshData RefineFromPointCloud(List<Vector3> points)
         {
-            // Placeholder - TripoSF is primarily image-to-mesh
             return new MeshData();
         }
 

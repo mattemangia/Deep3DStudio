@@ -299,8 +299,8 @@ def unload_all_models():
 def get_model_memory_estimate(model_name):
     """Estimate memory requirement for a model in MB"""
     estimates = {
-        'dust3r': 3000,
-        'mast3r': 3500,  # MASt3R requires slightly more memory than DUSt3R
+        'dust3r': 4000,
+        'mast3r': 4500,  # MASt3R requires slightly more memory than DUSt3R
         'mast3r_retrieval': 500,  # Retrieval model is smaller
         'must3r': 4000,  # MUSt3R with multi-layer memory requires more
         'must3r_retrieval': 500,  # Retrieval model is smaller

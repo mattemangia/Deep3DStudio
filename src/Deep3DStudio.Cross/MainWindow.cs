@@ -3477,36 +3477,50 @@ namespace Deep3DStudio
 
         private void RunTripoSFRefinement()
         {
-            // TripoSF is an image-to-mesh model, not a mesh refiner
-            // It generates mesh from images using feed-forward inference
-            if (_loadedImages.Count == 0)
+            // TripoSF (SparseFlex) is a mesh refinement model
+            // It takes an existing mesh and produces a higher-resolution refined mesh
+            MeshObject? inputMesh = null;
+            lock (_sceneGraph)
             {
-                _logBuffer += "Error: TripoSF requires loaded images. Load an image first.\n";
+                // Find first mesh in scene to refine
+                foreach (var obj in _sceneGraph.AllObjects)
+                {
+                    if (obj is MeshObject meshObj && meshObj.MeshData.Vertices.Count > 0)
+                    {
+                        inputMesh = meshObj;
+                        break;
+                    }
+                }
+            }
+
+            if (inputMesh == null)
+            {
+                _logBuffer += "Error: TripoSF requires a loaded mesh. Generate or load a mesh first.\n";
                 return;
             }
 
-            ProgressDialog.Instance.Start("TripoSF Generation...", OperationType.Processing);
+            ProgressDialog.Instance.Start("TripoSF Mesh Refinement...", OperationType.Processing);
             Task.Run(() => {
                 try
                 {
                     var triposf = new Deep3DStudio.Model.AIModels.TripoSFInference();
-                    var mesh = triposf.GenerateFromImage(_loadedImages[0].FilePath);
+                    var refinedMesh = triposf.RefineMesh(inputMesh.MeshData);
 
-                    if (mesh.Vertices.Count > 0)
+                    if (refinedMesh.Vertices.Count > 0)
                     {
                         EnqueueAction(() => {
-                            var obj = new MeshObject("TripoSF_Mesh", mesh);
+                            var obj = new MeshObject("TripoSF_Refined", refinedMesh);
                             lock (_sceneGraph)
                             {
                                 _sceneGraph.AddObject(obj);
                             }
-                            ProgressDialog.Instance.Log("TripoSF mesh generated.");
+                            ProgressDialog.Instance.Log($"TripoSF refinement complete: {refinedMesh.Vertices.Count} vertices, {refinedMesh.Indices.Count / 3} triangles.");
                             ProgressDialog.Instance.Complete();
                         });
                     }
                     else
                     {
-                        EnqueueAction(() => ProgressDialog.Instance.Fail(new Exception("TripoSF returned empty mesh")));
+                        EnqueueAction(() => ProgressDialog.Instance.Fail(new Exception("TripoSF refinement returned empty mesh")));
                     }
                 }
                 catch (Exception ex)

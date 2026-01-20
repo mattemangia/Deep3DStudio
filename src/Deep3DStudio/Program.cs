@@ -4,14 +4,25 @@ using Deep3DStudio.Icons;
 using Deep3DStudio.Configuration;
 using Deep3DStudio.UI;
 using Deep3DStudio.Python;
+using Deep3DStudio.CLI;
 
 namespace Deep3DStudio
 {
     class Program
     {
         [STAThread]
-        public static void Main(string[] args)
+        public static int Main(string[] args)
         {
+            // Parse command-line options first
+            var cliOptions = CommandLineOptions.Parse(args);
+
+            // If CLI mode is detected, run in CLI mode without GUI
+            if (cliOptions.IsCLIMode)
+            {
+                Console.WriteLine("CLI mode detected");
+                return RunCLI(cliOptions);
+            }
+
             // Try to force MESA to give a compatibility profile (legacy GL support)
             // This is critical for GL.Begin/GL.End calls in the viewport.
             Environment.SetEnvironmentVariable("MESA_GL_VERSION_OVERRIDE", "3.3COMPAT");
@@ -81,6 +92,28 @@ namespace Deep3DStudio
 
             // Prevent premature garbage collection of the Gtk.Application instance
             GC.KeepAlive(app);
+            return 0;
+        }
+
+        /// <summary>
+        /// Run in CLI mode for command-line inference testing.
+        /// </summary>
+        private static int RunCLI(CommandLineOptions options)
+        {
+            try
+            {
+                var runner = new CLIRunner(options);
+                return runner.Run();
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Fatal error: {ex.Message}");
+                if (options.Verbose)
+                {
+                    Console.Error.WriteLine(ex.StackTrace);
+                }
+                return 1;
+            }
         }
     }
 }

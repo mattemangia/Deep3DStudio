@@ -22,6 +22,8 @@ namespace Deep3DStudio.Python
         private readonly string _pythonPath;
         private readonly string _scriptPath;
         private readonly string _modelName;
+        private string? _weightsPath;
+        private string _device = "cuda";
         private bool _isLoaded = false;
         private bool _disposed = false;
         private Process? _persistentProcess;
@@ -346,6 +348,10 @@ namespace Deep3DStudio.Python
 
         public bool Load(string weightsPath, string device = "cuda")
         {
+            // Store weights path and device for use in Infer (since each subprocess is a new process)
+            _weightsPath = weightsPath;
+            _device = device;
+
             if (_isLoaded)
             {
                 Log("Model already loaded");
@@ -463,9 +469,11 @@ namespace Deep3DStudio.Python
 
                 OnProgress?.Invoke("inference", 0.2f, "Running inference...");
 
-                // Run inference
+                // Run inference - pass weights and device since each subprocess is a new process
                 string retrieval = useRetrieval ? "--use-retrieval" : "";
-                string args = $"--command infer --model {_modelName} --input \"{inputPath}\" --output \"{outputPath}\" {retrieval}";
+                string weightsArg = !string.IsNullOrEmpty(_weightsPath) ? $"--weights \"{_weightsPath}\"" : "";
+                string deviceArg = $"--device {_device}";
+                string args = $"--command infer --model {_modelName} --input \"{inputPath}\" --output \"{outputPath}\" {weightsArg} {deviceArg} {retrieval}";
 
                 var (exitCode, stdout, stderr) = RunPythonCommand(args, 600000); // 10 min timeout
 
@@ -550,6 +558,123 @@ namespace Deep3DStudio.Python
             {
                 // Clean up temp files
                 try { if (!string.IsNullOrEmpty(inputPath) && File.Exists(inputPath)) File.Delete(inputPath); } catch { }
+                try { if (!string.IsNullOrEmpty(outputPath) && File.Exists(outputPath)) File.Delete(outputPath); } catch { }
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// Run inference with a mesh file as input (for mesh refinement models like TripoSF).
+        /// </summary>
+        /// <param name="meshPath">Path to the input mesh file</param>
+        /// <returns>List of output meshes</returns>
+        public List<MeshData> InferMesh(string meshPath)
+        {
+            var results = new List<MeshData>();
+
+            if (!_isLoaded)
+            {
+                Log("Model not loaded");
+                return results;
+            }
+
+            string outputPath = "";
+
+            try
+            {
+                OnProgress?.Invoke("inference", 0.1f, "Preparing mesh input...");
+
+                outputPath = Path.GetTempFileName();
+
+                OnProgress?.Invoke("inference", 0.2f, "Running mesh refinement...");
+
+                // Run inference with mesh path
+                string weightsArg = !string.IsNullOrEmpty(_weightsPath) ? $"--weights \"{_weightsPath}\"" : "";
+                string deviceArg = $"--device {_device}";
+                string args = $"--command infer --model {_modelName} --mesh-input \"{meshPath}\" --output \"{outputPath}\" {weightsArg} {deviceArg}";
+
+                var (exitCode, stdout, stderr) = RunPythonCommand(args, 600000); // 10 min timeout
+
+                OnProgress?.Invoke("inference", 0.8f, "Processing results...");
+
+                if (exitCode == 0 && File.Exists(outputPath))
+                {
+                    string outputJson = File.ReadAllText(outputPath);
+                    var outputData = JsonSerializer.Deserialize<JsonElement>(outputJson);
+
+                    if (outputData.TryGetProperty("success", out var successProp) && successProp.GetBoolean())
+                    {
+                        if (outputData.TryGetProperty("results", out var resultsProp))
+                        {
+                            foreach (var item in resultsProp.EnumerateArray())
+                            {
+                                var mesh = new MeshData();
+
+                                if (item.TryGetProperty("vertices", out var vertsProp))
+                                {
+                                    foreach (var v in vertsProp.EnumerateArray())
+                                    {
+                                        var arr = v.EnumerateArray().ToArray();
+                                        if (arr.Length >= 3)
+                                        {
+                                            mesh.Vertices.Add(new Vector3(
+                                                (float)arr[0].GetDouble(),
+                                                (float)arr[1].GetDouble(),
+                                                (float)arr[2].GetDouble()
+                                            ));
+                                        }
+                                    }
+                                }
+
+                                if (item.TryGetProperty("colors", out var colorsProp))
+                                {
+                                    foreach (var c in colorsProp.EnumerateArray())
+                                    {
+                                        var arr = c.EnumerateArray().ToArray();
+                                        if (arr.Length >= 3)
+                                        {
+                                            mesh.Colors.Add(new Vector3(
+                                                (float)arr[0].GetDouble(),
+                                                (float)arr[1].GetDouble(),
+                                                (float)arr[2].GetDouble()
+                                            ));
+                                        }
+                                    }
+                                }
+
+                                if (item.TryGetProperty("faces", out var facesProp))
+                                {
+                                    foreach (var f in facesProp.EnumerateArray())
+                                    {
+                                        mesh.Indices.Add(f.GetInt32());
+                                    }
+                                }
+
+                                results.Add(mesh);
+                                Log($"Refined mesh with {mesh.Vertices.Count} vertices, {mesh.Indices.Count / 3} triangles");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        string error = outputData.TryGetProperty("error", out var errProp) ? errProp.GetString() ?? "Unknown error" : "Unknown error";
+                        Log($"Mesh inference failed: {error}");
+                    }
+                }
+                else
+                {
+                    Log($"Mesh inference failed with exit code {exitCode}");
+                }
+
+                OnProgress?.Invoke("inference", 1.0f, "Complete");
+            }
+            catch (Exception ex)
+            {
+                Log($"Mesh inference exception: {ex.Message}");
+            }
+            finally
+            {
                 try { if (!string.IsNullOrEmpty(outputPath) && File.Exists(outputPath)) File.Delete(outputPath); } catch { }
             }
 
