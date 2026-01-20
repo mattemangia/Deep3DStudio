@@ -219,9 +219,9 @@ namespace Deep3DStudio.UI
                         ImGui.TextUnformatted(logText);
                     }
 
-                    // Auto scroll
-                    if (State == ProgressState.Running && ImGui.GetScrollY() >= ImGui.GetScrollMaxY())
-                        ImGui.SetScrollHereY(1.0f);
+                    // Auto scroll while logs are actively updating.
+                    if (State == ProgressState.Running || State == ProgressState.Error)
+                        ImGui.SetScrollY(ImGui.GetScrollMaxY());
 
                     ImGui.EndChild();
                 }

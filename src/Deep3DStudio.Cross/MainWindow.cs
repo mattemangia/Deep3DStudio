@@ -1871,7 +1871,7 @@ namespace Deep3DStudio
 
                 if (_autoScroll && newText)
                 {
-                    ImGui.SetScrollHereY(1.0f);
+                    ImGui.SetScrollY(ImGui.GetScrollMaxY());
                 }
 
                 _lastLogLength = _logBuffer.Length;

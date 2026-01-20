@@ -355,7 +355,8 @@ namespace Deep3DStudio.UI
 
             // Auto-scroll to end
             var endIter = _logView.Buffer.EndIter;
-            _logView.ScrollToIter(endIter, 0, false, 0, 0);
+            _logView.Buffer.PlaceCursor(endIter);
+            _logView.ScrollToIter(endIter, 0.0, true, 0.0, 1.0);
         }
 
         private void OnActionButtonClicked(object? sender, EventArgs e)
