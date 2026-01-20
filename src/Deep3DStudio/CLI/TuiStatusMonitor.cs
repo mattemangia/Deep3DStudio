@@ -182,7 +182,12 @@ namespace Deep3DStudio.CLI
                     _logView.Text = currentText + message;
                     
                     if (_logView.Lines > 0)
-                        _logView.ScrollTo(_logView.Lines - 1);
+                    {
+                        // Scroll to bottom: Set the top row such that the last line is at the bottom of the view
+                        int height = _logView.Bounds.Height;
+                        int topRow = Math.Max(0, _logView.Lines - height);
+                        _logView.ScrollTo(topRow);
+                    }
                         
                     _logView.SetNeedsDisplay();
                     Application.MainLoop.Driver.Wakeup(); // Force wake up to redraw immediately
