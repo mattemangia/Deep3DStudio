@@ -282,8 +282,14 @@ namespace Deep3DStudio.CLI
                     {
                         // Scroll to bottom: Set the top row such that the last line is at the bottom of the view
                         int height = _logView.Bounds.Height;
+                        // Fallback if layout hasn't calculated height yet (avoids scrolling past end)
+                        if (height <= 0) height = 20; 
+                        
                         int topRow = Math.Max(0, _logView.Lines - height);
                         _logView.ScrollTo(topRow);
+                        
+                        // Debug log to verify scrolling logic
+                        // try { File.AppendAllText("tui_debug.log", $"Scroll: Lines={_logView.Lines}, Height={height}, TopRow={topRow}\n"); } catch { }
                     }
                         
                     _logView.SetNeedsDisplay();
