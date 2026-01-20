@@ -756,10 +756,18 @@ namespace Deep3DStudio
 
                 if (ImGui.BeginPopupModal("Really Exit?", ref _showExitConfirmation, ImGuiWindowFlags.AlwaysAutoResize))
                 {
-                    ImGui.Text("You have unsaved changes. Are you sure you want to exit?");
+                    ImGui.Text("You have unsaved changes. Do you want to save before exiting?");
                     ImGui.Separator();
 
-                    if (ImGui.Button("Yes, Exit", new System.Numerics.Vector2(120, 0)))
+                    if (ImGui.Button("Save & Exit", new System.Numerics.Vector2(120, 0)))
+                    {
+                        ImGui.CloseCurrentPopup();
+                        _showExitConfirmation = false;
+                        OnSaveProject(true);
+                    }
+                    ImGui.SameLine();
+
+                    if (ImGui.Button("Discard Changes", new System.Numerics.Vector2(120, 0)))
                     {
                         ImGui.CloseCurrentPopup();
                         _isDirty = false; // Prevent loop
@@ -2518,11 +2526,11 @@ namespace Deep3DStudio
             });
         }
 
-        private void OnSaveProject()
+        private void OnSaveProject(bool exitAfter = false)
         {
             if (string.IsNullOrEmpty(_currentProjectPath))
             {
-                OnSaveProjectAs();
+                OnSaveProjectAs(exitAfter);
                 return;
             }
 
@@ -2543,6 +2551,7 @@ namespace Deep3DStudio
                         UpdateTitle();
                         ProgressDialog.Instance.Log($"Project saved: {_currentProjectPath}");
                         ProgressDialog.Instance.Complete();
+                        if (exitAfter) Close();
                     });
                 }
                 catch (Exception ex)
@@ -2552,14 +2561,14 @@ namespace Deep3DStudio
             });
         }
 
-        private void OnSaveProjectAs()
+        private void OnSaveProjectAs(bool exitAfter = false)
         {
             var result = Nfd.SaveDialog(out string path, new Dictionary<string, string> { { "Deep3D Project", "d3d" } });
             if (result == NfdStatus.Ok && !string.IsNullOrEmpty(path))
             {
                 if (!path.EndsWith(".d3d")) path += ".d3d";
                 _currentProjectPath = path;
-                OnSaveProject();
+                OnSaveProject(exitAfter);
             }
         }
 
