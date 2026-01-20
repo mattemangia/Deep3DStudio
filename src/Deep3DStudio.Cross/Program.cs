@@ -33,6 +33,7 @@ namespace Deep3DStudio
             // If CLI mode is detected, run in CLI mode without GUI
             if (cliOptions.IsCLIMode)
             {
+                Console.WriteLine(ConsoleLogo.GenerateAsciiLogo());
                 Logger.Info("CLI mode detected");
                 return RunCLI(cliOptions);
             }

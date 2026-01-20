@@ -144,7 +144,7 @@ namespace Deep3DStudio.CLI
                     ColorScheme = new ColorScheme() { Normal = new Terminal.Gui.Attribute(Color.Cyan, Color.Black) }
                 };
 
-                string asciiArt = GenerateAsciiLogo();
+                string asciiArt = ConsoleLogo.GenerateAsciiLogo();
                 var logoLabel = new Label(asciiArt)
                 {
                     X = Pos.Center(),
