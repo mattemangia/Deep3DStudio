@@ -179,15 +179,25 @@ namespace Deep3DStudio.CLI
             }
         }
 
-                
+        public void Stop()
+        {
+            if (!_isRunning) return;
+            _isRunning = false;
 
-                // ... Stop ...
+            Application.MainLoop.Invoke(() =>
+            {
+                try
+                {
+                    Application.RequestStop();
+                }
+                catch
+                {
+                    // Best-effort stop; ignore if loop already stopped.
+                }
+            });
 
-        
-
-                public void Stop()
-        
-        // ... Stop ...
+            _tuiThread?.Join(1000);
+        }
 
         public void SetStatus(string status)
         {
@@ -221,6 +231,8 @@ namespace Deep3DStudio.CLI
                         currentText = currentText.Substring(currentText.Length - 10000);
                         
                     _logView.Text = currentText + message;
+
+                    _logView.MoveEnd();
                     
                     if (_logView.Lines > 0)
                     {
