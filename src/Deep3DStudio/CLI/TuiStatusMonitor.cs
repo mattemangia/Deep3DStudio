@@ -86,10 +86,7 @@ namespace Deep3DStudio.CLI
             {
                 Application.Init();
 
-                // Show Splash Screen
-                ShowSplash();
-
-                // Define Dark Theme (High Contrast)
+                // 1. Setup Main Log Window (Background, not added yet)
                 var darkScheme = new ColorScheme()
                 {
                     Normal = new Terminal.Gui.Attribute(Color.White, Color.Black),
@@ -136,11 +133,42 @@ namespace Deep3DStudio.CLI
                 };
 
                 _window.Add(_statusLabel, _progressBar, new Label(1, 3, "Logs:") { ColorScheme = darkScheme }, _logView);
-                Application.Top.Add(_window);
 
-                // Signal that UI is built
+                // 2. Setup Splash Window
+                var splashWindow = new Window("Deep3DStudio")
+                {
+                    X = 0,
+                    Y = 0,
+                    Width = Dim.Fill(),
+                    Height = Dim.Fill(),
+                    ColorScheme = new ColorScheme() { Normal = new Terminal.Gui.Attribute(Color.Cyan, Color.Black) }
+                };
+
+                string asciiArt = GenerateAsciiLogo();
+                var logoLabel = new Label(asciiArt)
+                {
+                    X = Pos.Center(),
+                    Y = Pos.Center(),
+                    TextAlignment = TextAlignment.Left
+                };
+                splashWindow.Add(logoLabel);
+
+                // 3. Add Splash initially
+                Application.Top.Add(splashWindow);
+
+                // 4. Schedule Swap
+                Application.MainLoop.AddTimeout(TimeSpan.FromSeconds(2), (loop) =>
+                {
+                    Application.Top.Remove(splashWindow);
+                    Application.Top.Add(_window);
+                    Application.MainLoop.Driver.Wakeup();
+                    return false; // Don't repeat
+                });
+
+                // Signal that UI infrastructure is ready (logging can start accumulating)
                 _initEvent.Set();
 
+                // 5. Run Main Loop
                 Application.Run();
             }
             catch (Exception ex)
@@ -151,58 +179,11 @@ namespace Deep3DStudio.CLI
             }
         }
 
-        private void ShowSplash()
-        {
-            try
-            {
-                string asciiArt = GenerateAsciiLogo();
-                if (string.IsNullOrEmpty(asciiArt)) return;
-
-                var splashWindow = new Window("Deep3DStudio")
-                {
-                    X = 0,
-                    Y = 0,
-                    Width = Dim.Fill(),
-                    Height = Dim.Fill(),
-                    ColorScheme = new ColorScheme() { Normal = new Terminal.Gui.Attribute(Color.Cyan, Color.Black) }
-                };
-
-                var logoLabel = new Label(asciiArt)
-                {
-                    X = Pos.Center(),
-                    Y = Pos.Center(),
-                    TextAlignment = TextAlignment.Left
-                };
-
-                splashWindow.Add(logoLabel);
-                Application.Top.Add(splashWindow);
-
-                // Run for 2 seconds
-                bool stopSplash = false;
-                Application.MainLoop.AddTimeout(TimeSpan.FromSeconds(2), (loop) =>
-                {
-                    stopSplash = true;
-                    Application.RequestStop();
-                    return false;
-                });
-
-                Application.Run();
-                
-                // Clean up splash
-                Application.Top.Remove(splashWindow);
-            }
-            catch (Exception ex)
-            {
-                File.AppendAllText("tui_debug.log", $"Splash failed: {ex.Message}\n");
-            }
-        }
-
         private string GenerateAsciiLogo()
         {
             try
             {
                 var assembly = Assembly.GetExecutingAssembly();
-                // Find resource ending with logo.png
                 string? resourceName = null;
                 foreach (var name in assembly.GetManifestResourceNames())
                 {
@@ -213,7 +194,7 @@ namespace Deep3DStudio.CLI
                     }
                 }
 
-                if (resourceName == null) return "Deep3DStudio";
+                if (resourceName == null) return "Deep3DStudio (Logo Not Found)";
 
                 using var stream = assembly.GetManifestResourceStream(resourceName);
                 if (stream == null) return "Deep3DStudio";
@@ -221,16 +202,15 @@ namespace Deep3DStudio.CLI
                 using var bitmap = SKBitmap.Decode(stream);
                 if (bitmap == null) return "Deep3DStudio";
 
-                // Resize for TUI (e.g. 60 width, aspect ratio corrected)
-                // Console characters are roughly 1:2 width:height
-                int width = 60;
+                int width = 80; // Slightly wider
                 int height = (int)(bitmap.Height * ((float)width / bitmap.Width) * 0.5f);
                 
-                using var resized = bitmap.Resize(new SKImageInfo(width, height), SKFilterQuality.Medium);
+                using var resized = bitmap.Resize(new SKImageInfo(width, height), SKFilterQuality.High);
                 if (resized == null) return "Deep3DStudio";
 
                 var sb = new StringBuilder();
-                string ramp = "@%#*+=-:. ";
+                // Ramp from Dark (Space) to Bright (@) for black background
+                string ramp = " .:-=+*#%@";
 
                 for (int y = 0; y < resized.Height; y++)
                 {
@@ -239,13 +219,16 @@ namespace Deep3DStudio.CLI
                         var color = resized.GetPixel(x, y);
                         // Simple luminance
                         float luminance = (0.299f * color.Red + 0.587f * color.Green + 0.114f * color.Blue) / 255f;
-                        if (color.Alpha < 128)
+                        
+                        if (color.Alpha < 64) // Threshold for transparency
                         {
                             sb.Append(' ');
                         }
                         else
                         {
+                            // Map luminance 0..1 to ramp index
                             int index = (int)(luminance * (ramp.Length - 1));
+                            index = Math.Clamp(index, 0, ramp.Length - 1);
                             sb.Append(ramp[index]);
                         }
                     }
@@ -254,9 +237,9 @@ namespace Deep3DStudio.CLI
 
                 return sb.ToString();
             }
-            catch
+            catch (Exception ex)
             {
-                return "Deep3DStudio";
+                return $"Deep3DStudio (Logo Error: {ex.Message})";
             }
         }
         
