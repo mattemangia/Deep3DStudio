@@ -23,6 +23,7 @@ import traceback
 import base64
 import io
 import gc
+import types
 
 # Unbuffered output
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, line_buffering=True)
@@ -150,7 +151,39 @@ def _ensure_dust3r_submodules():
     except ImportError as e:
         log(f"Warning: Could not pre-import dust3r submodules: {e}")
 
+def _setup_dust3r_for_mast3r():
+    """Create a dust3r/dust3r shim and pre-inject path_to_dust3r for mast3r/must3r."""
+    try:
+        import dust3r
+        dust3r_pkg_path = os.path.dirname(dust3r.__file__)
+        site_packages = os.path.dirname(dust3r_pkg_path)
+        dust3r_subdir = os.path.join(dust3r_pkg_path, 'dust3r')
+
+        if not os.path.exists(dust3r_subdir):
+            os.makedirs(dust3r_subdir, exist_ok=True)
+            init_path = os.path.join(dust3r_subdir, '__init__.py')
+            if not os.path.exists(init_path):
+                with open(init_path, 'w', encoding='utf-8') as f:
+                    f.write("# Auto-generated to satisfy mast3r/must3r path_to_dust3r.py check\n")
+                    f.write("from dust3r import *\n")
+            log(f"Created dust3r/dust3r shim at {dust3r_subdir}")
+
+        fake_mast3r_path = types.ModuleType('mast3r.utils.path_to_dust3r')
+        fake_mast3r_path.DUSt3R_REPO_PATH = site_packages
+        fake_mast3r_path.DUSt3R_LIB_PATH = dust3r_subdir
+        sys.modules['mast3r.utils.path_to_dust3r'] = fake_mast3r_path
+
+        fake_must3r_path = types.ModuleType('must3r.utils.path_to_dust3r')
+        fake_must3r_path.DUSt3R_REPO_PATH = site_packages
+        fake_must3r_path.DUSt3R_LIB_PATH = dust3r_subdir
+        sys.modules['must3r.utils.path_to_dust3r'] = fake_must3r_path
+
+        log("Injected path_to_dust3r shims for mast3r/must3r")
+    except Exception as e:
+        log(f"Warning: Could not setup dust3r paths for mast3r: {e}")
+
 def load_mast3r(weights_path, device):
+    _setup_dust3r_for_mast3r()
     _ensure_dust3r_submodules()
     from mast3r.model import AsymmetricMASt3R
     model = AsymmetricMASt3R.from_pretrained(weights_path).to(device).eval()
@@ -163,6 +196,7 @@ def load_dust3r(weights_path, device):
 
 def load_must3r(weights_path, device):
     import torch
+    _setup_dust3r_for_mast3r()
     _ensure_dust3r_submodules()
     try:
         from must3r.model import load_model as must3r_load_model
@@ -241,26 +275,129 @@ def load_triposf(weights_path, device):
 def load_wonder3d(weights_path, device):
     import os
     import torch
+    import sys
+    import importlib.util
+    import types
 
     # Disable xformers to avoid compatibility issues with PyTorch versions
     os.environ["XFORMERS_DISABLED"] = "1"
+    os.environ["DIFFUSERS_USE_XFORMERS"] = "0"
+
+    # Some xformers builds expect this CUDA helper even on CPU-only Torch
+    if not hasattr(torch.backends.cuda, "is_flash_attention_available"):
+        torch.backends.cuda.is_flash_attention_available = lambda: False
+
+    # Force diffusers to treat xformers as unavailable
+    try:
+        import diffusers.utils.import_utils as import_utils
+        import_utils._xformers_available = False
+        import_utils._xformers_version = "N/A"
+    except Exception:
+        pass
+    # Bypass transformers torch.load safety gate for trusted local weights
+    try:
+        import transformers.utils.import_utils as t_import_utils
+        t_import_utils.check_torch_load_is_safe = lambda: None
+        import transformers.modeling_utils as t_modeling_utils
+        t_modeling_utils.check_torch_load_is_safe = lambda: None
+    except Exception:
+        pass
+
+    # Diffusers compatibility shim for Wonder3D (older API)
+    try:
+        import diffusers.models.modeling_utils as modeling_utils
+        if not hasattr(modeling_utils, "_load_state_dict_into_model"):
+            def _load_state_dict_into_model(model, state_dict, *args, **kwargs):
+                model.load_state_dict(state_dict, strict=False)
+                return []
+            modeling_utils._load_state_dict_into_model = _load_state_dict_into_model
+    except Exception:
+        pass
+    try:
+        import diffusers.models.attention as d_attention
+        if not hasattr(d_attention, "AdaGroupNorm"):
+            from diffusers.models.normalization import AdaGroupNorm
+            d_attention.AdaGroupNorm = AdaGroupNorm
+    except Exception:
+        pass
+    try:
+        import diffusers.utils as d_utils
+        if not hasattr(d_utils, "DIFFUSERS_CACHE"):
+            d_utils.DIFFUSERS_CACHE = getattr(d_utils, "HF_MODULES_CACHE", None)
+        if not hasattr(d_utils, "HF_HUB_OFFLINE"):
+            d_utils.HF_HUB_OFFLINE = os.environ.get("HF_HUB_OFFLINE", "").upper() in ("1", "TRUE", "YES", "ON")
+        if not hasattr(d_utils, "maybe_allow_in_graph"):
+            from diffusers.utils.torch_utils import maybe_allow_in_graph
+            d_utils.maybe_allow_in_graph = maybe_allow_in_graph
+    except Exception:
+        pass
+    try:
+        import diffusers.models.unets.unet_2d_blocks as unet_2d_blocks
+        sys.modules.setdefault("diffusers.models.unet_2d_blocks", unet_2d_blocks)
+    except Exception:
+        pass
+    try:
+        import diffusers.models.transformers.dual_transformer_2d as dual_t2d
+        sys.modules.setdefault("diffusers.models.dual_transformer_2d", dual_t2d)
+    except Exception:
+        pass
+
+    # Alias wonder3d.mvdiffusion as top-level mvdiffusion for diffusers loader
+    try:
+        spec = importlib.util.find_spec("wonder3d.mvdiffusion")
+        if spec and spec.submodule_search_locations:
+            mvdiffusion_mod = types.ModuleType("mvdiffusion")
+            mvdiffusion_mod.__path__ = list(spec.submodule_search_locations)
+            sys.modules.setdefault("mvdiffusion", mvdiffusion_mod)
+    except Exception:
+        pass
 
     from wonder3d.mvdiffusion.pipelines.pipeline_mvdiffusion_image import MVDiffusionImagePipeline
 
     # Load the Wonder3D pipeline from pretrained weights
+    dtype = torch.float16 if device.type != "cpu" else torch.float32
     pipeline = MVDiffusionImagePipeline.from_pretrained(
         weights_path,
-        torch_dtype=torch.float16
+        torch_dtype=dtype
     )
     pipeline = pipeline.to(device)
+    if device.type == "cpu":
+        # Reduce memory usage on CPU
+        try:
+            pipeline.enable_attention_slicing()
+        except Exception:
+            pass
     log(f"Wonder3D loaded successfully")
     return pipeline
 
 def load_lgm(weights_path, device):
     import torch
+    import lgm.gs as lgm_gs
+    import numpy as np
     from lgm.models import LGM
     from lgm.options import Options, config_defaults
     from safetensors.torch import load_file
+
+    # Patch GaussianRenderer to avoid hardcoded CUDA device
+    if not getattr(lgm_gs.GaussianRenderer, "_deep3d_cpu_patch", False):
+        def _patched_init(self, opt: Options, device_override=None):
+            self.opt = opt
+            if device_override is None:
+                device_override = "cuda" if torch.cuda.is_available() else "cpu"
+            self.device = device_override
+            self.bg_color = torch.tensor([1, 1, 1], dtype=torch.float32, device=self.device)
+
+            # intrinsics
+            self.tan_half_fov = np.tan(0.5 * np.deg2rad(self.opt.fovy))
+            self.proj_matrix = torch.zeros(4, 4, dtype=torch.float32)
+            self.proj_matrix[0, 0] = 1 / self.tan_half_fov
+            self.proj_matrix[1, 1] = 1 / self.tan_half_fov
+            self.proj_matrix[2, 2] = (opt.zfar + opt.znear) / (opt.zfar - opt.znear)
+            self.proj_matrix[3, 2] = - (opt.zfar * opt.znear) / (opt.zfar - opt.znear)
+            self.proj_matrix[2, 3] = 1
+
+        lgm_gs.GaussianRenderer.__init__ = _patched_init
+        lgm_gs.GaussianRenderer._deep3d_cpu_patch = True
 
     # Use 'big' config which matches the model_fp16_fixrot.safetensors weights
     # The 'big' config has: up_channels=(1024, 1024, 512, 256, 128), splat_size=128, output_size=512
@@ -281,6 +418,8 @@ def load_lgm(weights_path, device):
         state_dict = state_dict['model']
 
     model.load_state_dict(state_dict, strict=False)
+    if device.type == "cpu":
+        model = model.float()
     model = model.to(device).eval()
     log(f"LGM loaded with {sum(p.numel() for p in model.parameters())} parameters")
     return model

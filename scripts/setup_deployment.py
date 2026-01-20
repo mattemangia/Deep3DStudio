@@ -932,6 +932,16 @@ except ImportError:
                 with open(gs_path, "w", encoding="utf-8") as f:
                     f.write(new_content)
                 print(f"    Fixed hardcoded cuda device in gs.py")
+            else:
+                # Fallback patch: replace device="cuda" and add self.device when block format differs
+                with open(gs_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                if 'device="cuda"' in content and "self.device" not in content:
+                    content = content.replace("self.opt = opt", "self.opt = opt\n        self.device = \"cuda\" if torch.cuda.is_available() else \"cpu\"")
+                    content = content.replace('device="cuda"', "device=self.device")
+                    with open(gs_path, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    print("    Applied fallback CPU device patch in gs.py")
 
     # Patch Wonder3D: Add __init__.py files and fix diffusers API changes
     wonder3d_dir = os.path.join(site_packages, "wonder3d")
@@ -971,6 +981,190 @@ except ImportError:
                 with open(pipeline_path, "w", encoding="utf-8") as f:
                     f.write(new_content)
                 print(f"    Fixed randn_tensor import in pipeline_mvdiffusion_image.py")
+
+            # Ensure xformers is disabled and CUDA flash attention shim exists for CPU-only torch
+            with open(pipeline_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            if "XFORMERS_DISABLED" not in content:
+                inject = """import os
+
+# Disable xformers for CPU-only environments and add CUDA flash attention shim
+os.environ.setdefault("XFORMERS_DISABLED", "1")
+os.environ.setdefault("DIFFUSERS_USE_XFORMERS", "0")
+if not hasattr(torch.backends.cuda, "is_flash_attention_available"):
+    torch.backends.cuda.is_flash_attention_available = lambda: False
+"""
+                if "import torch" in content:
+                    content = content.replace("import torch\n", "import torch\n" + inject)
+                elif "import torch" not in content and "import warnings" in content:
+                    content = content.replace("import warnings\n", "import warnings\n" + inject)
+                with open(pipeline_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                print("    Disabled xformers and added CPU shim in pipeline_mvdiffusion_image.py")
+
+        # Provide top-level mvdiffusion alias expected by diffusers loader
+        mvdiffusion_alias = os.path.join(site_packages, "mvdiffusion")
+        if not os.path.exists(mvdiffusion_alias):
+            os.makedirs(mvdiffusion_alias, exist_ok=True)
+            alias_init = os.path.join(mvdiffusion_alias, "__init__.py")
+            with open(alias_init, "w", encoding="utf-8") as f:
+                f.write("from wonder3d.mvdiffusion import *\n")
+            print("    Created mvdiffusion alias package for wonder3d")
+
+        # Patch Wonder3D unet to handle diffusers API changes
+        unet_path = os.path.join(wonder3d_dir, "mvdiffusion", "models", "unet_mv2d_condition.py")
+        if os.path.exists(unet_path):
+            with open(unet_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            old_import = "from diffusers.models.modeling_utils import ModelMixin, load_state_dict, _load_state_dict_into_model"
+            if old_import in content and "_load_state_dict_into_model" in content:
+                new_import = """try:
+    from diffusers.models.modeling_utils import ModelMixin, load_state_dict, _load_state_dict_into_model
+except ImportError:
+    from diffusers.models.modeling_utils import ModelMixin, load_state_dict
+    def _load_state_dict_into_model(model, state_dict, *args, **kwargs):
+        model.load_state_dict(state_dict, strict=False)
+        return []
+"""
+                content = content.replace(old_import, new_import)
+                with open(unet_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                print("    Patched Wonder3D unet for diffusers compatibility")
+
+    # Patch diffusers module path for unet_2d_blocks by adding a compatibility shim
+    diffusers_models_dir = os.path.join(site_packages, "diffusers", "models")
+    unet_blocks_shim = os.path.join(diffusers_models_dir, "unet_2d_blocks.py")
+    if os.path.exists(diffusers_models_dir) and not os.path.exists(unet_blocks_shim):
+        with open(unet_blocks_shim, "w", encoding="utf-8") as f:
+            f.write("from diffusers.models.unets.unet_2d_blocks import *\n")
+        print("    Added diffusers.models.unet_2d_blocks shim")
+
+    dual_transformer_shim = os.path.join(diffusers_models_dir, "dual_transformer_2d.py")
+    if os.path.exists(diffusers_models_dir) and not os.path.exists(dual_transformer_shim):
+        with open(dual_transformer_shim, "w", encoding="utf-8") as f:
+            f.write("from diffusers.models.transformers.dual_transformer_2d import *\n")
+        print("    Added diffusers.models.dual_transformer_2d shim")
+
+    # Patch diffusers: Respect XFORMERS_DISABLED / DIFFUSERS_USE_XFORMERS for CPU-only installs
+    diffusers_import_utils = os.path.join(site_packages, "diffusers", "utils", "import_utils.py")
+    if os.path.exists(diffusers_import_utils):
+        with open(diffusers_import_utils, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        marker = '_xformers_available, _xformers_version = _is_package_available("xformers")'
+        if marker in content and "XFORMERS_DISABLED" not in content:
+            replacement = marker + """
+if os.environ.get("XFORMERS_DISABLED", "").upper() in ENV_VARS_TRUE_VALUES or os.environ.get("DIFFUSERS_USE_XFORMERS", "1") in ("0", "FALSE", "OFF"):
+    _xformers_available = False
+    _xformers_version = "N/A"
+"""
+            content = content.replace(marker, replacement)
+            with open(diffusers_import_utils, "w", encoding="utf-8") as f:
+                f.write(content)
+            print("    Patched diffusers import_utils to disable xformers on CPU")
+
+    diffusers_utils_init = os.path.join(site_packages, "diffusers", "utils", "__init__.py")
+    if os.path.exists(diffusers_utils_init):
+        with open(diffusers_utils_init, "r", encoding="utf-8") as f:
+            content = f.read()
+        if "DIFFUSERS_CACHE" not in content:
+            content += "\n# Back-compat alias for older code expecting DIFFUSERS_CACHE\nif 'DIFFUSERS_CACHE' not in globals():\n    DIFFUSERS_CACHE = HF_MODULES_CACHE\n"
+        if "HF_HUB_OFFLINE" not in content:
+            content += "\n# Back-compat alias for HF_HUB_OFFLINE\nif 'HF_HUB_OFFLINE' not in globals():\n    HF_HUB_OFFLINE = os.environ.get('HF_HUB_OFFLINE', '').upper() in ('1', 'TRUE', 'YES', 'ON')\n"
+        if "maybe_allow_in_graph" not in content:
+            content += "\n# Back-compat alias for maybe_allow_in_graph\nif 'maybe_allow_in_graph' not in globals():\n    from .torch_utils import maybe_allow_in_graph\n"
+        with open(diffusers_utils_init, "w", encoding="utf-8") as f:
+            f.write(content)
+        print("    Added DIFFUSERS_CACHE alias in diffusers.utils")
+
+    # Patch diffusers attention to expose AdaGroupNorm for older imports
+    diffusers_attention = os.path.join(site_packages, "diffusers", "models", "attention.py")
+    if os.path.exists(diffusers_attention):
+        with open(diffusers_attention, "r", encoding="utf-8") as f:
+            content = f.read()
+        if "AdaGroupNorm" not in content:
+            content = content.replace("from torch import nn", "from torch import nn\nfrom .normalization import AdaGroupNorm\n")
+            with open(diffusers_attention, "w", encoding="utf-8") as f:
+                f.write(content)
+            print("    Exposed AdaGroupNorm in diffusers.models.attention")
+
+    # Patch transformers: allow trusted local weights when DEEP3D_TRUSTED_WEIGHTS=1
+    transformers_import_utils = os.path.join(site_packages, "transformers", "utils", "import_utils.py")
+    if os.path.exists(transformers_import_utils):
+        with open(transformers_import_utils, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        if "DEEP3D_TRUSTED_WEIGHTS" not in content and "check_torch_load_is_safe" in content:
+            old_def = """def check_torch_load_is_safe() -> None:
+    if not is_torch_greater_or_equal("2.6"):
+        raise ValueError(
+            "Due to a serious vulnerability issue in `torch.load`, even with `weights_only=True`, we now require users "
+            "to upgrade torch to at least v2.6 in order to use the function. This version restriction does not apply "
+            "when loading files with safetensors."
+            "\\nSee the vulnerability report here https://nvd.nist.gov/vuln/detail/CVE-2025-32434"
+        )
+"""
+            new_def = """def check_torch_load_is_safe() -> None:
+    if os.environ.get("DEEP3D_TRUSTED_WEIGHTS", "0") == "1":
+        return
+    if not is_torch_greater_or_equal("2.6"):
+        raise ValueError(
+            "Due to a serious vulnerability issue in `torch.load`, even with `weights_only=True`, we now require users "
+            "to upgrade torch to at least v2.6 in order to use the function. This version restriction does not apply "
+            "when loading files with safetensors."
+            "\\nSee the vulnerability report here https://nvd.nist.gov/vuln/detail/CVE-2025-32434"
+        )
+"""
+            if old_def in content:
+                content = content.replace(old_def, new_def)
+                with open(transformers_import_utils, "w", encoding="utf-8") as f:
+                    f.write(content)
+                print("    Patched transformers torch.load safety check for trusted weights")
+
+    # Patch MASt3R: Allow installed dust3r package without git submodule layout
+    mast3r_path = os.path.join(site_packages, "mast3r", "utils", "path_to_dust3r.py")
+    if os.path.exists(mast3r_path):
+        with open(mast3r_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        if "Fallback to installed dust3r package" not in content:
+            patched = """# Copyright (C) 2024-present Naver Corporation. All rights reserved.
+# Licensed under CC BY-NC-SA 4.0 (non-commercial use only).
+#
+# --------------------------------------------------------
+# dust3r submodule import
+# --------------------------------------------------------
+
+import sys
+import os
+import os.path as path
+
+HERE_PATH = path.normpath(path.dirname(__file__))
+DUSt3R_REPO_PATH = path.normpath(path.join(HERE_PATH, '../../dust3r'))
+DUSt3R_LIB_PATH = path.join(DUSt3R_REPO_PATH, 'dust3r')
+
+# check the presence of models directory in repo to be sure its cloned
+if path.isdir(DUSt3R_LIB_PATH):
+    # workaround for sibling import
+    sys.path.insert(0, DUSt3R_REPO_PATH)
+else:
+    # Fallback to installed dust3r package
+    try:
+        import dust3r  # noqa: F401
+        dust3r_pkg_path = path.normpath(path.dirname(dust3r.__file__))
+        DUSt3R_REPO_PATH = path.dirname(dust3r_pkg_path)
+        DUSt3R_LIB_PATH = dust3r_pkg_path
+        if DUSt3R_REPO_PATH not in sys.path:
+            sys.path.insert(0, DUSt3R_REPO_PATH)
+    except Exception as e:
+        raise ImportError(
+            f"dust3r is not initialized, could not find: {DUSt3R_LIB_PATH}.\\n "
+            "Did you forget to run 'git submodule update --init --recursive' ?"
+        ) from e
+"""
+            with open(mast3r_path, "w", encoding="utf-8") as f:
+                f.write(patched)
+            print("    Patched mast3r path_to_dust3r.py for installed dust3r fallback")
 
     print("  Patches applied successfully")
 
