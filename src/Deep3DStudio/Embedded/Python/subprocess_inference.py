@@ -23,41 +23,42 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, line_buffering=True)
 def log(msg):
     print(f"[PyRunner] {msg}", file=sys.stderr, flush=True)
 
-# Add potential model code locations to path
+# Setup Python path for proper module discovery
 def setup_python_path():
-    """Add model code directories to sys.path if needed"""
+    """Ensure site-packages is in sys.path for module discovery.
+
+    IMPORTANT: We do NOT add the 'models/' directory to sys.path because:
+    - models/ only contains weight files (.pth, .safetensors, etc.)
+    - Adding it to sys.path can interfere with Python module imports
+    - The actual Python modules (dust3r, mast3r, etc.) are in site-packages
+    """
     # Get the Python executable's directory
     python_dir = os.path.dirname(sys.executable)
 
-    # Common locations for model packages
-    possible_paths = []
+    # Only add site-packages paths (where the actual modules are installed)
+    site_packages_paths = []
 
-    # Check for site-packages in various locations
     if sys.platform == 'win32':
-        possible_paths.extend([
+        # Windows: python/Lib/site-packages
+        site_packages_paths.extend([
             os.path.join(python_dir, 'Lib', 'site-packages'),
             os.path.join(python_dir, 'site-packages'),
         ])
     else:
-        possible_paths.extend([
-            os.path.join(python_dir, '..', 'lib', 'python3.10', 'site-packages'),
-            os.path.join(python_dir, '..', 'lib', 'python3.11', 'site-packages'),
-            os.path.join(os.path.dirname(python_dir), 'lib', 'python3.10', 'site-packages'),
+        # Linux/Mac: python/lib/python3.x/site-packages
+        python_root = os.path.dirname(python_dir)  # Go from bin/ to python/
+        site_packages_paths.extend([
+            os.path.join(python_root, 'lib', 'python3.10', 'site-packages'),
+            os.path.join(python_root, 'lib', 'python3.11', 'site-packages'),
+            os.path.join(python_root, 'lib', 'python3.9', 'site-packages'),
         ])
 
-    # Add models directory (where code might be copied)
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    exe_dir = os.path.dirname(script_dir) if 'Embedded' in script_dir else script_dir
-    possible_paths.extend([
-        os.path.join(exe_dir, 'models'),
-        os.path.join(exe_dir, '..', 'models'),
-    ])
-
-    for path in possible_paths:
+    # Add site-packages to sys.path (append, don't insert at 0)
+    for path in site_packages_paths:
         abs_path = os.path.abspath(path)
         if os.path.exists(abs_path) and abs_path not in sys.path:
-            sys.path.insert(0, abs_path)
-            log(f"Added to sys.path: {abs_path}")
+            sys.path.append(abs_path)
+            log(f"Added site-packages to sys.path: {abs_path}")
 
 # Setup path before any imports
 setup_python_path()
