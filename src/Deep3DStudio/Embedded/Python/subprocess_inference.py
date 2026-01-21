@@ -25,6 +25,7 @@ import base64
 import io
 import gc
 import types
+from PIL import Image
 
 # Unbuffered output
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, line_buffering=True)
@@ -1294,7 +1295,8 @@ def infer_wonder3d(images_data, num_steps=50, guidance_scale=3.0):
         if not pil_images:
             return {"success": False, "error": "No images"}
 
-        img = pil_images[0]
+        # Wonder3D expects 256x256 input
+        img = pil_images[0].convert('RGB').resize((256, 256), Image.LANCZOS)
         results = []
 
         with torch.no_grad():

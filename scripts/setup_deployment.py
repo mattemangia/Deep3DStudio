@@ -343,7 +343,19 @@ def setup_python_embed(target_dir, target_platform):
     elif "darwin" in host_os and "osx" in target_platform: is_compatible = True
 
     # Requirements list
-    base_reqs = ["torch", "torchvision", "numpy", "Pillow", "opencv-python", "rembg", "onnxruntime", "scipy", "easydict"]
+    # Pin torch/torchvision for torch-directml compatibility (Windows)
+    # torch-directml requires specific versions, usually lagging behind latest
+    base_reqs = [
+        "torch==2.4.1", 
+        "torchvision==0.19.1", 
+        "numpy", 
+        "Pillow", 
+        "opencv-python", 
+        "rembg", 
+        "onnxruntime", 
+        "scipy", 
+        "easydict"
+    ]
 
     # Add torch-directml for Windows platforms
     if "win" in target_platform:

@@ -51,16 +51,17 @@ namespace Deep3DStudio.DeepMeshPrior
             else
             {
                 h = new long[] { 16, 32, 64, 128, 256, 256, 512, 512, 256, 256, 128, 64, 32, 32, 16, 3 };
-                for(int i=0; i<h.Length-2; i++)
+                // Stop at h[13] (32 channels) for Convs
+                for(int i=0; i<h.Length-3; i++)
                 {
                     AddLayer(h[i], h[i+1]);
                 }
 
-                _finalLinear = nn.Linear(h[h.Length-2], h[h.Length-1]); // 16 -> 3
-                register_module("final_linear1", _finalLinear);
                 // Two linear layers at the end: linear1 (32 -> 16) then linear2 (16 -> 3).
+                _finalLinear = nn.Linear(h[h.Length-3], h[h.Length-2]); // 32 -> 16
+                register_module("final_linear1", _finalLinear);
 
-                _finalLinear2 = nn.Linear(h[14], h[15]);
+                _finalLinear2 = nn.Linear(h[h.Length-2], h[h.Length-1]); // 16 -> 3
                 register_module("final_linear2", _finalLinear2);
             }
 
@@ -114,8 +115,7 @@ namespace Deep3DStudio.DeepMeshPrior
             else
             {
                 // Normal sequential
-                // Layers 0 to 12 (13 layers)
-                for(int i=0; i<13; i++)
+                for(int i=0; i<_convs.Count; i++)
                 {
                     dx = _convs[i].forward(dx, edgeIndex, edgeWeight);
                     dx = _bns[i].forward(dx);
