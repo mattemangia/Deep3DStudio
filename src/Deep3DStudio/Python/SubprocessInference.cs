@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using OpenTK.Mathematics;
@@ -20,6 +21,10 @@ namespace Deep3DStudio.Python
     /// </summary>
     public class SubprocessInference : IDisposable
     {
+        private static readonly JsonSerializerOptions JsonOptions = new()
+        {
+            NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
+        };
         private readonly string _pythonPath;
         private readonly string _scriptPath;
         private readonly string _modelName;
@@ -388,7 +393,7 @@ namespace Deep3DStudio.Python
                 {
                     try
                     {
-                        var result = JsonSerializer.Deserialize<Dictionary<string, object>>(stdout);
+                        var result = JsonSerializer.Deserialize<Dictionary<string, object>>(stdout, JsonOptions);
                         if (result != null && result.TryGetValue("success", out var success))
                         {
                             if (success is JsonElement je && je.GetBoolean())
@@ -407,7 +412,7 @@ namespace Deep3DStudio.Python
                         if (jsonStart >= 0)
                         {
                             string jsonStr = stdout.Substring(jsonStart);
-                            var result = JsonSerializer.Deserialize<Dictionary<string, object>>(jsonStr);
+                            var result = JsonSerializer.Deserialize<Dictionary<string, object>>(jsonStr, JsonOptions);
                             if (result != null && result.TryGetValue("success", out var success))
                             {
                                 if (success is JsonElement je && je.GetBoolean())
@@ -501,7 +506,7 @@ namespace Deep3DStudio.Python
                 if (exitCode == 0 && File.Exists(outputPath))
                 {
                     string outputJson = File.ReadAllText(outputPath);
-                    var outputData = JsonSerializer.Deserialize<JsonElement>(outputJson);
+                    var outputData = JsonSerializer.Deserialize<JsonElement>(outputJson, JsonOptions);
 
                     if (outputData.TryGetProperty("success", out var successProp) && successProp.GetBoolean())
                     {
@@ -625,7 +630,7 @@ namespace Deep3DStudio.Python
                 if (exitCode == 0 && File.Exists(outputPath))
                 {
                     string outputJson = File.ReadAllText(outputPath);
-                    var outputData = JsonSerializer.Deserialize<JsonElement>(outputJson);
+                    var outputData = JsonSerializer.Deserialize<JsonElement>(outputJson, JsonOptions);
 
                     if (outputData.TryGetProperty("success", out var successProp) && successProp.GetBoolean())
                     {
@@ -765,7 +770,7 @@ namespace Deep3DStudio.Python
                 if (exitCode == 0 && File.Exists(outputPath))
                 {
                     string outputJson = File.ReadAllText(outputPath);
-                    var outputData = JsonSerializer.Deserialize<JsonElement>(outputJson);
+                    var outputData = JsonSerializer.Deserialize<JsonElement>(outputJson, JsonOptions);
 
                     if (outputData.TryGetProperty("success", out var successProp) && successProp.GetBoolean())
                     {
@@ -909,7 +914,7 @@ namespace Deep3DStudio.Python
                 if (exitCode == 0 && File.Exists(outputPath))
                 {
                     string outputJson = File.ReadAllText(outputPath);
-                    var outputData = JsonSerializer.Deserialize<JsonElement>(outputJson);
+                    var outputData = JsonSerializer.Deserialize<JsonElement>(outputJson, JsonOptions);
 
                     if (outputData.TryGetProperty("success", out var successProp) && successProp.GetBoolean())
                     {

@@ -2104,7 +2104,7 @@ def infer_triposr(image_bytes, resolution=256, mc_resolution=128):
     model = loaded_models.get('triposr')
     if not model: return None
 
-    img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+    img = Image.open(io.BytesIO(image_bytes)).convert('RGB').resize((256, 256))
     try:
         from rembg import remove
         img = remove(img)

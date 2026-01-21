@@ -63,7 +63,7 @@ MODELS = {
             "triposr_config.yaml": "https://huggingface.co/stabilityai/TripoSR/resolve/main/config.yaml"
         },
         "files": ["tsr/"],
-        "requirements": ["torch", "rembg", "omegaconf", "einops", "transformers", "torchmcubes"]
+        "requirements": ["torch", "rembg", "omegaconf", "einops", "transformers", "torchmcubes", "PyMCubes"]
     },
     "triposf": {
         # TripoSF (SparseFlex) - High-Resolution mesh refinement model
@@ -71,7 +71,7 @@ MODELS = {
         "weights": "https://huggingface.co/VAST-AI/TripoSF/resolve/main/vae/pretrained_TripoSFVAE_256i1024o.safetensors",
         "configs": {},
         "files": ["triposf/"],
-        "requirements": ["torch", "numpy", "trimesh", "safetensors", "torchmcubes", "easydict", "scipy"]
+        "requirements": ["torch", "numpy", "trimesh", "safetensors", "torchmcubes", "PyMCubes", "easydict", "scipy"]
     },
     "lgm": {
         # LGM (Large Multi-View Gaussian Model) for Gaussian Splatting
@@ -488,7 +488,11 @@ def setup_python_embed(target_dir, target_platform):
                         pkg_env["CUDA_HOME"] = ""
                         pkg_env["CUDA_PATH"] = ""
                         pkg_env["TORCH_CUDA_ARCH_LIST"] = ""
-                        pkg_env["CMAKE_ARGS"] = (pkg_env.get("CMAKE_ARGS", "") + " -DWITH_CUDA=OFF").strip()
+                        pkg_env["CMAKE_ARGS"] = (pkg_env.get("CMAKE_ARGS", "") +
+                                                 " -DWITH_CUDA=OFF -DUSE_CUDA=OFF"
+                                                 " -DCMAKE_CUDA_COMPILER=NOTFOUND"
+                                                 " -DCMAKE_DISABLE_FIND_PACKAGE_CUDA=ON"
+                                                 " -DCMAKE_DISABLE_FIND_PACKAGE_CUDAToolkit=ON").strip()
                         if "PATH" in pkg_env:
                             path_parts = [p for p in pkg_env["PATH"].split(";") if "CUDA" not in p.upper()]
                             pkg_env["PATH"] = ";".join(path_parts)

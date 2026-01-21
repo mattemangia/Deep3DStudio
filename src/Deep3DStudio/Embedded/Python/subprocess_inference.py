@@ -122,6 +122,69 @@ def _install_torch_cluster_stub():
 
 _install_torch_cluster_stub()
 
+def _install_torchmcubes_stub():
+    """Provide a CPU torchmcubes fallback using PyMCubes when CUDA build is unavailable."""
+    try:
+        import torchmcubes  # noqa: F401
+        return
+    except Exception:
+        pass
+
+    try:
+        import mcubes
+    except Exception:
+        return
+
+    import types
+    import numpy as np
+    import torch
+
+    def marching_cubes(level, thresh):
+        level_np = level.detach().cpu().numpy()
+        verts, faces = mcubes.marching_cubes(level_np, thresh)
+        verts_t = torch.from_numpy(verts.astype(np.float32))
+        faces_t = torch.from_numpy(faces.astype(np.int64))
+        return verts_t, faces_t
+
+    torchmcubes_stub = types.ModuleType("torchmcubes")
+    torchmcubes_stub.marching_cubes = marching_cubes
+    sys.modules["torchmcubes"] = torchmcubes_stub
+    log("Installed torchmcubes stub using PyMCubes.")
+
+_install_torchmcubes_stub()
+
+def _sanitize_points_colors(points, colors):
+    import numpy as np
+    if points is None or len(points) == 0:
+        return points, colors
+    finite = np.isfinite(points).all(axis=1)
+    points = points[finite]
+    if colors is not None and len(colors) == len(finite):
+        colors = colors[finite]
+    return points, colors
+
+def _sanitize_for_json(obj):
+    import math
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else 0.0
+    if isinstance(obj, list):
+        return [_sanitize_for_json(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    return obj
+
+def _write_json_output(output_path, result):
+    try:
+        clean = _sanitize_for_json(result)
+        with open(output_path, 'w') as f:
+            json.dump(clean, f, allow_nan=False)
+    except Exception as e:
+        fallback = {"success": False, "error": f"Failed to serialize output: {e}"}
+        with open(output_path, 'w') as f:
+            json.dump(fallback, f)
+        return fallback
+    return result
+
 def get_device(device_str):
     import torch
     try:
@@ -175,6 +238,7 @@ def safe_load_images(pil_images, size=512, device='cpu'):
     """Load PIL images into dust3r/mast3r format"""
     import torch
     import numpy as np
+    from PIL import Image
     from PIL import Image
 
     result = []
@@ -570,6 +634,9 @@ def load_must3r(weights_path, device):
     _ensure_dust3r_submodules()
     try:
         from must3r.model import load_model as must3r_load_model
+        if device.type not in ("cuda", "cpu", "mps"):
+            log(f"MUSt3R: unsupported device {device}, falling back to CPU")
+            device = torch.device("cpu")
         # load_model returns (encoder, decoder) tuple
         encoder, decoder = must3r_load_model(weights_path, device=str(device))
         log(f"MUSt3R loaded: encoder and decoder ready")
@@ -946,6 +1013,7 @@ def infer_must3r(images_data, use_retrieval=True):
 
                 valid_pts = pts[mask].reshape(-1, 3)
                 valid_colors = img_np[mask].reshape(-1, 3)
+                valid_pts, valid_colors = _sanitize_points_colors(valid_pts, valid_colors)
 
                 results.append({
                     'vertices': valid_pts.tolist(),
@@ -1029,6 +1097,7 @@ def infer_stereo_model(model_name, images_data, use_retrieval=True):
 
                 valid_pts = pts[mask]
                 valid_colors = img_np[mask]
+                valid_pts, valid_colors = _sanitize_points_colors(valid_pts, valid_colors)
 
                 results.append({
                     'vertices': valid_pts.tolist(),
@@ -1066,7 +1135,7 @@ def infer_triposr(images_data, resolution=256, mc_resolution=256):
         if not pil_images:
             return {"success": False, "error": "No images"}
 
-        img = pil_images[0]
+        img = pil_images[0].convert('RGB').resize((256, 256), Image.LANCZOS)
         results = []
 
         # Get device from model parameters
@@ -1380,13 +1449,11 @@ def run_inference(model_name, input_path, output_path, weights_path=None, device
             log(f"Model not loaded, loading {model_name} from {weights_path}")
             load_result = load_model(model_name, weights_path, device_str)
             if not load_result.get('success'):
-                with open(output_path, 'w') as f:
-                    json.dump(load_result, f)
+                _write_json_output(output_path, load_result)
                 return load_result
         else:
             result = {"success": False, "error": f"{model_name} not loaded and no weights path provided"}
-            with open(output_path, 'w') as f:
-                json.dump(result, f)
+            _write_json_output(output_path, result)
             return result
 
     # Handle mesh-input models (like triposf/unirig) that take mesh path directly
@@ -1401,8 +1468,7 @@ def run_inference(model_name, input_path, output_path, weights_path=None, device
                 "faces": mesh.faces.reshape(-1).tolist() if hasattr(mesh.faces, "reshape") else list(mesh.faces)
             }
             result = infer_unirig(mesh_data, kwargs.get('max_joints', 50), kwargs.get('max_bones_per_vertex', 4))
-        with open(output_path, 'w') as f:
-            json.dump(result, f)
+        _write_json_output(output_path, result)
         log(f"Results written to {output_path}")
         return result
 
@@ -1434,8 +1500,7 @@ def run_inference(model_name, input_path, output_path, weights_path=None, device
     else:
         result = {"success": False, "error": f"Unknown model: {model_name}"}
 
-    with open(output_path, 'w') as f:
-        json.dump(result, f)
+    _write_json_output(output_path, result)
 
     log(f"Results written to {output_path}")
     return result

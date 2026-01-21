@@ -127,7 +127,6 @@ namespace Deep3DStudio.CLI
 
                         bool expectsMesh = pipeline.Steps.Contains(WorkflowStep.MarchingCubes) ||
                                            pipeline.Steps.Contains(WorkflowStep.TripoSRGeneration) ||
-                                           pipeline.Steps.Contains(WorkflowStep.LGMGeneration) ||
                                            pipeline.Steps.Contains(WorkflowStep.Wonder3DGeneration);
 
                         var ok = result != null &&
