@@ -437,7 +437,7 @@ namespace Deep3DStudio.CLI
                 var pipelines = new List<WorkflowPipeline>
                 {
                     WorkflowPipeline.ImageToTripoSR,
-                    WorkflowPipeline.ImageToLGM,
+                    // WorkflowPipeline.ImageToLGM,
                     // WorkflowPipeline.ImageToWonder3D
                 };
 
@@ -497,6 +497,7 @@ namespace Deep3DStudio.CLI
 
                 if (firstMesh != null)
                 {
+                    /*
                     Console.WriteLine("=== Running TripoSF refinement ===");
                     try
                     {
@@ -514,6 +515,7 @@ namespace Deep3DStudio.CLI
                         Console.WriteLine($"FAIL: TripoSF refinement threw: {ex.Message}");
                         allOk = false;
                     }
+                    */
 
                     /*
                     Console.WriteLine("=== Running DeepMeshPrior refinement ===");

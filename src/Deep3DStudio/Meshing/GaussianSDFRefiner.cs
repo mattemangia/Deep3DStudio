@@ -56,9 +56,6 @@ namespace Deep3DStudio.Meshing
                 progressCallback?.Invoke("Computing Signed Distance Field...", 0.2f);
 
                 // 2. Compute SDF (Signed Distance Field)
-                // For each voxel, find distance to the nearest triangle. Without a KD-Tree,
-                // use a parallel brute-force scan, which is adequate for moderate meshes.
-
                 var triangles = new List<(Vector3 p1, Vector3 p2, Vector3 p3)>();
                 for (int i = 0; i < inputMesh.Indices.Count; i += 3)
                 {
@@ -74,6 +71,13 @@ namespace Deep3DStudio.Meshing
                     CancellationToken = cancellationToken
                 };
 
+                // Use triangle AABBs for a simple optimization to skip distant triangles
+                var triAABBs = triangles.Select(tri => (
+                    min: Vector3.ComponentMin(tri.p1, Vector3.ComponentMin(tri.p2, tri.p3)),
+                    max: Vector3.ComponentMax(tri.p1, Vector3.ComponentMax(tri.p2, tri.p3))
+                )).ToList();
+
+                int completedSdf = 0;
                 Parallel.For(0, resX, parallelOptions, x =>
                 {
                     parallelOptions.CancellationToken.ThrowIfCancellationRequested();
@@ -84,23 +88,40 @@ namespace Deep3DStudio.Meshing
                             Vector3 p = min + new Vector3(x * step, y * step, z * step);
                             float minDist = float.MaxValue;
 
-                            // Brute-force check against all triangles
-                            foreach (var tri in triangles)
+                            // Optimization: Check closest triangles using AABB distance first
+                            for (int i = 0; i < triangles.Count; i++)
                             {
+                                var aabb = triAABBs[i];
+                                // Quick lower bound on distance to AABB
+                                float distSqAABB = 0;
+                                if (p.X < aabb.min.X) distSqAABB += (aabb.min.X - p.X) * (aabb.min.X - p.X);
+                                else if (p.X > aabb.max.X) distSqAABB += (p.X - aabb.max.X) * (p.X - aabb.max.X);
+                                if (p.Y < aabb.min.Y) distSqAABB += (aabb.min.Y - p.Y) * (aabb.min.Y - p.Y);
+                                else if (p.Y > aabb.max.Y) distSqAABB += (p.Y - aabb.max.Y) * (p.Y - aabb.max.Y);
+                                if (p.Z < aabb.min.Z) distSqAABB += (aabb.min.Z - p.Z) * (aabb.min.Z - p.Z);
+                                else if (p.Z > aabb.max.Z) distSqAABB += (p.Z - aabb.max.Z) * (p.Z - aabb.max.Z);
+
+                                if (distSqAABB >= minDist * minDist) continue;
+
+                                var tri = triangles[i];
                                 float dist = PointToTriangleDistance(p, tri.p1, tri.p2, tri.p3);
                                 if (dist < minDist) minDist = dist;
                             }
 
-                            // Without a reliable inside/outside test, use unsigned distance.
                             sdf[x, y, z] = minDist;
                         }
                     }
+                    int done = System.Threading.Interlocked.Increment(ref completedSdf);
+                    if (done % 5 == 0 || done == resX)
+                    {
+                        progressCallback?.Invoke($"Computing SDF: {done}/{resX} slices...", 0.2f + (0.2f * done / resX));
+                    }
                 });
 
-                // Sign correction (optional) uses the closest triangle normal as a heuristic.
-
+                // Sign correction
                 progressCallback?.Invoke("Correcting SDF Signs...", 0.4f);
-                 Parallel.For(0, resX, parallelOptions, x =>
+                int completedSign = 0;
+                Parallel.For(0, resX, parallelOptions, x =>
                 {
                     parallelOptions.CancellationToken.ThrowIfCancellationRequested();
                     for (int y = 0; y < resY; y++)
@@ -108,29 +129,40 @@ namespace Deep3DStudio.Meshing
                         for (int z = 0; z < resZ; z++)
                         {
                             Vector3 p = min + new Vector3(x * step, y * step, z * step);
-                            float minDist = float.MaxValue;
+                            float minDist = Math.Abs(sdf[x, y, z]);
                             Vector3 closestNormal = Vector3.UnitY;
                             Vector3 closestPoint = Vector3.Zero;
 
-                            foreach (var tri in triangles)
+                            // We need to find the specific closest triangle again to get its normal
+                            // Optimization: only check triangles whose AABB is within minDist
+                            for (int i = 0; i < triangles.Count; i++)
                             {
+                                var aabb = triAABBs[i];
+                                float dX = Math.Max(0, Math.Max(aabb.min.X - p.X, p.X - aabb.max.X));
+                                float dY = Math.Max(0, Math.Max(aabb.min.Y - p.Y, p.Y - aabb.max.Y));
+                                float dZ = Math.Max(0, Math.Max(aabb.min.Z - p.Z, p.Z - aabb.max.Z));
+                                if (dX*dX + dY*dY + dZ*dZ > (minDist + 1e-4f) * (minDist + 1e-4f)) continue;
+
+                                var tri = triangles[i];
                                 var result = ClosestPointOnTriangle(p, tri.p1, tri.p2, tri.p3);
                                 float dist = Vector3.Distance(p, result.Point);
-                                if (dist < minDist)
+                                if (dist <= minDist + 1e-5f)
                                 {
                                     minDist = dist;
                                     closestPoint = result.Point;
-                                    // Compute normal
-                                    var triNormal = Vector3.Cross(tri.p2 - tri.p1, tri.p3 - tri.p1).Normalized();
-                                    closestNormal = triNormal;
+                                    var triNormal = Vector3.Cross(tri.p2 - tri.p1, tri.p3 - tri.p1);
+                                    if (triNormal.LengthSquared > 1e-9f) closestNormal = triNormal.Normalized();
                                 }
                             }
 
-                            // Dot product with normal to determine side
-                            // If (p - closestPoint) . normal > 0, we are "outside" (in direction of normal)
                             float sign = Vector3.Dot(p - closestPoint, closestNormal) > 0 ? 1.0f : -1.0f;
                             sdf[x, y, z] = minDist * sign;
                         }
+                    }
+                    int done = System.Threading.Interlocked.Increment(ref completedSign);
+                    if (done % 10 == 0 || done == resX)
+                    {
+                        progressCallback?.Invoke($"Correcting Signs: {done}/{resX} slices...", 0.4f + (0.2f * done / resX));
                     }
                 });
 
