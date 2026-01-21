@@ -128,7 +128,7 @@ Download the latest release for your platform from the [Releases](https://github
 
 - **OS**: Windows 10+, Linux (Ubuntu 20.04+), macOS 11+
 - **RAM**: 16GB minimum, 32GB recommended
-- **GPU**: NVIDIA GPU with CUDA support recommended (for AI features)
+- **GPU**: NVIDIA CUDA, AMD/Intel DirectML (Windows), or Apple MPS (macOS) supported; AI uses an auto device picker by default
 - **Storage**: 10GB+ for application and AI models
 
 ## Usage
@@ -144,11 +144,15 @@ Download the latest release for your platform from the [Releases](https://github
    - Use `File → Import Images` to load your source images
    - Supported formats: PNG, JPG, JPEG, BMP
 
-3. **Choose reconstruction method**
-   - Select your preferred AI model from the dropdown in the left panel
-   - Options: Dust3r, MASt3R, MUSt3R, TripoSR, LGM, Wonder3D
-   - For multi-view inputs: Dust3r, MASt3R, MUSt3R, or SfM
-   - For single-image inputs: TripoSR, LGM, or Wonder3D
+  3. **Choose reconstruction method**
+     - Select your preferred AI model from the dropdown in the left panel
+     - Options: Dust3r, MASt3R, MUSt3R, TripoSR, LGM, Wonder3D
+     - For multi-view inputs: Dust3r, MASt3R, MUSt3R, or SfM
+     - For single-image inputs: TripoSR, LGM, or Wonder3D
+
+  4. **Configure AI device (optional)**
+     - Settings -> AI Inference Device defaults to **Auto** (selects CUDA/DirectML/MPS if available)
+     - Override to CPU/CUDA/DirectML/MPS/ROCm if you need a specific backend
    - For video input: MUSt3R (supports 8-11 FPS processing)
 
 4. **Run reconstruction**

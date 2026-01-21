@@ -104,7 +104,7 @@ MODELS = {
     "unirig": {
         "repo": "https://github.com/VAST-AI-Research/UniRig.git",
         "weights": "https://huggingface.co/VAST-AI/UniRig/resolve/main/skeleton/articulation-xl_quantization_256/model.ckpt",
-        "files": ["src/"],
+        "files": ["src/unirig"],
         "target_name": "unirig",
         "requirements": ["torch", "numpy", "scipy", "python-box", "pyyaml", "trimesh"]
     }

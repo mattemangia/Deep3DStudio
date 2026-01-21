@@ -124,10 +124,44 @@ _install_torch_cluster_stub()
 
 def get_device(device_str):
     import torch
-    if device_str == "cuda" and torch.cuda.is_available():
-        return torch.device("cuda")
-    elif device_str == "mps" and hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+    try:
+        import torch_directml
+    except Exception:
+        torch_directml = None
+
+    if device_str in (None, "", "auto"):
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if torch_directml:
+            log("Auto device: using DirectML backend.")
+            return torch_directml.device()
+        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
+
+    if device_str == "directml":
+        if torch_directml:
+            return torch_directml.device()
+        log("DirectML requested but torch-directml is not available. Falling back to CPU.")
+        return torch.device("cpu")
+
+    if device_str == "rocm":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        log("ROCm requested but no compatible CUDA/ROCm backend found. Falling back to CPU.")
+        return torch.device("cpu")
+
+    if device_str == "cuda":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if torch_directml:
+            log("CUDA requested but unavailable. Falling back to DirectML.")
+            return torch_directml.device()
+        return torch.device("cpu")
+
+    if device_str == "mps" and hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
         return torch.device("mps")
+
     return torch.device("cpu")
 
 def clear_gpu():
@@ -694,7 +728,8 @@ def load_wonder3d(weights_path, device):
     dtype = torch.float16 if device.type != "cpu" else torch.float32
     pipeline = MVDiffusionImagePipeline.from_pretrained(
         weights_path,
-        torch_dtype=dtype
+        torch_dtype=dtype,
+        use_safetensors=False
     )
     pipeline = pipeline.to(device)
     if device.type == "cpu":

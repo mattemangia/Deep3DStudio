@@ -298,6 +298,9 @@ namespace Deep3DStudio.Model.AIModels
             return await Task.Run(async () =>
             {
                 SceneResult? currentResult = existingScene ?? new SceneResult();
+                float[,,]? voxelGrid = null;
+                Vector3 voxelOrigin = Vector3.Zero;
+                float voxelSize = 0.02f;
                 int totalSteps = pipeline.Steps.Count;
 
                 for (int i = 0; i < totalSteps; i++)
@@ -769,8 +772,48 @@ gc.collect()
                             }
                             break;
 
+                        case WorkflowStep.VoxelizePointCloud:
+                            if (currentResult != null && currentResult.Meshes.Count > 0)
+                            {
+                                Report("Voxelizing point cloud...", 0.1f);
+                                var voxelized = VoxelizePointClouds(currentResult.Meshes, 200);
+                                if (voxelized.grid != null)
+                                {
+                                    voxelGrid = voxelized.grid;
+                                    voxelOrigin = voxelized.origin;
+                                    voxelSize = voxelized.voxelSize;
+                                    Report("Voxelization complete.", 1.0f);
+                                }
+                                else
+                                {
+                                    Report("Voxelization skipped - no points found.", 0.1f);
+                                }
+                            }
+                            else
+                            {
+                                Report("Voxelization skipped - no point cloud available.", 0.1f);
+                            }
+                            break;
+
                         case WorkflowStep.MarchingCubes:
-                            Report("Marching cubes step (placeholder).", 0.5f);
+                            if (voxelGrid == null)
+                            {
+                                Report("Marching cubes skipped - no voxel grid.", 0.1f);
+                                break;
+                            }
+                            Report("Running marching cubes...", 0.1f);
+                            var mesher = new Meshing.MarchingCubesMesher();
+                            var marchingMesh = mesher.GenerateMesh(voxelGrid, voxelOrigin, voxelSize, 0.5f);
+                            if (marchingMesh.Vertices.Count > 0 && marchingMesh.Indices.Count > 0)
+                            {
+                                currentResult.Meshes.Clear();
+                                currentResult.Meshes.Add(marchingMesh);
+                                Report($"Marching cubes complete. {marchingMesh.Vertices.Count} vertices.", 1.0f);
+                            }
+                            else
+                            {
+                                Report("Marching cubes produced no geometry.", 0.9f);
+                            }
                             break;
 
                         case WorkflowStep.DeepMeshPriorRefinement:
@@ -902,6 +945,72 @@ gc.collect()
 
                 return currentResult;
             });
+        }
+
+        private static (float[,,]? grid, Vector3 origin, float voxelSize) VoxelizePointClouds(List<MeshData> meshes, int maxRes)
+        {
+            var min = new Vector3(float.MaxValue);
+            var max = new Vector3(float.MinValue);
+            bool hasPoint = false;
+
+            foreach (var mesh in meshes)
+            {
+                foreach (var v in mesh.Vertices)
+                {
+                    hasPoint = true;
+                    min = Vector3.ComponentMin(min, v);
+                    max = Vector3.ComponentMax(max, v);
+                }
+            }
+
+            var settings = IniSettings.Instance;
+            float voxelSize = Math.Max(0.001f, settings.MergerVoxelSize);
+            if (!hasPoint)
+                return (null, Vector3.Zero, voxelSize);
+
+            int w = (int)((max.X - min.X) / voxelSize) + 5;
+            int h = (int)((max.Y - min.Y) / voxelSize) + 5;
+            int d = (int)((max.Z - min.Z) / voxelSize) + 5;
+
+            if (w > maxRes)
+            {
+                voxelSize *= (w / (float)maxRes);
+                w = maxRes;
+                h = (int)((max.Y - min.Y) / voxelSize) + 5;
+                d = (int)((max.Z - min.Z) / voxelSize) + 5;
+            }
+
+            float[,,] grid = new float[w, h, d];
+
+            foreach (var mesh in meshes)
+            {
+                foreach (var v in mesh.Vertices)
+                {
+                    int x = (int)((v.X - min.X) / voxelSize);
+                    int y = (int)((v.Y - min.Y) / voxelSize);
+                    int z = (int)((v.Z - min.Z) / voxelSize);
+                    if (x >= 0 && x < w && y >= 0 && y < h && z >= 0 && z < d)
+                    {
+                        grid[x, y, z] = 1.0f;
+                    }
+                }
+            }
+
+            float[,,] smooth = new float[w, h, d];
+            for (int x = 1; x < w - 1; x++)
+                for (int y = 1; y < h - 1; y++)
+                    for (int z = 1; z < d - 1; z++)
+                    {
+                        if (grid[x, y, z] > 0)
+                        {
+                            smooth[x, y, z] = 1;
+                            smooth[x + 1, y, z] = 1; smooth[x - 1, y, z] = 1;
+                            smooth[x, y + 1, z] = 1; smooth[x, y - 1, z] = 1;
+                            smooth[x, y, z + 1] = 1; smooth[x, y, z - 1] = 1;
+                        }
+                    }
+
+            return (smooth, min, voxelSize);
         }
 
         public async Task<SceneResult?> RefineSfMResultAsync(SceneResult sfmResult, Action<string>? statusCallback = null)

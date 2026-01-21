@@ -587,6 +587,15 @@ def get_optimal_pairs_with_retrieval(images, retrieval_model, codebook, device, 
         return make_pairs(images, scene_graph='complete', prefilter=None, symmetrize=True)
 
 def get_torch_device(device_str):
+    if device_str in (None, "", "auto"):
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if torch_directml:
+            print("Auto device: using DirectML backend.")
+            return torch_directml.device()
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
     if device_str == "directml":
         if torch_directml:
             return torch_directml.device()
@@ -610,11 +619,10 @@ def get_torch_device(device_str):
             print("Warning: ROCm requested but GPU not available. Falling back to CPU.")
             return torch.device("cpu")
     elif device_str == "cuda" and not torch.cuda.is_available():
+        if torch_directml:
+            print("Warning: CUDA requested but not available. Falling back to DirectML.")
+            return torch_directml.device()
         print("Warning: CUDA requested but not available. Falling back to CPU.")
-        return torch.device("cpu")
-    elif device_str is None:
-        if torch.cuda.is_available(): return torch.device("cuda")
-        if torch.backends.mps.is_available(): return torch.device("mps")
         return torch.device("cpu")
 
     return torch.device(device_str)
@@ -1147,7 +1155,11 @@ def load_model(model_name, weights_path, device=None):
              base_dir = os.path.dirname(weights_path)
              is_cuda = (device_obj.type == 'cuda')
              report_progress("load", 0.4, "Loading Wonder3D pipeline...")
-             model = MVDiffusionPipeline.from_pretrained(base_dir, torch_dtype=torch.float16 if is_cuda else torch.float32)
+            model = MVDiffusionPipeline.from_pretrained(
+                base_dir,
+                torch_dtype=torch.float16 if is_cuda else torch.float32,
+                use_safetensors=False
+            )
              report_progress("load", 0.7, "Moving Wonder3D to device...")
              model.to(device_obj)
              loaded_models[model_name] = model

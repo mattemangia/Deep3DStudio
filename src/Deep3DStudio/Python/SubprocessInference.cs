@@ -24,7 +24,7 @@ namespace Deep3DStudio.Python
         private readonly string _scriptPath;
         private readonly string _modelName;
         private string? _weightsPath;
-        private string _device = "cuda";
+        private string _device = "auto";
         private bool _isLoaded = false;
         private bool _disposed = false;
         private Process? _persistentProcess;
@@ -365,7 +365,7 @@ namespace Deep3DStudio.Python
             return (process.ExitCode, stdout.ToString().Trim(), stderr.ToString().Trim());
         }
 
-        public bool Load(string weightsPath, string device = "cuda")
+        public bool Load(string weightsPath, string device = "auto")
         {
             // Store weights path and device for use in Infer (since each subprocess is a new process)
             _weightsPath = weightsPath;

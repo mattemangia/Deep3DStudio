@@ -47,6 +47,7 @@ namespace Deep3DStudio.Configuration
 
     public enum AIComputeDevice
     {
+        Auto,
         CPU,
         CUDA,
         DirectML, // For AMD/Intel GPUs on Windows
@@ -187,7 +188,7 @@ namespace Deep3DStudio.Configuration
         public int Must3rFrameInterval { get; set; } = 5;
 
         // Additional AI Model Settings
-        public AIComputeDevice AIDevice { get; set; } = AIComputeDevice.CUDA;
+        public AIComputeDevice AIDevice { get; set; } = AIComputeDevice.Auto;
         public bool UseCudaForAI { get => AIDevice == AIComputeDevice.CUDA; set => AIDevice = value ? AIComputeDevice.CUDA : AIComputeDevice.CPU; }
         public int LGMResolution { get; set; } = 512;
         public int Wonder3DSteps { get; set; } = 50;
@@ -713,22 +714,20 @@ namespace Deep3DStudio.Configuration
             // Intelligent Default Selection based on OS
             if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
             {
-                // macOS: Always use MPS for AI if possible, CPU fallback.
-                // Computation: CPU (or check later if OpenCL is usable via OpenCV, but usually CPU is safer for defaults)
-                AIDevice = AIComputeDevice.MPS;
+                // macOS: Auto-select MPS if available, CPU fallback.
+                AIDevice = AIComputeDevice.Auto;
                 Device = ComputeDevice.CPU;
             }
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                // Windows: Prefer CUDA if available, else CPU.
-                // We default to CUDA for AI, assuming user has NVIDIA. If not, they can switch to DirectML.
-                AIDevice = AIComputeDevice.CUDA;
+                // Windows: Auto-select CUDA/DirectML if available, CPU fallback.
+                AIDevice = AIComputeDevice.Auto;
                 Device = ComputeDevice.GPU; // Assume discrete GPU is present
             }
             else
             {
                 // Linux
-                AIDevice = AIComputeDevice.CUDA;
+                AIDevice = AIComputeDevice.Auto;
                 Device = ComputeDevice.GPU;
             }
 

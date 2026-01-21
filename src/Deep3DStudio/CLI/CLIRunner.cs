@@ -125,9 +125,14 @@ namespace Deep3DStudio.CLI
                             return exitCode;
                         }
 
+                        bool expectsMesh = pipeline.Steps.Contains(WorkflowStep.MarchingCubes) ||
+                                           pipeline.Steps.Contains(WorkflowStep.TripoSRGeneration) ||
+                                           pipeline.Steps.Contains(WorkflowStep.LGMGeneration) ||
+                                           pipeline.Steps.Contains(WorkflowStep.Wonder3DGeneration);
+
                         var ok = result != null &&
                                  result.Meshes.Count > 0 &&
-                                 result.Meshes.Any(m => m.Vertices.Count > 0);
+                                 result.Meshes.Any(m => m.Vertices.Count > 0 && (!expectsMesh || m.Indices.Count > 0));
 
                         Console.WriteLine(ok
                             ? $"OK: {pipeline.Name} produced geometry."
@@ -172,6 +177,92 @@ namespace Deep3DStudio.CLI
                     catch (Exception ex)
                     {
                         Console.WriteLine($"FAIL: TripoSF refinement threw: {ex.Message}");
+                        allOk = false;
+                    }
+
+                    Console.WriteLine("=== Running DeepMeshPrior refinement ===");
+                    try
+                    {
+                        cancellationSource.Token.ThrowIfCancellationRequested();
+                        var refineScene = new SceneResult { Meshes = new List<MeshData> { firstMesh.Clone() } };
+                        var dmpPipeline = new WorkflowPipeline
+                        {
+                            Name = "DeepMeshPrior Refinement",
+                            Steps = new List<WorkflowStep> { WorkflowStep.DeepMeshPriorRefinement }
+                        };
+                        var dmpResult = manager.ExecuteWorkflowAsync(
+                            dmpPipeline,
+                            images,
+                            refineScene,
+                            (msg, progress) =>
+                            {
+                                Console.WriteLine($"[{dmpPipeline.Name}] {progress:P0} {msg}");
+                                TuiStatusMonitor.Instance.UpdateProgress($"{dmpPipeline.Name}: {msg}", progress);
+                            },
+                            cancellationSource.Token
+                        ).GetAwaiter().GetResult();
+
+                        bool ok = dmpResult != null &&
+                                  dmpResult.Meshes.Count > 0 &&
+                                  dmpResult.Meshes.Any(m => m.Vertices.Count > 0);
+                        Console.WriteLine(ok
+                            ? $"OK: DeepMeshPrior refined mesh with {dmpResult!.Meshes.Sum(m => m.Vertices.Count)} vertices."
+                            : "FAIL: DeepMeshPrior refinement produced no geometry.");
+                        if (!ok)
+                            allOk = false;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        Console.WriteLine("DeepMeshPrior refinement cancelled.");
+                        exitCode = 1;
+                        return exitCode;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"FAIL: DeepMeshPrior refinement threw: {ex.Message}");
+                        allOk = false;
+                    }
+
+                    Console.WriteLine("=== Running GaussianSDF refinement ===");
+                    try
+                    {
+                        cancellationSource.Token.ThrowIfCancellationRequested();
+                        var refineScene = new SceneResult { Meshes = new List<MeshData> { firstMesh.Clone() } };
+                        var gsdfPipeline = new WorkflowPipeline
+                        {
+                            Name = "GaussianSDF Refinement",
+                            Steps = new List<WorkflowStep> { WorkflowStep.GaussianSDFRefinement }
+                        };
+                        var gsdfResult = manager.ExecuteWorkflowAsync(
+                            gsdfPipeline,
+                            images,
+                            refineScene,
+                            (msg, progress) =>
+                            {
+                                Console.WriteLine($"[{gsdfPipeline.Name}] {progress:P0} {msg}");
+                                TuiStatusMonitor.Instance.UpdateProgress($"{gsdfPipeline.Name}: {msg}", progress);
+                            },
+                            cancellationSource.Token
+                        ).GetAwaiter().GetResult();
+
+                        bool ok = gsdfResult != null &&
+                                  gsdfResult.Meshes.Count > 0 &&
+                                  gsdfResult.Meshes.Any(m => m.Vertices.Count > 0);
+                        Console.WriteLine(ok
+                            ? $"OK: GaussianSDF refined mesh with {gsdfResult!.Meshes.Sum(m => m.Vertices.Count)} vertices."
+                            : "FAIL: GaussianSDF refinement produced no geometry.");
+                        if (!ok)
+                            allOk = false;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        Console.WriteLine("GaussianSDF refinement cancelled.");
+                        exitCode = 1;
+                        return exitCode;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"FAIL: GaussianSDF refinement threw: {ex.Message}");
                         allOk = false;
                     }
 
@@ -236,6 +327,68 @@ namespace Deep3DStudio.CLI
                         Console.WriteLine("Skipping UniRig: no example mesh found.");
                         allOk = false;
                     }
+                }
+
+                Console.WriteLine("=== Running NeRF reconstruction (timeout 5m) ===");
+                try
+                {
+                    var settings = IniSettings.Instance;
+                    var nerfPipeline = new WorkflowPipeline
+                    {
+                        Name = "Images -> Reconstruction -> NeRF",
+                        Steps = new List<WorkflowStep>
+                        {
+                            WorkflowStep.LoadImages,
+                            settings.ReconstructionMethod switch
+                            {
+                                ReconstructionMethod.Mast3r => WorkflowStep.Mast3rReconstruction,
+                                ReconstructionMethod.Must3r => WorkflowStep.Must3rReconstruction,
+                                ReconstructionMethod.FeatureMatching => WorkflowStep.SfMReconstruction,
+                                _ => WorkflowStep.Dust3rReconstruction
+                            },
+                            WorkflowStep.NeRFRefinement
+                        }
+                    };
+
+                    using var nerfCts = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(cancellationSource.Token);
+                    nerfCts.CancelAfter(TimeSpan.FromMinutes(5));
+
+                    var nerfResult = manager.ExecuteWorkflowAsync(
+                        nerfPipeline,
+                        images,
+                        null,
+                        (msg, progress) =>
+                        {
+                            Console.WriteLine($"[{nerfPipeline.Name}] {progress:P0} {msg}");
+                            TuiStatusMonitor.Instance.UpdateProgress($"{nerfPipeline.Name}: {msg}", progress);
+                        },
+                        nerfCts.Token
+                    ).GetAwaiter().GetResult();
+
+                    if (nerfCts.IsCancellationRequested && !cancellationSource.IsCancellationRequested)
+                    {
+                        Console.WriteLine("NeRF timeout reached. Returning partial result.");
+                    }
+
+                    bool ok = nerfResult != null &&
+                              nerfResult.Meshes.Count > 0 &&
+                              nerfResult.Meshes.Any(m => m.Vertices.Count > 0);
+                    Console.WriteLine(ok
+                        ? $"OK: NeRF produced mesh with {nerfResult!.Meshes.Sum(m => m.Vertices.Count)} vertices."
+                        : "FAIL: NeRF produced no geometry.");
+                    if (!ok)
+                        allOk = false;
+                }
+                catch (OperationCanceledException)
+                {
+                    Console.WriteLine("NeRF reconstruction cancelled.");
+                    exitCode = 1;
+                    return exitCode;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"FAIL: NeRF reconstruction threw: {ex.Message}");
+                    allOk = false;
                 }
 
                 exitCode = allOk ? 0 : 1;

@@ -47,7 +47,10 @@ namespace Deep3DStudio.Model.AIModels
             var settings = IniSettings.Instance;
             return settings.AIDevice switch
             {
+                AIComputeDevice.Auto => "auto",
                 AIComputeDevice.CUDA => "cuda",
+                AIComputeDevice.ROCm => "rocm",
+                AIComputeDevice.DirectML => "directml",
                 AIComputeDevice.MPS => "mps",
                 _ => "cpu"
             };
