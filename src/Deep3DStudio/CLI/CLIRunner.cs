@@ -61,113 +61,137 @@ namespace Deep3DStudio.CLI
                 Console.WriteLine($"  {img}");
 
             var manager = AIModelManager.Instance;
+            using var cancellationSource = new System.Threading.CancellationTokenSource();
+            TuiStatusMonitor.Instance.SetCancellationTokenSource(cancellationSource);
+
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;
+                cancellationSource.Cancel();
+                Console.WriteLine("Cancellation requested. Stopping after current step...");
+            };
+
             manager.ModelLoadProgress += (stage, progress, message) =>
             {
                 Console.WriteLine($"[ModelLoad] {stage} {progress:P0} {message}");
+                TuiStatusMonitor.Instance.UpdateProgress($"{stage}: {message}", progress);
             };
 
-            var pipelines = new List<WorkflowPipeline>
+            try
             {
-                WorkflowPipeline.ImageToDust3rToMesh,
-                WorkflowPipeline.ImageToMast3rToMesh,
-                WorkflowPipeline.ImageToMust3rToMesh,
-                WorkflowPipeline.ImageToSfM,
-                WorkflowPipeline.ImageToTripoSR,
-                WorkflowPipeline.ImageToLGM,
-                WorkflowPipeline.ImageToWonder3D
-            };
-
-            bool allOk = true;
-            MeshData? firstMesh = null;
-
-            foreach (var pipeline in pipelines)
-            {
-                Console.WriteLine($"=== Running {pipeline.Name} ===");
-                if (RequiresMultiView(pipeline) && images.Count < 2)
+                var pipelines = new List<WorkflowPipeline>
                 {
-                    Console.WriteLine($"Skipping {pipeline.Name}: requires at least 2 images.");
-                    allOk = false;
-                    continue;
-                }
+                    WorkflowPipeline.ImageToDust3rToMesh,
+                    WorkflowPipeline.ImageToMast3rToMesh,
+                    WorkflowPipeline.ImageToMust3rToMesh,
+                    WorkflowPipeline.ImageToSfM,
+                    WorkflowPipeline.ImageToTripoSR,
+                    WorkflowPipeline.ImageToLGM,
+                    WorkflowPipeline.ImageToWonder3D
+                };
 
-                var result = manager.ExecuteWorkflowAsync(
-                    pipeline,
-                    images,
-                    null,
-                    (msg, progress) => Console.WriteLine($"[{pipeline.Name}] {progress:P0} {msg}")
-                ).GetAwaiter().GetResult();
+                bool allOk = true;
+                int exitCode = 1;
+                MeshData? firstMesh = null;
 
-                var ok = result != null &&
-                         result.Meshes.Count > 0 &&
-                         result.Meshes.Any(m => m.Vertices.Count > 0);
-
-                Console.WriteLine(ok
-                    ? $"OK: {pipeline.Name} produced geometry."
-                    : $"FAIL: {pipeline.Name} produced no geometry.");
-
-                if (!ok)
-                    allOk = false;
-
-                if (firstMesh == null && result != null)
-                {
-                    firstMesh = result.Meshes.FirstOrDefault(m => m.Vertices.Count > 0 && m.Indices.Count > 0);
-                }
-            }
-
-            if (firstMesh != null)
-            {
-                Console.WriteLine("=== Running TripoSF refinement ===");
                 try
                 {
-                    var refined = manager.TripoSF?.RefineMesh(firstMesh);
-                    bool ok = refined != null && refined.Vertices.Count > 0;
-                    Console.WriteLine(ok
-                        ? $"OK: TripoSF refined mesh with {refined!.Vertices.Count} vertices."
-                        : "FAIL: TripoSF refinement produced no geometry.");
-                    if (!ok)
-                        allOk = false;
+                    foreach (var pipeline in pipelines)
+                    {
+                        Console.WriteLine($"=== Running {pipeline.Name} ===");
+                        if (RequiresMultiView(pipeline) && images.Count < 2)
+                        {
+                            Console.WriteLine($"Skipping {pipeline.Name}: requires at least 2 images.");
+                            allOk = false;
+                            continue;
+                        }
+
+                        var result = manager.ExecuteWorkflowAsync(
+                            pipeline,
+                            images,
+                            null,
+                            (msg, progress) =>
+                            {
+                                Console.WriteLine($"[{pipeline.Name}] {progress:P0} {msg}");
+                                TuiStatusMonitor.Instance.UpdateProgress($"{pipeline.Name}: {msg}", progress);
+                            },
+                            cancellationSource.Token
+                        ).GetAwaiter().GetResult();
+
+                        if (cancellationSource.IsCancellationRequested)
+                        {
+                            Console.WriteLine("Cancellation requested. Exiting early.");
+                            exitCode = 1;
+                            return exitCode;
+                        }
+
+                        var ok = result != null &&
+                                 result.Meshes.Count > 0 &&
+                                 result.Meshes.Any(m => m.Vertices.Count > 0);
+
+                        Console.WriteLine(ok
+                            ? $"OK: {pipeline.Name} produced geometry."
+                            : $"FAIL: {pipeline.Name} produced no geometry.");
+
+                        if (!ok)
+                            allOk = false;
+
+                        if (firstMesh == null && result != null)
+                        {
+                            firstMesh = result.Meshes.FirstOrDefault(m => m.Vertices.Count > 0 && m.Indices.Count > 0);
+                        }
+                    }
                 }
-                catch (Exception ex)
+                catch (OperationCanceledException)
                 {
-                    Console.WriteLine($"FAIL: TripoSF refinement threw: {ex.Message}");
-                    allOk = false;
+                    Console.WriteLine("Cancelled by user.");
+                    exitCode = 1;
+                    return exitCode;
                 }
 
-                Console.WriteLine("=== Running UniRig auto-rig ===");
-                try
+                if (firstMesh != null)
                 {
-                    var rig = manager.UniRig?.RigMesh(firstMesh);
-                    bool ok = rig != null && rig.Success;
-                    Console.WriteLine(ok
-                        ? $"OK: UniRig produced {rig!.JointPositions?.Length ?? 0} joints."
-                        : $"FAIL: UniRig rigging failed ({rig?.StatusMessage ?? "no result"}).");
-                    if (!ok)
-                        allOk = false;
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"FAIL: UniRig rigging threw: {ex.Message}");
-                    allOk = false;
-                }
-            }
-            else
-            {
-                Console.WriteLine("Skipping TripoSF: no mesh with faces produced by earlier models.");
-                allOk = false;
-
-                var unirigExample = FindUniRigExampleMesh();
-                if (!string.IsNullOrEmpty(unirigExample))
-                {
-                    Console.WriteLine("=== Running UniRig auto-rig (example mesh) ===");
+                    Console.WriteLine("=== Running TripoSF refinement ===");
                     try
                     {
-                        var rig = manager.UniRig?.RigMeshFromFile(unirigExample);
+                        cancellationSource.Token.ThrowIfCancellationRequested();
+                        var refined = manager.TripoSF?.RefineMesh(firstMesh, cancellationSource.Token);
+                        bool ok = refined != null && refined.Vertices.Count > 0;
+                        Console.WriteLine(ok
+                            ? $"OK: TripoSF refined mesh with {refined!.Vertices.Count} vertices."
+                            : "FAIL: TripoSF refinement produced no geometry.");
+                        if (!ok)
+                            allOk = false;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        Console.WriteLine("TripoSF refinement cancelled.");
+                        exitCode = 1;
+                        return exitCode;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"FAIL: TripoSF refinement threw: {ex.Message}");
+                        allOk = false;
+                    }
+
+                    Console.WriteLine("=== Running UniRig auto-rig ===");
+                    try
+                    {
+                        cancellationSource.Token.ThrowIfCancellationRequested();
+                        var rig = manager.UniRig?.RigMesh(firstMesh);
                         bool ok = rig != null && rig.Success;
                         Console.WriteLine(ok
                             ? $"OK: UniRig produced {rig!.JointPositions?.Length ?? 0} joints."
                             : $"FAIL: UniRig rigging failed ({rig?.StatusMessage ?? "no result"}).");
                         if (!ok)
                             allOk = false;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        Console.WriteLine("UniRig rigging cancelled.");
+                        exitCode = 1;
+                        return exitCode;
                     }
                     catch (Exception ex)
                     {
@@ -177,13 +201,51 @@ namespace Deep3DStudio.CLI
                 }
                 else
                 {
-                    Console.WriteLine("Skipping UniRig: no example mesh found.");
+                    Console.WriteLine("Skipping TripoSF: no mesh with faces produced by earlier models.");
                     allOk = false;
-                }
-            }
 
-            manager.UnloadAllModels();
-            return allOk ? 0 : 1;
+                    var unirigExample = FindUniRigExampleMesh();
+                    if (!string.IsNullOrEmpty(unirigExample))
+                    {
+                        Console.WriteLine("=== Running UniRig auto-rig (example mesh) ===");
+                        try
+                        {
+                            cancellationSource.Token.ThrowIfCancellationRequested();
+                            var rig = manager.UniRig?.RigMeshFromFile(unirigExample);
+                            bool ok = rig != null && rig.Success;
+                            Console.WriteLine(ok
+                                ? $"OK: UniRig produced {rig!.JointPositions?.Length ?? 0} joints."
+                                : $"FAIL: UniRig rigging failed ({rig?.StatusMessage ?? "no result"}).");
+                            if (!ok)
+                                allOk = false;
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            Console.WriteLine("UniRig rigging cancelled.");
+                            exitCode = 1;
+                            return exitCode;
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"FAIL: UniRig rigging threw: {ex.Message}");
+                            allOk = false;
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine("Skipping UniRig: no example mesh found.");
+                        allOk = false;
+                    }
+                }
+
+                exitCode = allOk ? 0 : 1;
+                return exitCode;
+            }
+            finally
+            {
+                manager.UnloadAllModels();
+                TuiStatusMonitor.Instance.SetCancellationTokenSource(null);
+            }
         }
 
         private int RunNeRFWorkflow()
@@ -204,6 +266,8 @@ namespace Deep3DStudio.CLI
             }
 
             var cts = new System.Threading.CancellationTokenSource();
+            TuiStatusMonitor.Instance.SetCancellationTokenSource(cts);
+
             Console.CancelKeyPress += (_, e) =>
             {
                 e.Cancel = true;
@@ -230,27 +294,37 @@ namespace Deep3DStudio.CLI
 
             var manager = AIModelManager.Instance;
             Console.WriteLine($"=== Running {pipeline.Name} (Ctrl+C to cancel) ===");
-            var result = manager.ExecuteWorkflowAsync(
-                pipeline,
-                images,
-                null,
-                (msg, progress) => Console.WriteLine($"[{pipeline.Name}] {progress:P0} {msg}"),
-                cts.Token
-            ).GetAwaiter().GetResult();
+            try
+            {
+                var result = manager.ExecuteWorkflowAsync(
+                    pipeline,
+                    images,
+                    null,
+                    (msg, progress) =>
+                    {
+                        Console.WriteLine($"[{pipeline.Name}] {progress:P0} {msg}");
+                        TuiStatusMonitor.Instance.UpdateProgress($"{pipeline.Name}: {msg}", progress);
+                    },
+                    cts.Token
+                ).GetAwaiter().GetResult();
 
-            if (originalIterations.HasValue)
-                settings.NeRFIterations = originalIterations.Value;
+                bool ok = result != null &&
+                          result.Meshes.Count > 0 &&
+                          result.Meshes.Any(m => m.Vertices.Count > 0);
 
-            bool ok = result != null &&
-                      result.Meshes.Count > 0 &&
-                      result.Meshes.Any(m => m.Vertices.Count > 0);
+                Console.WriteLine(ok
+                    ? $"OK: NeRF produced mesh with {result!.Meshes.Sum(m => m.Vertices.Count)} vertices."
+                    : "FAIL: NeRF produced no geometry.");
 
-            Console.WriteLine(ok
-                ? $"OK: NeRF produced mesh with {result!.Meshes.Sum(m => m.Vertices.Count)} vertices."
-                : "FAIL: NeRF produced no geometry.");
-
-            manager.UnloadAllModels();
-            return ok ? 0 : 1;
+                return ok ? 0 : 1;
+            }
+            finally
+            {
+                if (originalIterations.HasValue)
+                    settings.NeRFIterations = originalIterations.Value;
+                manager.UnloadAllModels();
+                TuiStatusMonitor.Instance.SetCancellationTokenSource(null);
+            }
         }
 
         private static bool RequiresMultiView(WorkflowPipeline pipeline)

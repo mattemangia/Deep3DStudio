@@ -22,7 +22,30 @@ namespace Deep3DStudio
                 // Display logo in standard console
                 Console.WriteLine(ConsoleLogo.GenerateAsciiLogo());
                 Console.WriteLine("CLI mode detected");
-                return RunCLI(cliOptions);
+
+                // Start TUI Status Monitor for CLI mode
+                TuiStatusMonitor.Instance.Start();
+
+                // Hook Python extraction progress to TUI
+                PythonService.Instance.OnExtractionProgress += (msg, prog) =>
+                {
+                    TuiStatusMonitor.Instance.UpdateProgress(msg, prog);
+                };
+
+                // Hook AI Model Manager progress to TUI
+                var aiManager = Model.AIModels.AIModelManager.Instance;
+                aiManager.ProgressUpdated += (msg, prog) =>
+                {
+                    TuiStatusMonitor.Instance.UpdateProgress(msg, prog);
+                };
+                aiManager.ModelLoadProgress += (stage, prog, msg) =>
+                {
+                    TuiStatusMonitor.Instance.UpdateProgress($"{stage}: {msg}", prog);
+                };
+
+                var exitCode = RunCLI(cliOptions);
+                TuiStatusMonitor.Instance.Stop();
+                return exitCode;
             }
             else
             {

@@ -23,6 +23,8 @@ namespace Deep3DStudio.CLI
         private bool _isRunning;
         private TuiWriter? _writer;
         private ManualResetEvent _initEvent = new ManualResetEvent(false);
+        private readonly object _tokenLock = new object();
+        private CancellationTokenSource? _cancellationTokenSource;
 
         // P/Invoke to allocate console on Windows
         [DllImport("kernel32.dll", SetLastError = true)]
@@ -114,7 +116,14 @@ namespace Deep3DStudio.CLI
                 };
                 cancelButton.Clicked += () =>
                 {
-                    var tokenSource = UI.ProgressDialog.Instance.CancellationTokenSource;
+                    CancellationTokenSource? tokenSource;
+                    lock (_tokenLock)
+                    {
+                        tokenSource = _cancellationTokenSource;
+                    }
+
+                    tokenSource ??= UI.ProgressDialog.Instance.CancellationTokenSource;
+
                     if (tokenSource != null && !tokenSource.IsCancellationRequested)
                     {
                         tokenSource.Cancel();
@@ -213,6 +222,14 @@ namespace Deep3DStudio.CLI
                 _isRunning = false;
                 _initEvent.Set();
                 File.WriteAllText("tui_error.log", $"TUI Init Failed: {ex}\n");
+            }
+        }
+
+        public void SetCancellationTokenSource(CancellationTokenSource? tokenSource)
+        {
+            lock (_tokenLock)
+            {
+                _cancellationTokenSource = tokenSource;
             }
         }
 
