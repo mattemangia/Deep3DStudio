@@ -990,12 +990,20 @@ def infer_must3r(images_data, use_retrieval=True):
         # Combine results
         all_outputs = x_out_0 + x_out if x_out else x_out_0
 
-        # Extract point cloud from outputs
+        # Extract point cloud and poses from outputs
         results = []
         for i, img in enumerate(pil_images):
             if i < len(all_outputs) and all_outputs[i] is not None:
                 pts = all_outputs[i]['pts3d'].cpu().numpy()
                 conf = all_outputs[i].get('conf', None)
+                
+                # Extract pose if available
+                pose_c2w = None
+                if 'c2w' in all_outputs[i]:
+                    pose_c2w = all_outputs[i]['c2w'].cpu().numpy().tolist()
+                elif 'world_view_transform' in all_outputs[i]:
+                    # Convert w2c to c2w if needed, but must3r usually provides c2w
+                    pose_c2w = all_outputs[i]['world_view_transform'].inverse().cpu().numpy().tolist()
 
                 # Get colors from image
                 h, w = pts.shape[:2]
@@ -1016,12 +1024,16 @@ def infer_must3r(images_data, use_retrieval=True):
                 valid_colors = img_np[mask].reshape(-1, 3)
                 valid_pts, valid_colors = _sanitize_points_colors(valid_pts, valid_colors)
 
-                results.append({
+                res_dict = {
                     'vertices': valid_pts.tolist(),
                     'colors': valid_colors.tolist(),
                     'faces': [],
                     'image_index': i
-                })
+                }
+                if pose_c2w:
+                    res_dict['pose'] = pose_c2w
+                
+                results.append(res_dict)
                 log(f"Image {i}: {len(valid_pts)} points")
 
         clear_gpu()

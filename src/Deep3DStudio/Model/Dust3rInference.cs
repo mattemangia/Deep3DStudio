@@ -176,9 +176,9 @@ namespace Deep3DStudio.Model
                             ImagePath = validImagePaths[i]
                         };
 
-                        if (meshes[i].Pose.HasValue)
+                        if (meshes[i].Pose is Matrix4 poseMatrix)
                         {
-                            pose.CameraToWorld = meshes[i].Pose.Value;
+                            pose.CameraToWorld = poseMatrix;
                             try
                             {
                                 pose.WorldToCamera = pose.CameraToWorld.Inverted();
