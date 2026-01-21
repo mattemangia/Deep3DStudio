@@ -169,7 +169,29 @@ namespace Deep3DStudio.Model
                 {
                     result.Meshes.Add(meshes[i]);
                     if (i < validImagePaths.Count)
-                        result.Poses.Add(new CameraPose { ImageIndex = i, ImagePath = validImagePaths[i] });
+                    {
+                        var pose = new CameraPose
+                        {
+                            ImageIndex = i,
+                            ImagePath = validImagePaths[i]
+                        };
+
+                        if (meshes[i].Pose.HasValue)
+                        {
+                            pose.CameraToWorld = meshes[i].Pose.Value;
+                            try
+                            {
+                                pose.WorldToCamera = pose.CameraToWorld.Inverted();
+                            }
+                            catch
+                            {
+                                pose.WorldToCamera = Matrix4.Identity;
+                                Log($"[Dust3r] Warning: Could not invert pose matrix for image {i}");
+                            }
+                        }
+                        
+                        result.Poses.Add(pose);
+                    }
                 }
 
                 Log($"[Dust3r] Complete. {result.Meshes.Count} meshes.");

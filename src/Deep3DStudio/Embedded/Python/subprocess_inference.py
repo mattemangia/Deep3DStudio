@@ -1083,10 +1083,12 @@ def infer_stereo_model(model_name, images_data, use_retrieval=True):
 
             pts3d = scene.get_pts3d()
             masks = scene.get_masks()
+            poses = scene.get_im_poses() # List of 4x4 c2w matrices
 
             for i, img in enumerate(pil_images):
                 pts = pts3d[i].detach().cpu().numpy()
                 mask = masks[i].detach().cpu().numpy()
+                pose_c2w = poses[i].detach().cpu().numpy().tolist() # 4x4 list of lists
 
                 h, w = pts.shape[:2]
                 if img.size != (w, h):
@@ -1104,7 +1106,8 @@ def infer_stereo_model(model_name, images_data, use_retrieval=True):
                     'vertices': valid_pts.tolist(),
                     'colors': valid_colors.tolist(),
                     'faces': [],
-                    'image_index': i
+                    'image_index': i,
+                    'pose': pose_c2w
                 })
                 log(f"Image {i}: {len(valid_pts)} points")
 

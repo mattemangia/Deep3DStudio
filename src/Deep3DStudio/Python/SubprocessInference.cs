@@ -556,6 +556,33 @@ namespace Deep3DStudio.Python
                                     }
                                 }
 
+                                if (item.TryGetProperty("pose", out var poseProp))
+                                {
+                                    var rows = poseProp.EnumerateArray().ToArray();
+                                    if (rows.Length == 4)
+                                    {
+                                        float[] m = new float[16];
+                                        for(int r=0; r<4; r++)
+                                        {
+                                            var cols = rows[r].EnumerateArray().ToArray();
+                                            if (cols.Length >= 4)
+                                            {
+                                                for(int c=0; c<4; c++)
+                                                {
+                                                    m[r*4 + c] = (float)cols[c].GetDouble();
+                                                }
+                                            }
+                                        }
+                                        // OpenTK Matrix4 constructor is row-major: M11, M12, M13, M14...
+                                        mesh.Pose = new Matrix4(
+                                            m[0], m[1], m[2], m[3],
+                                            m[4], m[5], m[6], m[7],
+                                            m[8], m[9], m[10], m[11],
+                                            m[12], m[13], m[14], m[15]
+                                        );
+                                    }
+                                }
+
                                 results.Add(mesh);
                                 Log($"Loaded mesh with {mesh.Vertices.Count} vertices");
                             }

@@ -21,6 +21,7 @@ namespace Deep3DStudio.Model
 
         public bool HasTexture => Texture != null || TextureId != -1;
         public int[]? PixelToVertexIndex { get; set; }
+        public Matrix4? Pose { get; set; }
 
         public void ApplyTransform(Matrix4 transform)
         {
