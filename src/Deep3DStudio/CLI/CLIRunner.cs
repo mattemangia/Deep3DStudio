@@ -38,6 +38,8 @@ namespace Deep3DStudio.CLI
                 case "test-models":
                 case "test":
                     return RunTestAllModels();
+                case "test-problematic":
+                    return RunTestProblematicModels();
                 case "nerf":
                     return RunNeRFWorkflow();
                 default:
@@ -368,6 +370,246 @@ namespace Deep3DStudio.CLI
                     {
                         Console.WriteLine("NeRF timeout reached. Returning partial result.");
                     }
+
+                    bool ok = nerfResult != null &&
+                              nerfResult.Meshes.Count > 0 &&
+                              nerfResult.Meshes.Any(m => m.Vertices.Count > 0);
+                    Console.WriteLine(ok
+                        ? $"OK: NeRF produced mesh with {nerfResult!.Meshes.Sum(m => m.Vertices.Count)} vertices."
+                        : "FAIL: NeRF produced no geometry.");
+                    if (!ok)
+                        allOk = false;
+                }
+                catch (OperationCanceledException)
+                {
+                    Console.WriteLine("NeRF reconstruction cancelled.");
+                    exitCode = 1;
+                    return exitCode;
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"FAIL: NeRF reconstruction threw: {ex.Message}");
+                    allOk = false;
+                }
+
+                exitCode = allOk ? 0 : 1;
+                return exitCode;
+            }
+            finally
+            {
+                manager.UnloadAllModels();
+                TuiStatusMonitor.Instance.SetCancellationTokenSource(null);
+            }
+        }
+
+        private int RunTestProblematicModels()
+        {
+            var images = ResolveInputImages();
+            if (images.Count == 0)
+            {
+                Console.Error.WriteLine("No input images found. Provide --input <file|dir> or place images in Croco_Examples.");
+                return 1;
+            }
+
+            Console.WriteLine($"Using {images.Count} image(s):");
+            foreach (var img in images)
+                Console.WriteLine($"  {img}");
+
+            var manager = AIModelManager.Instance;
+            using var cancellationSource = new System.Threading.CancellationTokenSource();
+            TuiStatusMonitor.Instance.SetCancellationTokenSource(cancellationSource);
+
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;
+                cancellationSource.Cancel();
+                Console.WriteLine("Cancellation requested. Stopping after current step...");
+            };
+
+            manager.ModelLoadProgress += (stage, progress, message) =>
+            {
+                Console.WriteLine($"[ModelLoad] {stage} {progress:P0} {message}");
+                TuiStatusMonitor.Instance.UpdateProgress($"{stage}: {message}", progress);
+            };
+
+            try
+            {
+                var pipelines = new List<WorkflowPipeline>
+                {
+                    WorkflowPipeline.ImageToTripoSR,
+                    WorkflowPipeline.ImageToWonder3D
+                };
+
+                bool allOk = true;
+                int exitCode = 1;
+                MeshData? firstMesh = null;
+
+                try
+                {
+                    foreach (var pipeline in pipelines)
+                    {
+                        Console.WriteLine($"=== Running {pipeline.Name} ===");
+                        var result = manager.ExecuteWorkflowAsync(
+                            pipeline,
+                            images,
+                            null,
+                            (msg, progress) =>
+                            {
+                                Console.WriteLine($"[{pipeline.Name}] {progress:P0} {msg}");
+                                TuiStatusMonitor.Instance.UpdateProgress($"{pipeline.Name}: {msg}", progress);
+                            },
+                            cancellationSource.Token
+                        ).GetAwaiter().GetResult();
+
+                        if (cancellationSource.IsCancellationRequested)
+                        {
+                            Console.WriteLine("Cancellation requested. Exiting early.");
+                            exitCode = 1;
+                            return exitCode;
+                        }
+
+                        bool expectsMesh = true;
+
+                        var ok = result != null &&
+                                 result.Meshes.Count > 0 &&
+                                 result.Meshes.Any(m => m.Vertices.Count > 0 && (!expectsMesh || m.Indices.Count > 0));
+
+                        Console.WriteLine(ok
+                            ? $"OK: {pipeline.Name} produced geometry."
+                            : $"FAIL: {pipeline.Name} produced no geometry.");
+
+                        if (!ok)
+                            allOk = false;
+
+                        if (firstMesh == null && result != null)
+                        {
+                            firstMesh = result.Meshes.FirstOrDefault(m => m.Vertices.Count > 0 && m.Indices.Count > 0);
+                        }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    Console.WriteLine("Cancelled by user.");
+                    exitCode = 1;
+                    return exitCode;
+                }
+
+                if (firstMesh != null)
+                {
+                    Console.WriteLine("=== Running TripoSF refinement ===");
+                    try
+                    {
+                        cancellationSource.Token.ThrowIfCancellationRequested();
+                        var refined = manager.TripoSF?.RefineMesh(firstMesh, cancellationSource.Token);
+                        bool ok = refined != null && refined.Vertices.Count > 0;
+                        Console.WriteLine(ok
+                            ? $"OK: TripoSF refined mesh with {refined!.Vertices.Count} vertices."
+                            : "FAIL: TripoSF refinement produced no geometry.");
+                        if (!ok)
+                            allOk = false;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"FAIL: TripoSF refinement threw: {ex.Message}");
+                        allOk = false;
+                    }
+
+                    Console.WriteLine("=== Running DeepMeshPrior refinement ===");
+                    try
+                    {
+                        cancellationSource.Token.ThrowIfCancellationRequested();
+                        var refineScene = new SceneResult { Meshes = new List<MeshData> { firstMesh.Clone() } };
+                        var dmpPipeline = new WorkflowPipeline
+                        {
+                            Name = "DeepMeshPrior Refinement",
+                            Steps = new List<WorkflowStep> { WorkflowStep.DeepMeshPriorRefinement }
+                        };
+                        var dmpResult = manager.ExecuteWorkflowAsync(
+                            dmpPipeline,
+                            images,
+                            refineScene,
+                            (msg, progress) =>
+                            {
+                                Console.WriteLine($"[{dmpPipeline.Name}] {progress:P0} {msg}");
+                                TuiStatusMonitor.Instance.UpdateProgress($"{dmpPipeline.Name}: {msg}", progress);
+                            },
+                            cancellationSource.Token
+                        ).GetAwaiter().GetResult();
+
+                        bool ok = dmpResult != null &&
+                                  dmpResult.Meshes.Count > 0 &&
+                                  dmpResult.Meshes.Any(m => m.Vertices.Count > 0);
+                        Console.WriteLine(ok
+                            ? $"OK: DeepMeshPrior refined mesh with {dmpResult!.Meshes.Sum(m => m.Vertices.Count)} vertices."
+                            : "FAIL: DeepMeshPrior refinement produced no geometry.");
+                        if (!ok)
+                            allOk = false;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"FAIL: DeepMeshPrior refinement threw: {ex.Message}");
+                        allOk = false;
+                    }
+
+                    Console.WriteLine("=== Running UniRig auto-rig ===");
+                    try
+                    {
+                        cancellationSource.Token.ThrowIfCancellationRequested();
+                        var rig = manager.UniRig?.RigMesh(firstMesh);
+                        bool ok = rig != null && rig.Success;
+                        Console.WriteLine(ok
+                            ? $"OK: UniRig produced {rig!.JointPositions?.Length ?? 0} joints."
+                            : $"FAIL: UniRig rigging failed ({rig?.StatusMessage ?? "no result"}).");
+                        if (!ok)
+                            allOk = false;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"FAIL: UniRig rigging threw: {ex.Message}");
+                        allOk = false;
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("Skipping refinements: no mesh with faces produced by earlier models.");
+                    allOk = false;
+                }
+
+                Console.WriteLine("=== Running NeRF reconstruction (timeout 5m) ===");
+                try
+                {
+                    var settings = IniSettings.Instance;
+                    var nerfPipeline = new WorkflowPipeline
+                    {
+                        Name = "Images -> Reconstruction -> NeRF",
+                        Steps = new List<WorkflowStep>
+                        {
+                            WorkflowStep.LoadImages,
+                            settings.ReconstructionMethod switch
+                            {
+                                ReconstructionMethod.Mast3r => WorkflowStep.Mast3rReconstruction,
+                                ReconstructionMethod.Must3r => WorkflowStep.Must3rReconstruction,
+                                ReconstructionMethod.FeatureMatching => WorkflowStep.SfMReconstruction,
+                                _ => WorkflowStep.Dust3rReconstruction
+                            },
+                            WorkflowStep.NeRFRefinement
+                        }
+                    };
+
+                    using var nerfCts = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(cancellationSource.Token);
+                    nerfCts.CancelAfter(TimeSpan.FromMinutes(5));
+
+                    var nerfResult = manager.ExecuteWorkflowAsync(
+                        nerfPipeline,
+                        images,
+                        null,
+                        (msg, progress) =>
+                        {
+                            Console.WriteLine($"[{nerfPipeline.Name}] {progress:P0} {msg}");
+                            TuiStatusMonitor.Instance.UpdateProgress($"{nerfPipeline.Name}: {msg}", progress);
+                        },
+                        nerfCts.Token
+                    ).GetAwaiter().GetResult();
 
                     bool ok = nerfResult != null &&
                               nerfResult.Meshes.Count > 0 &&

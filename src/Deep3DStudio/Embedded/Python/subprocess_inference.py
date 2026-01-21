@@ -1150,9 +1150,10 @@ def infer_triposr(images_data, resolution=256, mc_resolution=256):
                     meshes = model.extract_mesh(scene_codes, resolution=mc_resolution, has_vertex_color=True)
                 except RuntimeError as e:
                     # Fallback to CPU if OOM or tensor device error
-                    if model.device.type != "cpu":
-                        log(f"TripoSR failed on {model.device} ({e}), falling back to CPU...")
-                        model = model.to("cpu")
+                    current_device = next(model.parameters()).device
+                    if current_device.type != "cpu":
+                        log(f"TripoSR failed on {current_device} ({e}), falling back to CPU...")
+                        model = model.to("cpu").float()
                         meshes = model.extract_mesh(scene_codes, resolution=mc_resolution, has_vertex_color=True)
                     else:
                         raise e
@@ -1338,6 +1339,12 @@ def infer_wonder3d(images_data, num_steps=50, guidance_scale=3.0):
                     if model.device.type != "cpu":
                         log(f"Wonder3D failed on {model.device} ({e}), falling back to CPU...")
                         model = model.to("cpu")
+                        # CPU doesn't support float16 for many ops, cast to float32
+                        # Safely cast components if they exist
+                        if hasattr(model, 'unet'): model.unet = model.unet.float()
+                        if hasattr(model, 'vae'): model.vae = model.vae.float()
+                        if hasattr(model, 'text_encoder'): model.text_encoder = model.text_encoder.float()
+                        if hasattr(model, 'image_encoder'): model.image_encoder = model.image_encoder.float()
                         output = model(img, num_inference_steps=num_steps, guidance_scale=guidance_scale)
                     else:
                         raise e
