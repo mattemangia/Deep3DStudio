@@ -6,6 +6,7 @@ using System.Text;
 using System.Runtime.InteropServices;
 using SkiaSharp;
 using System.Reflection;
+using Deep3DStudio.UI;
 
 namespace Deep3DStudio.CLI
 {
@@ -86,6 +87,8 @@ namespace Deep3DStudio.CLI
             {
                 Application.Init();
 
+                string appTitle = BuildWindowTitle();
+
                 // 1. Setup Main Log Window (Background, not added yet)
                 var darkScheme = new ColorScheme()
                 {
@@ -95,7 +98,7 @@ namespace Deep3DStudio.CLI
                     HotFocus = new Terminal.Gui.Attribute(Color.Cyan, Color.Black)
                 };
 
-                _window = new Window("Deep3DStudio Console")
+                _window = new Window(appTitle)
                 {
                     X = 0,
                     Y = 0,
@@ -104,10 +107,44 @@ namespace Deep3DStudio.CLI
                     ColorScheme = darkScheme
                 };
 
+                var cancelButton = new Button("Cancel")
+                {
+                    X = 1,
+                    Y = 0
+                };
+                cancelButton.Clicked += () =>
+                {
+                    var tokenSource = UI.ProgressDialog.Instance.CancellationTokenSource;
+                    if (tokenSource != null && !tokenSource.IsCancellationRequested)
+                    {
+                        tokenSource.Cancel();
+                        Log("Cancellation requested via TUI.");
+                    }
+                    else
+                    {
+                        Log("No active operation to cancel.");
+                    }
+                };
+
+                var exitButton = new Button("Exit")
+                {
+                    X = Pos.Right(cancelButton) + 2,
+                    Y = 0
+                };
+                exitButton.Clicked += () =>
+                {
+                    int choice = MessageBox.Query("Exit", "Are you sure?", "Yes", "No");
+                    if (choice == 0)
+                    {
+                        Application.RequestStop();
+                        Environment.Exit(0);
+                    }
+                };
+
                 _statusLabel = new Label("Status: Initializing...")
                 {
                     X = 1,
-                    Y = 1,
+                    Y = 2,
                     Width = Dim.Fill() - 2,
                     ColorScheme = darkScheme
                 };
@@ -115,7 +152,7 @@ namespace Deep3DStudio.CLI
                 _progressBar = new ProgressBar()
                 {
                     X = 1,
-                    Y = 2,
+                    Y = 3,
                     Width = Dim.Fill() - 2,
                     Fraction = 0f,
                     ColorScheme = darkScheme
@@ -124,7 +161,7 @@ namespace Deep3DStudio.CLI
                 _logView = new TextView()
                 {
                     X = 1,
-                    Y = 4,
+                    Y = 5,
                     Width = Dim.Fill() - 2,
                     Height = Dim.Fill(),
                     ReadOnly = true,
@@ -132,10 +169,10 @@ namespace Deep3DStudio.CLI
                     Text = "Deep3DStudio Log Started...\n"
                 };
 
-                _window.Add(_statusLabel, _progressBar, new Label(1, 3, "Logs:") { ColorScheme = darkScheme }, _logView);
+                _window.Add(cancelButton, exitButton, _statusLabel, _progressBar, new Label(1, 4, "Logs:") { ColorScheme = darkScheme }, _logView);
 
                 // 2. Setup Splash Window
-                var splashWindow = new Window("Deep3DStudio")
+                var splashWindow = new Window(appTitle)
                 {
                     X = 0,
                     Y = 0,
@@ -177,6 +214,14 @@ namespace Deep3DStudio.CLI
                 _initEvent.Set();
                 File.WriteAllText("tui_error.log", $"TUI Init Failed: {ex}\n");
             }
+        }
+
+        private static string BuildWindowTitle()
+        {
+            var entry = Assembly.GetEntryAssembly();
+            string name = entry?.GetName().Name ?? "Deep3DStudio";
+            string version = entry?.GetName().Version?.ToString(3) ?? "0.0.0";
+            return $"{name} {version} - Console";
         }
 
         public void Stop()
