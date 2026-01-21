@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using SkiaSharp;
 using System.Reflection;
 using Deep3DStudio.UI;
+using Deep3DStudio.Configuration;
 
 namespace Deep3DStudio.CLI
 {
@@ -25,6 +26,8 @@ namespace Deep3DStudio.CLI
         private ManualResetEvent _initEvent = new ManualResetEvent(false);
         private readonly object _tokenLock = new object();
         private CancellationTokenSource? _cancellationTokenSource;
+        private readonly object _fileLock = new object();
+        private string? _logFilePath;
 
         // P/Invoke to allocate console on Windows
         [DllImport("kernel32.dll", SetLastError = true)]
@@ -44,6 +47,8 @@ namespace Deep3DStudio.CLI
             if (_isRunning) return;
             _isRunning = true;
             _initEvent.Reset();
+
+            InitializeLogFile();
 
             // Ensure we have a console window on Windows
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -277,8 +282,7 @@ namespace Deep3DStudio.CLI
 
         public void Log(string message)
         {
-            // Debug logging to verify data reception
-            try { File.AppendAllText("tui_debug.log", message); } catch { }
+            WriteLogFile(message);
 
             if (!_isRunning || _logView == null) return;
 
@@ -314,6 +318,37 @@ namespace Deep3DStudio.CLI
                     Application.MainLoop.Driver.Wakeup(); // Force wake up to redraw immediately
                 }
             });
+        }
+
+        private void InitializeLogFile()
+        {
+            try
+            {
+                string settingsDir = IniSettings.GetSettingsDirectory();
+                Directory.CreateDirectory(settingsDir);
+                _logFilePath = Path.Combine(settingsDir, "terminal_gui.log");
+                File.WriteAllText(_logFilePath, string.Empty);
+            }
+            catch
+            {
+                _logFilePath = null;
+            }
+        }
+
+        private void WriteLogFile(string message)
+        {
+            if (string.IsNullOrEmpty(_logFilePath)) return;
+            lock (_fileLock)
+            {
+                try
+                {
+                    File.AppendAllText(_logFilePath, message);
+                }
+                catch
+                {
+                    // Ignore file logging failures.
+                }
+            }
         }
 
         public void UpdateProgress(string task, float progress)
