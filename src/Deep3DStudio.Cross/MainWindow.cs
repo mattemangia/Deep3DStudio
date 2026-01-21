@@ -39,8 +39,8 @@ namespace Deep3DStudio
             "Multi-View (Settings)", // Uses IniSettings.ReconstructionMethod
             "Feature Matching (SfM)",
             "TripoSR (Single Image)",
-            "LGM (Gaussian)",
-            "Wonder3D"
+            "LGM (Single Image)",
+            "Wonder3D (Single Image)"
         };
 
         /// <summary>
@@ -922,8 +922,8 @@ namespace Deep3DStudio
                     if (ImGui.BeginMenu("Image to 3D"))
                     {
                         if (ImGui.MenuItem("TripoSR (Fast)")) RunAIModel("TripoSR");
-                        if (ImGui.MenuItem("LGM (High Quality)")) RunAIModel("LGM");
-                        if (ImGui.MenuItem("Wonder3D (Multi-View)")) RunAIModel("Wonder3D");
+                        if (ImGui.MenuItem("LGM (Single Image)")) RunAIModel("LGM");
+                        if (ImGui.MenuItem("Wonder3D (Single-Image Multi-View)")) RunAIModel("Wonder3D");
                         ImGui.EndMenu();
                     }
 
@@ -1205,7 +1205,7 @@ namespace Deep3DStudio
 
                 if (ImGui.ImageButton("##Wonder3D", _iconFactory.GetIcon(IconType.Wonder3D), size))
                     RunSingleStep(WorkflowStep.Wonder3DGeneration);
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Wonder3D (Multi-View)");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Wonder3D (Single-Image Multi-View)");
 
                 ImGui.Spacing();
 
@@ -3388,11 +3388,11 @@ namespace Deep3DStudio
                     RunReconstruction();
                     break;
                 case "LGM":
-                    _selectedWorkflow = 3; // LGM (Gaussian)
+                    _selectedWorkflow = 3; // LGM (Single Image)
                     RunReconstruction();
                     break;
                 case "Wonder3D":
-                    _selectedWorkflow = 4; // Wonder3D
+                    _selectedWorkflow = 4; // Wonder3D (Single Image)
                     RunReconstruction();
                     break;
                 case "DeepMeshPrior":
@@ -3502,10 +3502,12 @@ namespace Deep3DStudio
             Task.Run(() => {
                 try
                 {
+                    var cancellationToken = ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
                     var triposf = new Deep3DStudio.Model.AIModels.TripoSFInference();
                     foreach (var mesh in meshes)
                     {
-                        var refinedMesh = triposf.RefineMesh(mesh.MeshData);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var refinedMesh = triposf.RefineMesh(mesh.MeshData, cancellationToken);
                         if (refinedMesh.Vertices.Count > 0)
                         {
                             EnqueueAction(() => {
@@ -3516,6 +3518,10 @@ namespace Deep3DStudio
                         }
                     }
                     EnqueueAction(() => ProgressDialog.Instance.Complete());
+                }
+                catch (OperationCanceledException)
+                {
+                    EnqueueAction(() => ProgressDialog.Instance.Log("TripoSF cancelled."));
                 }
                 catch (Exception ex)
                 {
@@ -3571,14 +3577,22 @@ namespace Deep3DStudio
                     // Convert ProjectImage list to string list
                     var imagePaths = _loadedImages.Select(i => i.FilePath).ToList();
 
+                    var cancellationToken = ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
                     result = await AIModelManager.Instance.ExecuteWorkflowAsync(pipeline, imagePaths, null, (s, p) =>
                     {
                         ProgressDialog.Instance.Update(p, s);
-                    });
+                    }, cancellationToken);
                 });
 
                 if (result != null)
                 {
+                    bool hasGeometry = result.Meshes.Any(m => m.Vertices.Count > 0);
+                    if (!hasGeometry)
+                    {
+                        ProgressDialog.Instance.Fail(new Exception("Reconstruction completed but no geometry was generated."));
+                        return;
+                    }
+
                     foreach (var mesh in result.Meshes)
                     {
                         if (mesh.Vertices.Count > 0)
@@ -3595,7 +3609,8 @@ namespace Deep3DStudio
                     PopulateDepthData(result);
 
                     ProgressDialog.Instance.Log($"Reconstruction complete. Added {result.Meshes.Count} objects.");
-                    ProgressDialog.Instance.Complete();
+                    if (!(ProgressDialog.Instance.CancellationTokenSource?.IsCancellationRequested ?? false))
+                        ProgressDialog.Instance.Complete();
                 }
                 else
                 {
@@ -3603,6 +3618,10 @@ namespace Deep3DStudio
                     if (ProgressDialog.Instance.State == ProgressState.Running)
                         ProgressDialog.Instance.Fail(new Exception("Unknown failure: No result returned."));
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                ProgressDialog.Instance.Log("Reconstruction cancelled.");
             }
             catch (Exception ex)
             {
@@ -3691,14 +3710,22 @@ namespace Deep3DStudio
                         Steps = new List<WorkflowStep> { step }
                     };
 
+                    var cancellationToken = ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
                     result = await AIModelManager.Instance.ExecuteWorkflowAsync(pipeline, imagePaths, currentResult, (s, p) =>
                     {
                         ProgressDialog.Instance.Update(p, s);
-                    });
+                    }, cancellationToken);
                 });
 
                 if (result != null)
                 {
+                    bool hasGeometry = result.Meshes.Any(m => m.Vertices.Count > 0);
+                    if (!hasGeometry)
+                    {
+                        ProgressDialog.Instance.Fail(new Exception($"{stepName} completed but no geometry was generated."));
+                        return;
+                    }
+
                     if (step == WorkflowStep.Dust3rReconstruction ||
                         step == WorkflowStep.Mast3rReconstruction ||
                         step == WorkflowStep.Must3rReconstruction ||
@@ -3706,7 +3733,8 @@ namespace Deep3DStudio
                     {
                         ApplyPointCloudResultToScene(result, stepName);
                         ProgressDialog.Instance.Log($"{stepName} complete. Added {result.Meshes.Count} point cloud(s).");
-                        ProgressDialog.Instance.Complete();
+                        if (!(ProgressDialog.Instance.CancellationTokenSource?.IsCancellationRequested ?? false))
+                            ProgressDialog.Instance.Complete();
                         return;
                     }
 
@@ -3724,7 +3752,8 @@ namespace Deep3DStudio
 
                     PopulateDepthData(result);
                     ProgressDialog.Instance.Log($"{stepName} complete. Added {result.Meshes.Count} objects.");
-                    ProgressDialog.Instance.Complete();
+                    if (!(ProgressDialog.Instance.CancellationTokenSource?.IsCancellationRequested ?? false))
+                        ProgressDialog.Instance.Complete();
                 }
                 else
                 {
@@ -3840,6 +3869,7 @@ namespace Deep3DStudio
             {
                 try
                 {
+                    var cancellationToken = ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
                     var baseMesh = GenerateMeshFromPointClouds(selectedPointClouds, MeshingAlgorithm.MarchingCubes);
                     MeshData? finalMesh = baseMesh;
 
@@ -3853,7 +3883,8 @@ namespace Deep3DStudio
                         case MeshingAlgorithm.TripoSF:
                             using (var triposf = new Deep3DStudio.Model.AIModels.TripoSFInference())
                             {
-                                finalMesh = triposf.RefineMesh(baseMesh);
+                                cancellationToken.ThrowIfCancellationRequested();
+                                finalMesh = triposf.RefineMesh(baseMesh, cancellationToken);
                             }
                             break;
                         case MeshingAlgorithm.GaussianSDF:
@@ -3918,6 +3949,7 @@ namespace Deep3DStudio
             {
                 try
                 {
+                    var nerfToken = ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
                     var inputMeshes = new List<MeshData>();
                     foreach (var mesh in selectedMeshes)
                     {
@@ -3934,7 +3966,11 @@ namespace Deep3DStudio
 
                     var nerf = new VoxelGridNeRF();
                     nerf.InitializeFromMesh(inputMeshes);
-                    nerf.Train(poses, iterations: IniSettings.Instance.NeRFIterations);
+                    bool cancelled = nerf.Train(poses, iterations: IniSettings.Instance.NeRFIterations, cancellationToken: nerfToken);
+                    if (cancelled)
+                    {
+                        ProgressDialog.Instance.Log("NeRF cancelled. Returning partial mesh.");
+                    }
                     var refined = nerf.GetMesh(GetMesher(IniSettings.Instance.MeshingAlgo));
 
                     if (refined.Vertices.Count == 0)

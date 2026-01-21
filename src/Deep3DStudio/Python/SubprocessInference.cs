@@ -264,9 +264,11 @@ namespace Deep3DStudio.Python
             throw new FileNotFoundException("Could not find subprocess_inference.py embedded resource");
         }
 
-        private (int exitCode, string stdout, string stderr) RunPythonCommand(string arguments, int timeoutMs = 300000)
+        private (int exitCode, string stdout, string stderr) RunPythonCommand(string arguments, int timeoutMs = 300000, CancellationToken cancellationToken = default)
         {
             Log($"Running: {_pythonPath} {_scriptPath} {arguments}");
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             var psi = new ProcessStartInfo
             {
@@ -337,6 +339,16 @@ namespace Deep3DStudio.Python
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
 
+            using var cancellation = cancellationToken.Register(() =>
+            {
+                try
+                {
+                    if (!process.HasExited)
+                        process.Kill(true);
+                }
+                catch { }
+            });
+
             bool exited = process.WaitForExit(timeoutMs);
 
             if (!exited)
@@ -347,6 +359,8 @@ namespace Deep3DStudio.Python
 
             // Wait for async reads to complete
             process.WaitForExit();
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             return (process.ExitCode, stdout.ToString().Trim(), stderr.ToString().Trim());
         }
@@ -436,7 +450,7 @@ namespace Deep3DStudio.Python
             }
         }
 
-        public List<MeshData> Infer(List<byte[]> imagesBytes, bool useRetrieval = true)
+        public List<MeshData> Infer(List<byte[]> imagesBytes, bool useRetrieval = true, CancellationToken cancellationToken = default)
         {
             var results = new List<MeshData>();
 
@@ -480,7 +494,7 @@ namespace Deep3DStudio.Python
                 string deviceArg = $"--device {_device}";
                 string args = $"--command infer --model {_modelName} --input \"{inputPath}\" --output \"{outputPath}\" {weightsArg} {deviceArg} {retrieval}";
 
-                var (exitCode, stdout, stderr) = RunPythonCommand(args, 600000); // 10 min timeout
+                var (exitCode, stdout, stderr) = RunPythonCommand(args, 600000, cancellationToken); // 10 min timeout
 
                 OnProgress?.Invoke("inference", 0.8f, "Processing results...");
 
@@ -555,6 +569,11 @@ namespace Deep3DStudio.Python
 
                 OnProgress?.Invoke("inference", 1.0f, "Complete");
             }
+            catch (OperationCanceledException)
+            {
+                Log("Inference cancelled.");
+                throw;
+            }
             catch (Exception ex)
             {
                 Log($"Inference exception: {ex.Message}");
@@ -574,7 +593,7 @@ namespace Deep3DStudio.Python
         /// </summary>
         /// <param name="meshPath">Path to the input mesh file</param>
         /// <returns>List of output meshes</returns>
-        public List<MeshData> InferMesh(string meshPath)
+        public List<MeshData> InferMesh(string meshPath, CancellationToken cancellationToken = default)
         {
             var results = new List<MeshData>();
 
@@ -599,7 +618,7 @@ namespace Deep3DStudio.Python
                 string deviceArg = $"--device {_device}";
                 string args = $"--command infer --model {_modelName} --mesh-input \"{meshPath}\" --output \"{outputPath}\" {weightsArg} {deviceArg}";
 
-                var (exitCode, stdout, stderr) = RunPythonCommand(args, 600000); // 10 min timeout
+                var (exitCode, stdout, stderr) = RunPythonCommand(args, 600000, cancellationToken); // 10 min timeout
 
                 OnProgress?.Invoke("inference", 0.8f, "Processing results...");
 
@@ -674,6 +693,11 @@ namespace Deep3DStudio.Python
 
                 OnProgress?.Invoke("inference", 1.0f, "Complete");
             }
+            catch (OperationCanceledException)
+            {
+                Log("Mesh inference cancelled.");
+                throw;
+            }
             catch (Exception ex)
             {
                 Log($"Mesh inference exception: {ex.Message}");
@@ -689,7 +713,7 @@ namespace Deep3DStudio.Python
         /// <summary>
         /// Run UniRig inference with mesh data (vertices + faces) and return rigging result.
         /// </summary>
-        public RigResult InferRig(MeshData mesh, int maxJoints, int maxBonesPerVertex)
+        public RigResult InferRig(MeshData mesh, int maxJoints, int maxBonesPerVertex, CancellationToken cancellationToken = default)
         {
             var result = new RigResult();
 
@@ -734,7 +758,7 @@ namespace Deep3DStudio.Python
                 string deviceArg = $"--device {_device}";
                 string args = $"--command infer --model {_modelName} --input \"{inputPath}\" --output \"{outputPath}\" {weightsArg} {deviceArg} --max-joints {maxJoints} --max-bones {maxBonesPerVertex}";
 
-                var (exitCode, stdout, stderr) = RunPythonCommand(args, 600000);
+                var (exitCode, stdout, stderr) = RunPythonCommand(args, 600000, cancellationToken);
 
                 OnProgress?.Invoke("inference", 0.8f, "Processing UniRig results...");
 
@@ -827,6 +851,12 @@ namespace Deep3DStudio.Python
 
                 OnProgress?.Invoke("inference", 1.0f, "Complete");
             }
+            catch (OperationCanceledException)
+            {
+                result.StatusMessage = "UniRig inference cancelled";
+                Log("UniRig inference cancelled.");
+                throw;
+            }
             catch (Exception ex)
             {
                 result.StatusMessage = ex.Message;
@@ -844,7 +874,7 @@ namespace Deep3DStudio.Python
         /// <summary>
         /// Run UniRig inference with a mesh file path (for GLB/GLTF etc.) and return rigging result.
         /// </summary>
-        public RigResult InferRigFromFile(string meshPath, int maxJoints, int maxBonesPerVertex)
+        public RigResult InferRigFromFile(string meshPath, int maxJoints, int maxBonesPerVertex, CancellationToken cancellationToken = default)
         {
             var result = new RigResult();
 
@@ -872,7 +902,7 @@ namespace Deep3DStudio.Python
                 string deviceArg = $"--device {_device}";
                 string args = $"--command infer --model {_modelName} --mesh-input \"{meshPath}\" --output \"{outputPath}\" {weightsArg} {deviceArg} --max-joints {maxJoints} --max-bones {maxBonesPerVertex}";
 
-                var (exitCode, stdout, stderr) = RunPythonCommand(args, 600000);
+                var (exitCode, stdout, stderr) = RunPythonCommand(args, 600000, cancellationToken);
 
                 OnProgress?.Invoke("inference", 0.8f, "Processing UniRig results...");
 
@@ -964,6 +994,12 @@ namespace Deep3DStudio.Python
                 }
 
                 OnProgress?.Invoke("inference", 1.0f, "Complete");
+            }
+            catch (OperationCanceledException)
+            {
+                result.StatusMessage = "UniRig inference cancelled";
+                Log("UniRig inference cancelled.");
+                throw;
             }
             catch (Exception ex)
             {

@@ -172,8 +172,8 @@ namespace Deep3DStudio
             _workflowCombo.AppendText($"Multi-View ({GetCurrentEngineName()})"); // Uses Settings engine
             _workflowCombo.AppendText("Feature Matching (SfM)");
             _workflowCombo.AppendText("TripoSR (Single Image)");
-            _workflowCombo.AppendText("LGM (Gaussian)");
-            _workflowCombo.AppendText("Wonder3D");
+            _workflowCombo.AppendText("LGM (Single Image)");
+            _workflowCombo.AppendText("Wonder3D (Single Image)");
             _workflowCombo.Active = 0;
             wfBox.PackStart(_workflowCombo, false, false, 0);
             wfItem.Add(wfBox);
@@ -206,12 +206,12 @@ namespace Deep3DStudio
             toolbar.Insert(tripoSRBtn, -1);
 
             var lgmBtn = new ToolButton(AppIconFactory.GenerateIcon("ai_gauss", iconSize), "LGM");
-            lgmBtn.TooltipText = "LGM: Large Gaussian Model (standalone)";
+            lgmBtn.TooltipText = "LGM: Single-image Gaussian model (standalone)";
             lgmBtn.Clicked += (s, e) => OnRunSingleStep(AIModels.WorkflowStep.LGMGeneration);
             toolbar.Insert(lgmBtn, -1);
 
             var wonder3DBtn = new ToolButton(AppIconFactory.GenerateIcon("ai_multi", iconSize), "Wonder3D");
-            wonder3DBtn.TooltipText = "Wonder3D: Multi-view 3D generation (standalone)";
+            wonder3DBtn.TooltipText = "Wonder3D: Single-image multi-view 3D generation (standalone)";
             wonder3DBtn.Clicked += (s, e) => OnRunSingleStep(AIModels.WorkflowStep.Wonder3DGeneration);
             toolbar.Insert(wonder3DBtn, -1);
 

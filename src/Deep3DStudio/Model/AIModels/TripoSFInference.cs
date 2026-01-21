@@ -121,7 +121,7 @@ namespace Deep3DStudio.Model.AIModels
         /// </summary>
         /// <param name="meshPath">Path to the input mesh file (.obj, .ply, .glb)</param>
         /// <returns>Refined mesh</returns>
-        public MeshData RefineMesh(string meshPath)
+        public MeshData RefineMesh(string meshPath, System.Threading.CancellationToken cancellationToken = default)
         {
             Initialize();
             var resultMesh = new MeshData();
@@ -143,13 +143,19 @@ namespace Deep3DStudio.Model.AIModels
                 Log($"[TripoSF] Refining mesh: {meshPath}");
 
                 // For TripoSF we pass the mesh path directly - the Python side handles loading
-                var meshes = _inference.InferMesh(meshPath);
+                cancellationToken.ThrowIfCancellationRequested();
+                var meshes = _inference.InferMesh(meshPath, cancellationToken);
 
                 if (meshes.Count > 0)
                 {
                     resultMesh = meshes[0];
                     Log($"[TripoSF] Refined mesh: {resultMesh.Vertices.Count} vertices, {resultMesh.Indices.Count / 3} triangles");
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                Log("[TripoSF] Inference cancelled.");
+                throw;
             }
             catch (Exception ex)
             {
@@ -164,7 +170,7 @@ namespace Deep3DStudio.Model.AIModels
         /// </summary>
         /// <param name="inputMesh">Input mesh data</param>
         /// <returns>Refined mesh</returns>
-        public MeshData RefineMesh(MeshData inputMesh)
+        public MeshData RefineMesh(MeshData inputMesh, System.Threading.CancellationToken cancellationToken = default)
         {
             Initialize();
             var resultMesh = new MeshData();
@@ -182,7 +188,8 @@ namespace Deep3DStudio.Model.AIModels
                 MeshExporter.Save(tempMeshPath, inputMesh);
                 Log($"[TripoSF] Saved input mesh to: {tempMeshPath}");
 
-                var meshes = _inference.InferMesh(tempMeshPath);
+                cancellationToken.ThrowIfCancellationRequested();
+                var meshes = _inference.InferMesh(tempMeshPath, cancellationToken);
 
                 if (meshes.Count > 0)
                 {
@@ -192,6 +199,11 @@ namespace Deep3DStudio.Model.AIModels
 
                 // Cleanup
                 try { File.Delete(tempMeshPath); } catch { }
+            }
+            catch (OperationCanceledException)
+            {
+                Log("[TripoSF] Inference cancelled.");
+                throw;
             }
             catch (Exception ex)
             {

@@ -114,7 +114,7 @@ namespace Deep3DStudio.Model.AIModels
             }
         }
 
-        public MeshData GenerateFromImage(string imagePath)
+        public MeshData GenerateFromImage(string imagePath, System.Threading.CancellationToken cancellationToken = default)
         {
             Initialize();
             var mesh = new MeshData();
@@ -136,13 +136,19 @@ namespace Deep3DStudio.Model.AIModels
                 var imagesBytes = new List<byte[]> { File.ReadAllBytes(imagePath) };
                 Log($"[Wonder3D] Processing image...");
 
-                var meshes = _inference.Infer(imagesBytes, false);
+                cancellationToken.ThrowIfCancellationRequested();
+                var meshes = _inference.Infer(imagesBytes, false, cancellationToken);
 
                 if (meshes.Count > 0)
                 {
                     mesh = meshes[0];
                     Log($"[Wonder3D] Generated mesh with {mesh.Vertices.Count} vertices");
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                Log("[Wonder3D] Inference cancelled.");
+                throw;
             }
             catch (Exception ex)
             {

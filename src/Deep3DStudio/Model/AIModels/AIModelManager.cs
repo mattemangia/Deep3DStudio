@@ -96,10 +96,10 @@ namespace Deep3DStudio.Model.AIModels
             Steps = new List<WorkflowStep> { WorkflowStep.LoadImages, WorkflowStep.TripoSRGeneration }
         };
 
-         public static WorkflowPipeline ImageToLGM => new()
+        public static WorkflowPipeline ImageToLGM => new()
         {
             Name = "Image -> LGM -> Mesh",
-            Description = "Single image to 3D using LGM (Large Multi-View Gaussian Model)",
+            Description = "Single-image 3D using LGM (Gaussian model)",
             Steps = new List<WorkflowStep> { WorkflowStep.LoadImages, WorkflowStep.LGMGeneration }
         };
 
@@ -249,20 +249,22 @@ namespace Deep3DStudio.Model.AIModels
         public async Task<SceneResult?> GenerateFromSingleImageAsync(
             string imagePath,
             ImageTo3DModel model,
-            Action<string>? statusCallback = null)
+            Action<string>? statusCallback = null,
+            System.Threading.CancellationToken cancellationToken = default)
         {
             return await Task.Run(() =>
             {
                 try
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     statusCallback?.Invoke($"Loading image: {Path.GetFileName(imagePath)}...");
                     MeshData? mesh = null;
 
                     switch (model)
                     {
-                        case ImageTo3DModel.TripoSR: mesh = TripoSR?.GenerateFromImage(imagePath); break;
-                        case ImageTo3DModel.LGM: mesh = LGM?.GenerateFromImage(imagePath); break;
-                        case ImageTo3DModel.Wonder3D: mesh = Wonder3D?.GenerateFromImage(imagePath); break;
+                        case ImageTo3DModel.TripoSR: mesh = TripoSR?.GenerateFromImage(imagePath, cancellationToken); break;
+                        case ImageTo3DModel.LGM: mesh = LGM?.GenerateFromImage(imagePath, cancellationToken); break;
+                        case ImageTo3DModel.Wonder3D: mesh = Wonder3D?.GenerateFromImage(imagePath, cancellationToken); break;
                     }
 
                     if (mesh != null && mesh.Vertices.Count > 0)
@@ -273,19 +275,25 @@ namespace Deep3DStudio.Model.AIModels
                     }
                     return null;
                 }
+                catch (OperationCanceledException)
+                {
+                    statusCallback?.Invoke("Cancelled.");
+                    throw;
+                }
                 catch (Exception ex)
                 {
                     statusCallback?.Invoke($"Error: {ex.Message}");
                     return null;
                 }
-            });
+            }, cancellationToken);
         }
 
         public async Task<SceneResult?> ExecuteWorkflowAsync(
             WorkflowPipeline pipeline,
             List<string>? imagePaths = null,
             SceneResult? existingScene = null,
-            Action<string, float>? progressCallback = null)
+            Action<string, float>? progressCallback = null,
+            System.Threading.CancellationToken cancellationToken = default)
         {
             return await Task.Run(async () =>
             {
@@ -295,51 +303,84 @@ namespace Deep3DStudio.Model.AIModels
                 for (int i = 0; i < totalSteps; i++)
                 {
                     var step = pipeline.Steps[i];
-                    float progress = (float)i / totalSteps;
-                    progressCallback?.Invoke($"Step {step}", progress);
+                    float stepBase = totalSteps > 0 ? (float)i / totalSteps : 0f;
+                    float stepSpan = totalSteps > 0 ? 1f / totalSteps : 1f;
 
-                    switch (step)
+                    void Report(string message, float stepProgress)
                     {
+                        float clamped = Math.Clamp(stepProgress, 0f, 1f);
+                        float overall = Math.Clamp(stepBase + clamped * stepSpan, 0f, 1f);
+                        ProgressUpdated?.Invoke(message, overall);
+                        progressCallback?.Invoke(message, overall);
+                    }
+
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        Report("Cancelled by user.", 0f);
+                        return currentResult;
+                    }
+
+                    Report($"Step {step}", 0f);
+
+                    try
+                    {
+                        switch (step)
+                        {
                         case WorkflowStep.LoadImages:
                             break;
 
                         case WorkflowStep.Dust3rReconstruction:
                             if (imagePaths != null && imagePaths.Count > 0)
                             {
-                                progressCallback?.Invoke("Attempting Dust3r reconstruction...", progress);
+                                Report("Attempting Dust3r reconstruction...", 0.05f);
 
                                 // Try Dust3r first - it will attempt to initialize internally
                                 SceneResult? dust3rResult = null;
+                                Action<string, float, string>? dust3rProgress = null;
                                 try
                                 {
                                     if (Dust3r != null)
                                     {
-                                        Dust3r.LogCallback = (msg) => progressCallback?.Invoke(msg, progress);
+                                        dust3rProgress = (stage, p, message) => Report($"Dust3r: {message}", p);
+                                        Dust3r.OnProgress += dust3rProgress;
+                                        Dust3r.LogCallback = msg => Report(msg, 0.1f);
                                     }
-                                    dust3rResult = Dust3r?.ReconstructScene(imagePaths);
+                                    dust3rResult = Dust3r?.ReconstructScene(imagePaths, cancellationToken);
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                    Report("Dust3r cancelled.", 0.6f);
+                                    return currentResult;
                                 }
                                 catch (Exception ex)
                                 {
-                                    progressCallback?.Invoke($"Dust3r failed: {ex.Message}", progress);
+                                    Report($"Dust3r failed: {ex.Message}", 0.6f);
+                                }
+                                finally
+                                {
+                                    if (Dust3r != null && dust3rProgress != null)
+                                    {
+                                        Dust3r.OnProgress -= dust3rProgress;
+                                    }
                                 }
 
                                 // Check if Dust3r succeeded (has actual mesh data)
                                 if (dust3rResult != null && dust3rResult.Meshes.Count > 0 &&
                                     dust3rResult.Meshes.Any(m => m.Vertices.Count > 0))
                                 {
-                                    progressCallback?.Invoke("Dust3r reconstruction complete.", progress + 0.1f);
+                                    Report("Dust3r reconstruction complete.", 1.0f);
                                     currentResult = dust3rResult;
                                 }
                                 else
                                 {
                                     // Fall back to SfM (Feature Matching)
-                                    progressCallback?.Invoke("Dust3r not available or failed, trying Feature Matching SfM...", progress);
+                                    Report("Dust3r not available or failed, trying Feature Matching SfM...", 0.2f);
 
                                     // Clean up any corrupted state from Dust3r before running SfM
                                     // This is critical to prevent crashes when falling back from failed Python/native operations
                                     try
                                     {
-                                        progressCallback?.Invoke("Cleaning up resources before SfM fallback...", progress);
+                                        Report("Cleaning up resources before SfM fallback...", 0.25f);
 
                                         // Dispose and reset Dust3r instance if it failed
                                         if (_dust3r != null)
@@ -354,7 +395,7 @@ namespace Deep3DStudio.Model.AIModels
                                         {
                                             try
                                             {
-                                                progressCallback?.Invoke("Releasing Python/GPU resources...", progress);
+                                                Report("Releasing Python/GPU resources...", 0.3f);
                                                 using (Py.GIL())
                                                 {
                                                     // Run aggressive Python cleanup
@@ -377,7 +418,7 @@ gc.collect()
                                             }
                                             catch (Exception pyEx)
                                             {
-                                                progressCallback?.Invoke($"Warning: Python cleanup had issues: {pyEx.Message}", progress);
+                                                Report($"Warning: Python cleanup had issues: {pyEx.Message}", 0.3f);
                                             }
                                         }
 
@@ -390,7 +431,7 @@ gc.collect()
                                         // This prevents any corrupted state from affecting OpenCV operations
                                         try
                                         {
-                                            progressCallback?.Invoke("Resetting OpenCV state...", progress);
+                                            Report("Resetting OpenCV state...", 0.4f);
                                             // Reset OpenCV optimization settings to default
                                             Cv2.SetUseOptimized(true);
                                             // Note: OpenCvSharp doesn't expose direct memory pool reset,
@@ -398,7 +439,7 @@ gc.collect()
                                         }
                                         catch (Exception cvEx)
                                         {
-                                            progressCallback?.Invoke($"Warning: OpenCV reset had issues: {cvEx.Message}", progress);
+                                            Report($"Warning: OpenCV reset had issues: {cvEx.Message}", 0.4f);
                                         }
 
                                         // Small delay to ensure native resources are fully released
@@ -406,7 +447,7 @@ gc.collect()
                                     }
                                     catch (Exception cleanupEx)
                                     {
-                                        progressCallback?.Invoke($"Warning: cleanup before SfM fallback had issues: {cleanupEx.Message}", progress);
+                                        Report($"Warning: cleanup before SfM fallback had issues: {cleanupEx.Message}", 0.45f);
                                     }
 
                                     try
@@ -419,44 +460,44 @@ gc.collect()
                                             if (File.Exists(path))
                                             {
                                                 validImagePaths.Add(path);
-                                                progressCallback?.Invoke($"[SfM] Image verified: {Path.GetFileName(path)}", progress);
+                                                Report($"[SfM] Image verified: {Path.GetFileName(path)}", 0.5f);
                                             }
                                             else
                                             {
-                                                progressCallback?.Invoke($"[SfM] Warning: Image not found: {path}", progress);
+                                                Report($"[SfM] Warning: Image not found: {path}", 0.5f);
                                             }
                                         }
 
                                         if (validImagePaths.Count < 2)
                                         {
-                                            progressCallback?.Invoke($"SfM requires at least 2 valid images. Found: {validImagePaths.Count}", progress);
+                                            Report($"SfM requires at least 2 valid images. Found: {validImagePaths.Count}", 0.6f);
                                         }
                                         else
                                         {
                                             // Create SfM in a completely fresh state
                                             using (var sfm = new SfMInference())
                                             {
-                                                sfm.LogCallback = (msg) => progressCallback?.Invoke(msg, progress);
+                                                sfm.LogCallback = msg => Report(msg, 0.6f);
                                                 currentResult = sfm.ReconstructScene(validImagePaths);
                                             }
                                         }
 
                                         if (currentResult.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
                                         {
-                                            progressCallback?.Invoke($"SfM reconstruction complete. {currentResult.Meshes[0].Vertices.Count} points.", progress + 0.1f);
+                                            Report($"SfM reconstruction complete. {currentResult.Meshes[0].Vertices.Count} points.", 1.0f);
                                         }
                                         else
                                         {
-                                            progressCallback?.Invoke("SfM reconstruction failed - no points generated.", progress);
+                                            Report("SfM reconstruction failed - no points generated.", 0.9f);
                                         }
                                     }
                                     catch (TypeInitializationException ex)
                                     {
-                                        progressCallback?.Invoke($"SfM unavailable (OpenCV native libraries not found): {ex.InnerException?.Message ?? ex.Message}", progress);
+                                        Report($"SfM unavailable (OpenCV native libraries not found): {ex.InnerException?.Message ?? ex.Message}", 0.9f);
                                     }
                                     catch (Exception ex)
                                     {
-                                        progressCallback?.Invoke($"SfM failed: {ex.Message}", progress);
+                                        Report($"SfM failed: {ex.Message}", 0.9f);
                                     }
                                 }
                             }
@@ -465,178 +506,277 @@ gc.collect()
                         case WorkflowStep.Mast3rReconstruction:
                             if (imagePaths != null && imagePaths.Count >= 2)
                             {
-                                progressCallback?.Invoke("Running MASt3R reconstruction...", progress);
+                                Report("Running MASt3R reconstruction...", 0.05f);
                                 try
                                 {
                                     using (var mast3r = new Mast3rInference())
                                     {
-                                        mast3r.LogCallback = (msg) => progressCallback?.Invoke(msg, progress);
-                                        // Use retrieval for optimal pairing of unordered images
-                                        currentResult = mast3r.ReconstructScene(imagePaths, useRetrieval: true);
+                                        Action<string, float, string> mast3rProgress = (stage, p, message) => Report($"MASt3R: {message}", p);
+                                        mast3r.OnProgress += mast3rProgress;
+                                        mast3r.LogCallback = msg => Report(msg, 0.1f);
+                                        try
+                                        {
+                                            // Use retrieval for optimal pairing of unordered images
+                                            currentResult = mast3r.ReconstructScene(imagePaths, useRetrieval: true, cancellationToken: cancellationToken);
+                                        }
+                                        finally
+                                        {
+                                            mast3r.OnProgress -= mast3rProgress;
+                                        }
                                     }
 
                                     if (currentResult.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
                                     {
-                                        progressCallback?.Invoke($"MASt3R reconstruction complete. {currentResult.Meshes[0].Vertices.Count} points.", progress + 0.1f);
+                                        Report($"MASt3R reconstruction complete. {currentResult.Meshes[0].Vertices.Count} points.", 1.0f);
                                     }
                                     else
                                     {
-                                        progressCallback?.Invoke("MASt3R reconstruction failed - no points generated.", progress);
+                                        Report("MASt3R reconstruction failed - no points generated.", 0.9f);
                                     }
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                    Report("MASt3R cancelled.", 0.6f);
+                                    return currentResult;
                                 }
                                 catch (Exception ex)
                                 {
-                                    progressCallback?.Invoke($"MASt3R failed: {ex.Message}", progress);
+                                    Report($"MASt3R failed: {ex.Message}", 0.9f);
                                 }
                             }
                             else
                             {
-                                progressCallback?.Invoke("MASt3R requires at least 2 images.", progress);
+                                Report("MASt3R requires at least 2 images.", 0.1f);
                             }
                             break;
 
                         case WorkflowStep.Must3rReconstruction:
                             if (imagePaths != null && imagePaths.Count >= 2)
                             {
-                                progressCallback?.Invoke("Running MUSt3R reconstruction...", progress);
+                                Report("Running MUSt3R reconstruction...", 0.05f);
                                 try
                                 {
                                     using (var must3r = new Must3rInference())
                                     {
-                                        must3r.LogCallback = (msg) => progressCallback?.Invoke(msg, progress);
-                                        // Use retrieval for optimal pairing of unordered images
-                                        currentResult = must3r.ReconstructScene(imagePaths, useRetrieval: true);
+                                        Action<string, float, string> must3rProgress = (stage, p, message) => Report($"MUSt3R: {message}", p);
+                                        must3r.OnProgress += must3rProgress;
+                                        must3r.LogCallback = msg => Report(msg, 0.1f);
+                                        try
+                                        {
+                                            // Use retrieval for optimal pairing of unordered images
+                                            currentResult = must3r.ReconstructScene(imagePaths, useRetrieval: true, cancellationToken: cancellationToken);
+                                        }
+                                        finally
+                                        {
+                                            must3r.OnProgress -= must3rProgress;
+                                        }
                                     }
 
                                     if (currentResult.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
                                     {
-                                        progressCallback?.Invoke($"MUSt3R reconstruction complete. {currentResult.Meshes[0].Vertices.Count} points.", progress + 0.1f);
+                                        Report($"MUSt3R reconstruction complete. {currentResult.Meshes[0].Vertices.Count} points.", 1.0f);
                                     }
                                     else
                                     {
-                                        progressCallback?.Invoke("MUSt3R reconstruction failed - no points generated.", progress);
+                                        Report("MUSt3R reconstruction failed - no points generated.", 0.9f);
                                     }
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                    Report("MUSt3R cancelled.", 0.6f);
+                                    return currentResult;
                                 }
                                 catch (Exception ex)
                                 {
-                                    progressCallback?.Invoke($"MUSt3R failed: {ex.Message}", progress);
+                                    Report($"MUSt3R failed: {ex.Message}", 0.9f);
                                 }
                             }
                             else
                             {
-                                progressCallback?.Invoke("MUSt3R requires at least 2 images.", progress);
+                                Report("MUSt3R requires at least 2 images.", 0.1f);
                             }
                             break;
 
                         case WorkflowStep.SfMReconstruction:
                             if (imagePaths != null && imagePaths.Count >= 2)
                             {
-                                progressCallback?.Invoke($"Running Feature Matching SfM with {imagePaths.Count} images...", progress);
+                                Report($"Running Feature Matching SfM with {imagePaths.Count} images...", 0.05f);
                                 try
                                 {
                                     using (var sfm = new SfMInference())
                                     {
-                                        sfm.LogCallback = (msg) => progressCallback?.Invoke(msg, progress);
+                                        sfm.LogCallback = msg => Report(msg, 0.6f);
                                         currentResult = sfm.ReconstructScene(imagePaths);
                                     }
 
                                     if (currentResult.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
                                     {
-                                        progressCallback?.Invoke($"SfM complete. Generated {currentResult.Meshes[0].Vertices.Count} points from {currentResult.Poses.Count} cameras.", progress + 0.1f);
+                                        Report($"SfM complete. Generated {currentResult.Meshes[0].Vertices.Count} points from {currentResult.Poses.Count} cameras.", 1.0f);
                                     }
                                     else
                                     {
-                                        progressCallback?.Invoke("SfM reconstruction failed - insufficient feature matches or images.", progress);
+                                        Report("SfM reconstruction failed - insufficient feature matches or images.", 0.9f);
                                     }
                                 }
                                 catch (TypeInitializationException ex)
                                 {
-                                    progressCallback?.Invoke($"SfM unavailable - OpenCV native libraries not found. Please install OpenCV or use Dust3r instead. Error: {ex.InnerException?.Message ?? ex.Message}", progress);
+                                    Report($"SfM unavailable - OpenCV native libraries not found. Please install OpenCV or use Dust3r instead. Error: {ex.InnerException?.Message ?? ex.Message}", 0.9f);
                                 }
                                 catch (Exception ex)
                                 {
-                                    progressCallback?.Invoke($"SfM failed: {ex.Message}", progress);
+                                    Report($"SfM failed: {ex.Message}", 0.9f);
                                 }
                             }
                             else if (imagePaths != null && imagePaths.Count < 2)
                             {
-                                progressCallback?.Invoke("SfM requires at least 2 images.", progress);
+                                Report("SfM requires at least 2 images.", 0.1f);
                             }
                             break;
 
                         case WorkflowStep.TripoSRGeneration:
                             if (imagePaths != null && imagePaths.Count > 0)
                             {
-                                progressCallback?.Invoke("Running TripoSR generation...", progress);
-                                currentResult = await GenerateFromSingleImageAsync(imagePaths[0], ImageTo3DModel.TripoSR,
-                                    msg => progressCallback?.Invoke(msg, progress));
+                                Report("Running TripoSR generation...", 0.05f);
+                                var tripo = TripoSR;
+                                Action<string, float, string>? tripoProgress = null;
+                                if (tripo != null)
+                                {
+                                    tripoProgress = (stage, p, message) => Report($"TripoSR: {message}", p);
+                                    tripo.OnProgress += tripoProgress;
+                                }
+
+                                try
+                                {
+                                    currentResult = await GenerateFromSingleImageAsync(imagePaths[0], ImageTo3DModel.TripoSR,
+                                        msg => Report(msg, 0.1f), cancellationToken);
+                                }
+                                finally
+                                {
+                                    if (tripo != null && tripoProgress != null)
+                                    {
+                                        tripo.OnProgress -= tripoProgress;
+                                    }
+                                }
 
                                 if (currentResult?.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
-                                    progressCallback?.Invoke($"TripoSR complete. {currentResult.Meshes[0].Vertices.Count} vertices.", progress + 0.1f);
+                                    Report($"TripoSR complete. {currentResult.Meshes[0].Vertices.Count} vertices.", 1.0f);
                                 else
-                                    progressCallback?.Invoke("TripoSR failed - model not loaded or generation failed.", progress);
+                                    Report("TripoSR failed - model not loaded or generation failed.", 0.9f);
                             }
                             break;
 
                         case WorkflowStep.LGMGeneration:
                             if (imagePaths != null && imagePaths.Count > 0)
                             {
-                                progressCallback?.Invoke("Running LGM generation...", progress);
-                                currentResult = await GenerateFromSingleImageAsync(imagePaths[0], ImageTo3DModel.LGM,
-                                    msg => progressCallback?.Invoke(msg, progress));
+                                Report("Running LGM generation...", 0.05f);
+                                var lgm = LGM;
+                                Action<string, float, string>? lgmProgress = null;
+                                if (lgm != null)
+                                {
+                                    lgmProgress = (stage, p, message) => Report($"LGM: {message}", p);
+                                    lgm.OnProgress += lgmProgress;
+                                }
+
+                                try
+                                {
+                                    currentResult = await GenerateFromSingleImageAsync(imagePaths[0], ImageTo3DModel.LGM,
+                                        msg => Report(msg, 0.1f), cancellationToken);
+                                }
+                                finally
+                                {
+                                    if (lgm != null && lgmProgress != null)
+                                    {
+                                        lgm.OnProgress -= lgmProgress;
+                                    }
+                                }
 
                                 if (currentResult?.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
-                                    progressCallback?.Invoke($"LGM complete. {currentResult.Meshes[0].Vertices.Count} vertices.", progress + 0.1f);
+                                    Report($"LGM complete. {currentResult.Meshes[0].Vertices.Count} vertices.", 1.0f);
                                 else
-                                    progressCallback?.Invoke("LGM failed - model not loaded or generation failed.", progress);
+                                    Report("LGM failed - model not loaded or generation failed.", 0.9f);
                             }
                             break;
 
                         case WorkflowStep.Wonder3DGeneration:
                             if (imagePaths != null && imagePaths.Count > 0)
                             {
-                                progressCallback?.Invoke("Running Wonder3D generation...", progress);
-                                currentResult = await GenerateFromSingleImageAsync(imagePaths[0], ImageTo3DModel.Wonder3D,
-                                    msg => progressCallback?.Invoke(msg, progress));
+                                Report("Running Wonder3D generation...", 0.05f);
+                                var wonder3D = Wonder3D;
+                                Action<string, float, string>? wonderProgress = null;
+                                if (wonder3D != null)
+                                {
+                                    wonderProgress = (stage, p, message) => Report($"Wonder3D: {message}", p);
+                                    wonder3D.OnProgress += wonderProgress;
+                                }
+
+                                try
+                                {
+                                    currentResult = await GenerateFromSingleImageAsync(imagePaths[0], ImageTo3DModel.Wonder3D,
+                                        msg => Report(msg, 0.1f), cancellationToken);
+                                }
+                                finally
+                                {
+                                    if (wonder3D != null && wonderProgress != null)
+                                    {
+                                        wonder3D.OnProgress -= wonderProgress;
+                                    }
+                                }
 
                                 if (currentResult?.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
-                                    progressCallback?.Invoke($"Wonder3D complete. {currentResult.Meshes[0].Vertices.Count} vertices.", progress + 0.1f);
+                                    Report($"Wonder3D complete. {currentResult.Meshes[0].Vertices.Count} vertices.", 1.0f);
                                 else
-                                    progressCallback?.Invoke("Wonder3D failed - model not loaded or generation failed.", progress);
+                                    Report("Wonder3D failed - model not loaded or generation failed.", 0.9f);
                             }
                             break;
 
                         case WorkflowStep.TripoSFRefinement:
                             if (currentResult != null && currentResult.Meshes.Count > 0)
                             {
-                                progressCallback?.Invoke("Running TripoSF refinement...", progress);
-                                for (int meshIdx = 0; meshIdx < currentResult.Meshes.Count; meshIdx++)
+                                Report("Running TripoSF refinement...", 0.05f);
+                                var tripoSF = TripoSF;
+                                Action<string, float, string>? tripoSfProgress = null;
+                                if (tripoSF != null)
                                 {
-                                    var inputMesh = currentResult.Meshes[meshIdx];
-                                    if (inputMesh.Vertices.Count == 0) continue;
-
-                                    var refinedMesh = TripoSF?.RefineMesh(inputMesh);
-                                    if (refinedMesh != null && refinedMesh.Vertices.Count > 0)
+                                    tripoSfProgress = (stage, p, message) => Report($"TripoSF: {message}", p);
+                                    tripoSF.OnProgress += tripoSfProgress;
+                                }
+                                try
+                                {
+                                    for (int meshIdx = 0; meshIdx < currentResult.Meshes.Count; meshIdx++)
                                     {
-                                        currentResult.Meshes[meshIdx] = refinedMesh;
+                                        var inputMesh = currentResult.Meshes[meshIdx];
+                                        if (inputMesh.Vertices.Count == 0) continue;
+
+                                        var refinedMesh = tripoSF?.RefineMesh(inputMesh, cancellationToken);
+                                        if (refinedMesh != null && refinedMesh.Vertices.Count > 0)
+                                        {
+                                            currentResult.Meshes[meshIdx] = refinedMesh;
+                                        }
                                     }
                                 }
-                                progressCallback?.Invoke("TripoSF refinement complete.", progress + 0.1f);
+                                finally
+                                {
+                                    if (tripoSF != null && tripoSfProgress != null)
+                                    {
+                                        tripoSF.OnProgress -= tripoSfProgress;
+                                    }
+                                }
+                                Report("TripoSF refinement complete.", 1.0f);
                             }
                             else
                             {
-                                progressCallback?.Invoke("TripoSF refinement skipped - no mesh available.", progress);
+                                Report("TripoSF refinement skipped - no mesh available.", 0.1f);
                             }
                             break;
 
                         case WorkflowStep.MarchingCubes:
-                            progressCallback?.Invoke("Marching cubes step (placeholder).", progress);
+                            Report("Marching cubes step (placeholder).", 0.5f);
                             break;
 
                         case WorkflowStep.DeepMeshPriorRefinement:
                             if (currentResult != null && currentResult.Meshes.Count > 0)
                             {
-                                progressCallback?.Invoke("Running DeepMeshPrior refinement...", progress);
+                                Report("Running DeepMeshPrior refinement...", 0.05f);
                                 var dmpOptimizer = new DeepMeshPrior.DeepMeshPriorOptimizer();
                                 var settings = Configuration.IniSettings.Instance;
 
@@ -650,22 +790,22 @@ gc.collect()
                                             settings.DeepMeshPriorIterations,
                                             settings.DeepMeshPriorLearningRate,
                                             settings.DeepMeshPriorLaplacianWeight,
-                                            (msg, p) => progressCallback?.Invoke(msg, progress + p * 0.1f));
+                                            (msg, p) => Report(msg, p));
                                         currentResult.Meshes[meshIdx] = refinedMesh;
                                     }
                                 }
-                                progressCallback?.Invoke("DeepMeshPrior refinement complete.", progress + 0.1f);
+                                Report("DeepMeshPrior refinement complete.", 1.0f);
                             }
                             else
                             {
-                                progressCallback?.Invoke("DeepMeshPrior skipped - no mesh available.", progress);
+                                Report("DeepMeshPrior skipped - no mesh available.", 0.1f);
                             }
                             break;
 
                         case WorkflowStep.GaussianSDFRefinement:
                             if (currentResult != null && currentResult.Meshes.Count > 0)
                             {
-                                progressCallback?.Invoke("Running GaussianSDF refinement...", progress);
+                                Report("Running GaussianSDF refinement...", 0.05f);
                                 var gsdfRefiner = new Meshing.GaussianSDFRefiner();
 
                                 for (int meshIdx = 0; meshIdx < currentResult.Meshes.Count; meshIdx++)
@@ -675,64 +815,75 @@ gc.collect()
                                     {
                                         var refinedMesh = await gsdfRefiner.RefineMeshAsync(
                                             inputMesh,
-                                            (msg, p) => progressCallback?.Invoke(msg, progress + p * 0.1f));
+                                            (msg, p) => Report(msg, p));
                                         currentResult.Meshes[meshIdx] = refinedMesh;
                                     }
                                 }
-                                progressCallback?.Invoke("GaussianSDF refinement complete.", progress + 0.1f);
+                                Report("GaussianSDF refinement complete.", 1.0f);
                             }
                             else
                             {
-                                progressCallback?.Invoke("GaussianSDF skipped - no mesh available.", progress);
+                                Report("GaussianSDF skipped - no mesh available.", 0.1f);
                             }
                             break;
 
                         case WorkflowStep.UniRigAutoRig:
                             if (currentResult != null && currentResult.Meshes.Count > 0)
                             {
-                                progressCallback?.Invoke("Running UniRig auto-rigging...", progress);
+                                Report("Running UniRig auto-rigging...", 0.05f);
                                 var mesh = currentResult.Meshes[0];
                                 if (mesh.Vertices.Count > 0)
                                 {
                                     var rigResult = await RigMeshAsync(
                                         mesh.Vertices.ToArray(),
                                         mesh.Indices.ToArray(),
-                                        msg => progressCallback?.Invoke(msg, progress));
+                                        msg => Report(msg, 0.2f));
 
                                     if (rigResult != null && rigResult.Success)
                                     {
                                         currentResult.RigResult = rigResult;
-                                        progressCallback?.Invoke($"UniRig complete. {rigResult.JointPositions?.Length ?? 0} joints.", progress + 0.1f);
+                                        Report($"UniRig complete. {rigResult.JointPositions?.Length ?? 0} joints.", 1.0f);
                                     }
                                     else
                                     {
-                                        progressCallback?.Invoke("UniRig failed or model not available.", progress);
+                                        Report("UniRig failed or model not available.", 0.9f);
                                     }
                                 }
                             }
                             else
                             {
-                                progressCallback?.Invoke("UniRig skipped - no mesh available.", progress);
+                                Report("UniRig skipped - no mesh available.", 0.1f);
                             }
                             break;
 
                         case WorkflowStep.NeRFRefinement:
                             if (currentResult != null && currentResult.Poses.Count > 0)
                             {
-                                progressCallback?.Invoke("Running NeRF refinement...", progress);
+                                Report("Running NeRF refinement...", 0.05f);
                                 var nerf = new VoxelGridNeRF();
                                 nerf.InitializeFromMesh(currentResult.Meshes);
-                                nerf.Train(currentResult.Poses, 5);
+                                var nerfIterations = Configuration.IniSettings.Instance.NeRFIterations;
+                                bool cancelled = nerf.Train(currentResult.Poses, nerfIterations, cancellationToken);
+                                if (cancelled)
+                                {
+                                    Report("NeRF cancelled. Returning partial mesh.", 0.6f);
+                                }
                                 var mesh = nerf.GetMesh();
                                 currentResult.Meshes.Clear();
                                 currentResult.Meshes.Add(mesh);
-                                progressCallback?.Invoke($"NeRF refinement complete. {mesh.Vertices.Count} vertices.", progress + 0.1f);
+                                Report($"NeRF refinement complete. {mesh.Vertices.Count} vertices.", 1.0f);
                             }
                             else
                             {
-                                progressCallback?.Invoke("NeRF refinement skipped - no poses available.", progress);
+                                Report("NeRF refinement skipped - no poses available.", 0.1f);
                             }
                             break;
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        Report("Cancelled by user.", 0f);
+                        return currentResult;
                     }
                 }
 

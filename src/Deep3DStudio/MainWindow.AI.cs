@@ -134,7 +134,7 @@ namespace Deep3DStudio
                 return;
             }
 
-            _statusLabel.Text = "Running Wonder3D multi-view 3D generation...";
+            _statusLabel.Text = "Running Wonder3D single-image multi-view 3D generation...";
             RunAIWorkflowAsync(AIModels.WorkflowPipeline.ImageToWonder3D);
         }
 
@@ -304,6 +304,7 @@ namespace Deep3DStudio
 
             // Start the progress dialog
             UI.ProgressDialog.Instance.Start($"Running {pipeline.Name}...", UI.OperationType.Processing);
+            var cancellationToken = UI.ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
 
             try
             {
@@ -318,7 +319,8 @@ namespace Deep3DStudio
                         {
                             UI.ProgressDialog.Instance.Update(progress, message);
                         }
-                    })
+                    }),
+                    cancellationToken
                 );
 
                 // Process pending GTK events after workflow to ensure queued Application.Invoke calls
@@ -327,12 +329,29 @@ namespace Deep3DStudio
 
                 if (result != null)
                 {
+                    bool hasGeometry = result.Meshes.Any(m => m.Vertices.Count > 0);
+                    if (!hasGeometry)
+                    {
+                        Application.Invoke((s, e) =>
+                        {
+                            UI.ProgressDialog.Instance.Fail(new Exception("Workflow completed but no geometry was generated."));
+                            _statusLabel.Text = $"Workflow '{pipeline.Name}' failed.";
+                        });
+                        return;
+                    }
                     Application.Invoke((s, e) =>
                     {
                         _lastSceneResult = result;
                         UpdateSceneFromResult(result);
-                        _statusLabel.Text = $"Workflow '{pipeline.Name}' completed successfully.";
-                        UI.ProgressDialog.Instance.Complete();
+                        if (cancellationToken.IsCancellationRequested)
+                        {
+                            _statusLabel.Text = $"Workflow '{pipeline.Name}' cancelled.";
+                        }
+                        else
+                        {
+                            _statusLabel.Text = $"Workflow '{pipeline.Name}' completed successfully.";
+                            UI.ProgressDialog.Instance.Complete();
+                        }
                     });
                 }
                 else
@@ -342,6 +361,13 @@ namespace Deep3DStudio
                         UI.ProgressDialog.Instance.Fail(new Exception("Workflow completed but no result was generated."));
                     });
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                Application.Invoke((s, e) =>
+                {
+                    _statusLabel.Text = "Workflow cancelled.";
+                });
             }
             catch (Exception ex)
             {
@@ -430,6 +456,7 @@ namespace Deep3DStudio
 
             // Start the progress dialog
             UI.ProgressDialog.Instance.Start($"Running {stepName}...", UI.OperationType.Processing);
+            var cancellationToken = UI.ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
 
             try
             {
@@ -451,7 +478,8 @@ namespace Deep3DStudio
                         {
                             UI.ProgressDialog.Instance.Update(progress, message);
                         }
-                    })
+                    }),
+                    cancellationToken
                 );
 
                 // Process pending GTK events after workflow to ensure queued Application.Invoke calls
@@ -460,6 +488,16 @@ namespace Deep3DStudio
 
                 if (result != null)
                 {
+                    bool hasGeometry = result.Meshes.Any(m => m.Vertices.Count > 0);
+                    if (!hasGeometry)
+                    {
+                        Application.Invoke((s, e) =>
+                        {
+                            UI.ProgressDialog.Instance.Fail(new Exception($"{stepName} completed but no geometry was generated."));
+                            _statusLabel.Text = $"{stepName} failed.";
+                        });
+                        return;
+                    }
                     Application.Invoke((s, e) =>
                     {
                         _lastSceneResult = result;
@@ -474,8 +512,15 @@ namespace Deep3DStudio
                         {
                             UpdateSceneFromResult(result);
                         }
-                        _statusLabel.Text = $"{stepName} completed successfully.";
-                        UI.ProgressDialog.Instance.Complete();
+                        if (cancellationToken.IsCancellationRequested)
+                        {
+                            _statusLabel.Text = $"{stepName} cancelled.";
+                        }
+                        else
+                        {
+                            _statusLabel.Text = $"{stepName} completed successfully.";
+                            UI.ProgressDialog.Instance.Complete();
+                        }
                     });
                 }
                 else
@@ -485,6 +530,13 @@ namespace Deep3DStudio
                         UI.ProgressDialog.Instance.Fail(new Exception($"{stepName} completed but no result was generated."));
                     });
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                Application.Invoke((s, e) =>
+                {
+                    _statusLabel.Text = $"{stepName} cancelled.";
+                });
             }
             catch (Exception ex)
             {

@@ -29,7 +29,7 @@ namespace Deep3DStudio
         private SpinButton _tripoSRResolution;
         private Entry _tripoSRModelPath;
 
-        // LGM (Large Multi-View Gaussian Model)
+        // LGM (Single-Image Gaussian Model in this workflow)
         private SpinButton _lgmFlowSteps;
         private SpinButton _lgmResolution;
         private Entry _lgmModelPath;
@@ -155,7 +155,7 @@ namespace Deep3DStudio
             row++;
             var infoLabel = new Label(
                 "Configure default AI models for each pipeline stage.\n\n" +
-                "Image→3D: Converts single/multi images to 3D.\n" +
+                "Image→3D: Single-image to 3D (TripoSR, LGM, Wonder3D).\n" +
                 "Mesh Extraction: Converts point clouds/SDFs to meshes.\n" +
                 "Rigging: Auto-generates skeleton and weights.\n\n" +
                 "Compute Device:\n" +
@@ -275,7 +275,7 @@ namespace Deep3DStudio
 
             int row = 0;
 
-            var header = new Label("<b>LGM - Large Multi-View Gaussian Model</b>") { UseMarkup = true, Halign = Align.Start };
+            var header = new Label("<b>LGM - Single-Image Gaussian Model</b>") { UseMarkup = true, Halign = Align.Start };
             grid.Attach(header, 0, row++, 2, 1);
 
             grid.Attach(new Label("Flow Steps:") { Halign = Align.Start }, 0, row, 1, 1);
@@ -324,7 +324,7 @@ namespace Deep3DStudio
 
             int row = 0;
 
-            var header = new Label("<b>Wonder3D - Multi-View Generation</b>") { UseMarkup = true, Halign = Align.Start };
+            var header = new Label("<b>Wonder3D - Single-Image Multi-View Generation</b>") { UseMarkup = true, Halign = Align.Start };
             grid.Attach(header, 0, row++, 2, 1);
 
             grid.Attach(new Label("Diffusion Steps:") { Halign = Align.Start }, 0, row, 1, 1);
@@ -347,8 +347,8 @@ namespace Deep3DStudio
 
             row++;
             var info = new Label(
-                "Wonder3D generates multi-view images using\n" +
-                "cross-domain diffusion for consistent 3D.\n\n" +
+                "Wonder3D generates multi-view images from a single\n" +
+                "input image for consistent 3D reconstruction.\n\n" +
                 "Steps: 20-50 recommended.\n" +
                 "Guidance Scale: Higher = more prompt adherence.")
             {
@@ -374,7 +374,7 @@ namespace Deep3DStudio
 
             int row = 0;
 
-            var header = new Label("<b>TripoSF - Ultra-High Resolution Mesh</b>") { UseMarkup = true, Halign = Align.Start };
+            var header = new Label("<b>TripoSF - Ultra-High Resolution Mesh Refinement</b>") { UseMarkup = true, Halign = Align.Start };
             grid.Attach(header, 0, row++, 2, 1);
 
             grid.Attach(new Label("Resolution:") { Halign = Align.Start }, 0, row, 1, 1);

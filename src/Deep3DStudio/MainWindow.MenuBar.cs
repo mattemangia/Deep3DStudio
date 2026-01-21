@@ -373,11 +373,11 @@ namespace Deep3DStudio
             tripoSRItem.Activated += OnTripoSRGenerate;
             imageTo3DMenu.Append(tripoSRItem);
 
-            var lgmItem = new MenuItem("_LGM (High Quality)");
+            var lgmItem = new MenuItem("_LGM (Single Image)");
             lgmItem.Activated += OnLGMGenerate;
             imageTo3DMenu.Append(lgmItem);
 
-            var wonder3DItem = new MenuItem("_Wonder3D (Multi-View)");
+            var wonder3DItem = new MenuItem("_Wonder3D (Single Image)");
             wonder3DItem.Activated += OnWonder3DGenerate;
             imageTo3DMenu.Append(wonder3DItem);
 

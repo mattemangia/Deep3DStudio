@@ -12,6 +12,7 @@ namespace Deep3DStudio.CLI
         public string? InputPath { get; private set; }
         public string? OutputPath { get; private set; }
         public string? ModelName { get; private set; }
+        public int? NerfIterations { get; private set; }
         public IReadOnlyList<string> ExtraArgs => _extraArgs;
 
         private readonly List<string> _extraArgs = new();
@@ -62,6 +63,12 @@ namespace Deep3DStudio.CLI
                         if (i + 1 < args.Length)
                         {
                             options.ModelName = args[++i];
+                        }
+                        break;
+                    case "--nerf-iterations":
+                        if (i + 1 < args.Length && int.TryParse(args[++i], out var nerfIterations))
+                        {
+                            options.NerfIterations = nerfIterations;
                         }
                         break;
                     default:

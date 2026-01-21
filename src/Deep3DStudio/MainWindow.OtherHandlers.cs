@@ -436,9 +436,6 @@ namespace Deep3DStudio
                 }
                 else
                 {
-                    _statusLabel.Text = "Initializing NeRF Voxel Grid...";
-                    var nerf = new VoxelGridNeRF();
-
                     var nerfSettings = IniSettings.Instance;
                     if (_lastSceneResult == null || _lastSceneResult.Poses.Count == 0)
                     {
@@ -446,11 +443,20 @@ namespace Deep3DStudio
                         return;
                     }
 
+                    _statusLabel.Text = "Initializing NeRF Voxel Grid...";
+                    var nerf = new VoxelGridNeRF();
+                    UI.ProgressDialog.Instance.Start("NeRF Refinement...", UI.OperationType.Processing);
+                    var nerfToken = UI.ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
+
                     var inputMeshes = selectedPointClouds.Select(ToMeshData).ToList();
                     await Task.Run(() =>
                     {
                         nerf.InitializeFromMesh(inputMeshes);
-                        nerf.Train(_lastSceneResult.Poses, iterations: nerfSettings.NeRFIterations);
+                        bool cancelled = nerf.Train(_lastSceneResult.Poses, iterations: nerfSettings.NeRFIterations, cancellationToken: nerfToken);
+                        if (cancelled)
+                        {
+                            UI.ProgressDialog.Instance.Log("NeRF cancelled. Returning partial mesh.");
+                        }
                     });
 
                     _statusLabel.Text = $"Extracting NeRF Mesh ({IniSettings.Instance.MeshingAlgo})...";
@@ -468,6 +474,10 @@ namespace Deep3DStudio
                         _viewport.FocusOnSelection();
                     }
                     _statusLabel.Text = "NeRF Meshing Complete.";
+                    if (!nerfToken.IsCancellationRequested)
+                    {
+                        UI.ProgressDialog.Instance.Complete();
+                    }
                 }
 
                 _sceneTreeView.RefreshTree();
@@ -480,6 +490,10 @@ namespace Deep3DStudio
             {
                 _statusLabel.Text = "Error during meshing: " + ex.Message;
                 Console.WriteLine(ex);
+                if (UI.ProgressDialog.Instance.IsVisible)
+                {
+                    UI.ProgressDialog.Instance.Fail(ex);
+                }
             }
         }
 
@@ -580,11 +594,13 @@ namespace Deep3DStudio
             // Process pending GTK events before starting to ensure clean state
             while (Application.EventsPending()) Application.RunIteration();
 
+            var cancellationToken = UI.ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
             var result = await manager.ExecuteWorkflowAsync(
                 pipeline,
                 _imagePaths,
                 _lastSceneResult,
-                (message, _) => Application.Invoke((s, e) => _statusLabel.Text = message)
+                (message, _) => Application.Invoke((s, e) => _statusLabel.Text = message),
+                cancellationToken
             );
 
             // Process pending GTK events after workflow to ensure queued Application.Invoke calls

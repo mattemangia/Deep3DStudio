@@ -104,7 +104,7 @@ namespace Deep3DStudio.Model
                     }
         }
 
-        public void Train(List<CameraPose> poses, int iterations = 5)
+        public bool Train(List<CameraPose> poses, int iterations = 5, System.Threading.CancellationToken cancellationToken = default)
         {
             var settings = IniSettings.Instance;
 
@@ -121,28 +121,40 @@ namespace Deep3DStudio.Model
             }
 
             Console.WriteLine($"Starting NeRF Training ({iterations} iterations)...");
-            TrainCPU(poses, iterations);
+            return TrainCPU(poses, iterations, cancellationToken);
         }
 
-        private void TrainCPU(List<CameraPose> poses, int iterations)
+        private bool TrainCPU(List<CameraPose> poses, int iterations, System.Threading.CancellationToken cancellationToken)
         {
-             for (int iter = 0; iter < iterations; iter++)
+            try
             {
-                var densityGrad = new float[GridSize, GridSize, GridSize];
-                var colorGrad = new Vector3[GridSize, GridSize, GridSize];
-                var counts = new int[GridSize, GridSize, GridSize];
-
-                foreach (var pose in poses)
+                for (int iter = 0; iter < iterations; iter++)
                 {
-                    ProcessImageOptimizedCPU(pose, densityGrad, colorGrad, counts);
+                    if (cancellationToken.IsCancellationRequested)
+                        return true;
+
+                    var densityGrad = new float[GridSize, GridSize, GridSize];
+                    var colorGrad = new Vector3[GridSize, GridSize, GridSize];
+                    var counts = new int[GridSize, GridSize, GridSize];
+
+                    foreach (var pose in poses)
+                    {
+                        ProcessImageOptimizedCPU(pose, densityGrad, colorGrad, counts, cancellationToken);
+                    }
+
+                    ApplyGradientsCPU(densityGrad, colorGrad, counts, cancellationToken);
+                    Console.WriteLine($"  Iteration {iter + 1}/{iterations} complete.");
                 }
 
-                ApplyGradientsCPU(densityGrad, colorGrad, counts);
-                Console.WriteLine($"  Iteration {iter+1}/{iterations} complete.");
+                return false;
+            }
+            catch (OperationCanceledException)
+            {
+                return true;
             }
         }
 
-        private void ProcessImageOptimizedCPU(CameraPose pose, float[,,] densityGrad, Vector3[,,] colorGrad, int[,,] counts)
+        private void ProcessImageOptimizedCPU(CameraPose pose, float[,,] densityGrad, Vector3[,,] colorGrad, int[,,] counts, System.Threading.CancellationToken cancellationToken)
         {
             var (tensor, shape) = ImageUtils.LoadAndPreprocessImage(pose.ImagePath);
             int W = shape[3]; // [1, 3, H, W]
@@ -157,10 +169,11 @@ namespace Deep3DStudio.Model
             int stride = 4;
             int numRaysY = (H + stride - 1) / stride;
 
-            Parallel.For(0, numRaysY,
+            Parallel.For(0, numRaysY, new ParallelOptions { CancellationToken = cancellationToken },
                 () => new Dictionary<int, (Vector3 colSum, float denSum, int count)>(),
                 (yIdx, loop, localState) =>
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     int y = yIdx * stride;
                     if (y >= H) return localState;
 
@@ -224,6 +237,7 @@ namespace Deep3DStudio.Model
                 },
                 (localState) =>
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     lock (counts)
                     {
                         foreach (var kvp in localState)
@@ -243,9 +257,9 @@ namespace Deep3DStudio.Model
             );
         }
 
-        private void ApplyGradientsCPU(float[,,] densityGrad, Vector3[,,] colorGrad, int[,,] counts)
+        private void ApplyGradientsCPU(float[,,] densityGrad, Vector3[,,] colorGrad, int[,,] counts, System.Threading.CancellationToken cancellationToken)
         {
-            Parallel.For(0, GridSize, x =>
+            Parallel.For(0, GridSize, new ParallelOptions { CancellationToken = cancellationToken }, x =>
             {
                 for (int y = 0; y < GridSize; y++)
                 {

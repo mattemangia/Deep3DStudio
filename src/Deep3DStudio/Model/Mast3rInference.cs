@@ -137,7 +137,7 @@ namespace Deep3DStudio.Model
         /// <summary>
         /// Reconstruct 3D scene from multiple images using MASt3R.
         /// </summary>
-        public SceneResult ReconstructScene(List<string> imagePaths, bool useRetrieval = true)
+        public SceneResult ReconstructScene(List<string> imagePaths, bool useRetrieval = true, System.Threading.CancellationToken cancellationToken = default)
         {
             Initialize();
             var result = new SceneResult();
@@ -181,7 +181,8 @@ namespace Deep3DStudio.Model
                 OnProgress?.Invoke("inference", 0.1f, $"Processing {imagesBytes.Count} images...");
 
                 // Run inference
-                var meshes = _inference.Infer(imagesBytes, useRetrieval);
+                cancellationToken.ThrowIfCancellationRequested();
+                var meshes = _inference.Infer(imagesBytes, useRetrieval, cancellationToken);
 
                 if (meshes.Count == 0)
                 {
@@ -208,6 +209,11 @@ namespace Deep3DStudio.Model
                 OnProgress?.Invoke("inference", 1.0f, "Complete");
 
                 return result;
+            }
+            catch (OperationCanceledException)
+            {
+                Log("[Mast3r] Inference cancelled.");
+                throw;
             }
             catch (Exception ex)
             {

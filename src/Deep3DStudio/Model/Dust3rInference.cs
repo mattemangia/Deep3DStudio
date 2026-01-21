@@ -122,7 +122,7 @@ namespace Deep3DStudio.Model
             }
         }
 
-        public SceneResult ReconstructScene(List<string> imagePaths)
+        public SceneResult ReconstructScene(List<string> imagePaths, System.Threading.CancellationToken cancellationToken = default)
         {
             Initialize();
             var result = new SceneResult();
@@ -160,7 +160,8 @@ namespace Deep3DStudio.Model
                 Log($"[Dust3r] Processing {imagesBytes.Count} images...");
                 OnProgress?.Invoke("inference", 0.1f, $"Processing {imagesBytes.Count} images...");
 
-                var meshes = _inference.Infer(imagesBytes, false);
+                cancellationToken.ThrowIfCancellationRequested();
+                var meshes = _inference.Infer(imagesBytes, false, cancellationToken);
 
                 for (int i = 0; i < meshes.Count; i++)
                 {
@@ -172,6 +173,11 @@ namespace Deep3DStudio.Model
                 Log($"[Dust3r] Complete. {result.Meshes.Count} meshes.");
                 OnProgress?.Invoke("inference", 1.0f, "Complete");
                 return result;
+            }
+            catch (OperationCanceledException)
+            {
+                Log("[Dust3r] Inference cancelled.");
+                throw;
             }
             catch (Exception ex)
             {

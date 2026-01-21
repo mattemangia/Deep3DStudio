@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using Deep3DStudio.Model;
 using Deep3DStudio.Model.AIModels;
+using Deep3DStudio.Configuration;
 
 namespace Deep3DStudio.CLI
 {
@@ -37,6 +38,8 @@ namespace Deep3DStudio.CLI
                 case "test-models":
                 case "test":
                     return RunTestAllModels();
+                case "nerf":
+                    return RunNeRFWorkflow();
                 default:
                     Console.Error.WriteLine($"Unknown CLI command: {_options.Command}");
                     PrintHelp();
@@ -183,6 +186,73 @@ namespace Deep3DStudio.CLI
             return allOk ? 0 : 1;
         }
 
+        private int RunNeRFWorkflow()
+        {
+            var images = ResolveInputImages();
+            if (images.Count < 2)
+            {
+                Console.Error.WriteLine("NeRF requires at least 2 images.");
+                return 1;
+            }
+
+            var settings = IniSettings.Instance;
+            int? originalIterations = null;
+            if (_options.NerfIterations.HasValue)
+            {
+                originalIterations = settings.NeRFIterations;
+                settings.NeRFIterations = Math.Max(1, _options.NerfIterations.Value);
+            }
+
+            var cts = new System.Threading.CancellationTokenSource();
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;
+                cts.Cancel();
+                Console.WriteLine("Cancellation requested. Returning partial NeRF mesh...");
+            };
+
+            var pipeline = new WorkflowPipeline
+            {
+                Name = "Images -> Reconstruction -> NeRF",
+                Steps = new List<WorkflowStep>
+                {
+                    WorkflowStep.LoadImages,
+                    settings.ReconstructionMethod switch
+                    {
+                        ReconstructionMethod.Mast3r => WorkflowStep.Mast3rReconstruction,
+                        ReconstructionMethod.Must3r => WorkflowStep.Must3rReconstruction,
+                        ReconstructionMethod.FeatureMatching => WorkflowStep.SfMReconstruction,
+                        _ => WorkflowStep.Dust3rReconstruction
+                    },
+                    WorkflowStep.NeRFRefinement
+                }
+            };
+
+            var manager = AIModelManager.Instance;
+            Console.WriteLine($"=== Running {pipeline.Name} (Ctrl+C to cancel) ===");
+            var result = manager.ExecuteWorkflowAsync(
+                pipeline,
+                images,
+                null,
+                (msg, progress) => Console.WriteLine($"[{pipeline.Name}] {progress:P0} {msg}"),
+                cts.Token
+            ).GetAwaiter().GetResult();
+
+            if (originalIterations.HasValue)
+                settings.NeRFIterations = originalIterations.Value;
+
+            bool ok = result != null &&
+                      result.Meshes.Count > 0 &&
+                      result.Meshes.Any(m => m.Vertices.Count > 0);
+
+            Console.WriteLine(ok
+                ? $"OK: NeRF produced mesh with {result!.Meshes.Sum(m => m.Vertices.Count)} vertices."
+                : "FAIL: NeRF produced no geometry.");
+
+            manager.UnloadAllModels();
+            return ok ? 0 : 1;
+        }
+
         private static bool RequiresMultiView(WorkflowPipeline pipeline)
         {
             return pipeline.Steps.Contains(WorkflowStep.Dust3rReconstruction) ||
@@ -295,12 +365,14 @@ namespace Deep3DStudio.CLI
             Console.WriteLine("Deep3DStudio CLI (placeholder)");
             Console.WriteLine("Usage:");
             Console.WriteLine("  --cli --command test-all [--input <file|dir>] [--verbose]");
+            Console.WriteLine("  --cli --command nerf [--input <file|dir>] [--nerf-iterations N]");
             Console.WriteLine("Options:");
             Console.WriteLine("  --cli, --headless   Run without GUI");
             Console.WriteLine("  --command, --mode   CLI command to run");
             Console.WriteLine("  --model             Model name to use");
             Console.WriteLine("  --input             Input path");
             Console.WriteLine("  --output            Output path");
+            Console.WriteLine("  --nerf-iterations   Override NeRF iteration count (Ctrl+C cancels and returns partial mesh)");
             Console.WriteLine("  --verbose, -v       Verbose logging");
             Console.WriteLine("  --help, -h, -?      Show this help");
         }

@@ -35,9 +35,9 @@ The application is developed as part of research at the **Università degli Stud
 | **MASt3R** | Metric 3D reconstruction with dense feature matching (2+ images) |
 | **MUSt3R** | Multi-view network optimized for many images and video (8-11 FPS) |
 | **TripoSR** | Fast single-image to 3D generation |
-| **TripoSF** | High-resolution 3D mesh generation |
-| **LGM** | Large Multi-View Gaussian Model for high-quality reconstruction |
-| **Wonder3D** | Multi-view image generation and reconstruction |
+| **TripoSF** | High-resolution mesh refinement (requires an existing mesh) |
+| **LGM** | Single-image Gaussian model for high-quality reconstruction |
+| **Wonder3D** | Single-image to multi-view generation and reconstruction |
 
 ### Mesh Processing & Refinement
 
@@ -147,19 +147,25 @@ Download the latest release for your platform from the [Releases](https://github
 3. **Choose reconstruction method**
    - Select your preferred AI model from the dropdown in the left panel
    - Options: Dust3r, MASt3R, MUSt3R, TripoSR, LGM, Wonder3D
-   - For >2 images: MASt3R or MUSt3R recommended
+   - For multi-view inputs: Dust3r, MASt3R, MUSt3R, or SfM
+   - For single-image inputs: TripoSR, LGM, or Wonder3D
    - For video input: MUSt3R (supports 8-11 FPS processing)
 
 4. **Run reconstruction**
    - Click the "Reconstruct" button or use `Ctrl+R`
    - Monitor progress in the status bar
 
-5. **Refine and edit**
+5. **Generate meshes (manual workflow)**
+   - Click "Generate Point Cloud" to create point clouds and camera frustums
+   - Select a point cloud, then click "Generate Mesh" to create geometry
+   - Refine meshes with DeepMeshPrior, TripoSF, GaussianSDF, or NeRF
+
+6. **Refine and edit**
    - Use mesh operations (decimation, smoothing, etc.)
    - Apply AI refinement if needed
    - Edit manually with the pen tool
 
-6. **Export**
+7. **Export**
    - Use `File → Export` to save your 3D model
    - Choose from OBJ, FBX, PLY, or GLTF formats
 
@@ -425,9 +431,9 @@ This project incorporates or builds upon the following open-source projects:
 - [MASt3R](https://github.com/naver/mast3r) - Matching And Stereo 3D Reconstruction with metric pointmaps
 - [MUSt3R](https://github.com/naver/must3r) - Multi-view Network for Stereo 3D Reconstruction (video support)
 - [TripoSR](https://github.com/VAST-AI-Research/TripoSR) - Single-image 3D generation
-- [TripoSF](https://github.com/VAST-AI-Research/TripoSF) - High-resolution 3D mesh generation
-- [LGM](https://github.com/3DTopia/LGM) - Large Multi-View Gaussian Model
-- [Wonder3D](https://github.com/xxlong0/Wonder3D) - Multi-view generation
+- [TripoSF](https://github.com/VAST-AI-Research/TripoSF) - High-resolution mesh refinement
+- [LGM](https://github.com/3DTopia/LGM) - Single-image Gaussian model
+- [Wonder3D](https://github.com/xxlong0/Wonder3D) - Single-image to multi-view generation
 - [UniRig](https://github.com/VAST-AI-Research/UniRig) - Automatic rigging
 
 ---
