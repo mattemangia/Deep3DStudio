@@ -556,6 +556,7 @@ namespace Deep3DStudio.CLI
                     }
                     */
 
+                    /*
                     Console.WriteLine("=== Running GaussianSDF refinement ===");
                     try
                     {
@@ -592,6 +593,7 @@ namespace Deep3DStudio.CLI
                         Console.WriteLine($"FAIL: GaussianSDF refinement threw: {ex.Message}");
                         allOk = false;
                     }
+                    */
 
                     Console.WriteLine("=== Running UniRig auto-rig ===");
                     try
