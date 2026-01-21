@@ -360,6 +360,7 @@ namespace Deep3DStudio
 
             try
             {
+                var cancellationToken = UI.ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
                 var meshingAlgo = IniSettings.Instance.MeshingAlgo;
 
                 // Override if workflow implies a specific AI method
@@ -382,7 +383,7 @@ namespace Deep3DStudio
                         return;
                     }
 
-                    var refinedMesh = await RefineMeshAsync(baseMesh, meshingAlgo);
+                    var refinedMesh = await RefineMeshAsync(baseMesh, meshingAlgo, cancellationToken);
                     if (refinedMesh == null || refinedMesh.Vertices.Count == 0)
                     {
                         _statusLabel.Text = "AI refinement did not return a result.";
@@ -486,6 +487,10 @@ namespace Deep3DStudio
                 var (meshes, pcs, cams, verts, tris) = _sceneGraph.GetStatistics();
                 _statusLabel.Text += $" | {meshes} meshes, {verts:N0} vertices";
             }
+            catch (OperationCanceledException)
+            {
+                _statusLabel.Text = "Meshing cancelled.";
+            }
             catch (Exception ex)
             {
                 _statusLabel.Text = "Error during meshing: " + ex.Message;
@@ -505,26 +510,32 @@ namespace Deep3DStudio
             return mesher.GenerateMesh(grid, min, size, 0.5f);
         }
 
-        private async Task<MeshData?> RefineMeshAsync(MeshData inputMesh, MeshingAlgorithm algorithm)
+        private async Task<MeshData?> RefineMeshAsync(
+            MeshData inputMesh,
+            MeshingAlgorithm algorithm,
+            System.Threading.CancellationToken cancellationToken = default)
         {
             switch (algorithm)
             {
                 case MeshingAlgorithm.DeepMeshPrior:
                     var deepMeshPrior = new DeepMeshPriorMesher();
                     return await deepMeshPrior.RefineMeshAsync(inputMesh, (status, progress) =>
-                        Application.Invoke((s, e) => _statusLabel.Text = status));
+                        Application.Invoke((s, e) => _statusLabel.Text = status),
+                        cancellationToken);
 
                 case MeshingAlgorithm.TripoSF:
                     return await Task.Run(() =>
                     {
                         using var tripo = new AIModels.TripoSFInference();
-                        return tripo.RefineMesh(inputMesh);
-                    });
+                        cancellationToken.ThrowIfCancellationRequested();
+                        return tripo.RefineMesh(inputMesh, cancellationToken);
+                    }, cancellationToken);
 
                 case MeshingAlgorithm.GaussianSDF:
                     var gaussian = new GaussianSDFRefiner();
                     return await gaussian.RefineMeshAsync(inputMesh, (status, progress) =>
-                        Application.Invoke((s, e) => _statusLabel.Text = status));
+                        Application.Invoke((s, e) => _statusLabel.Text = status),
+                        cancellationToken);
             }
 
             return inputMesh;

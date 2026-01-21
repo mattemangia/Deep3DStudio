@@ -12,8 +12,16 @@ namespace Deep3DStudio.DeepMeshPrior
 {
     public class DeepMeshPriorOptimizer
     {
-        public async Task<MeshData> OptimizeAsync(MeshData inputMesh, int iterations, float lr, float lapWeight, Action<string, float>? progressCallback)
+        public async Task<MeshData> OptimizeAsync(
+            MeshData inputMesh,
+            int iterations,
+            float lr,
+            float lapWeight,
+            Action<string, float>? progressCallback,
+            System.Threading.CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             // Initialize Torch
             // torch.InitializeDeviceType(DeviceType.CUDA); // Optional, auto-detected
 
@@ -83,6 +91,7 @@ namespace Deep3DStudio.DeepMeshPrior
             // 3. Loop
             for(int i=0; i<iterations; i++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 optimizer.zero_grad();
 
                 // Forward

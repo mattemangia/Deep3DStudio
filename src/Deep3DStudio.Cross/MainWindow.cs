@@ -3426,12 +3426,14 @@ namespace Deep3DStudio
             Task.Run(async () => {
                 try
                 {
+                    var cancellationToken = ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
                     var refiner = new Deep3DStudio.Meshing.DeepMeshPriorMesher();
                     foreach (var mesh in meshes)
                     {
-                        var refined = await refiner.RefineMeshAsync(mesh.MeshData, (status, progress) => {
-                            ProgressDialog.Instance.Update(progress, status);
-                        });
+                        var refined = await refiner.RefineMeshAsync(
+                            mesh.MeshData,
+                            (status, progress) => ProgressDialog.Instance.Update(progress, status),
+                            cancellationToken);
                         if (refined != null)
                         {
                             EnqueueAction(() => {
@@ -3442,6 +3444,10 @@ namespace Deep3DStudio
                         }
                     }
                     EnqueueAction(() => ProgressDialog.Instance.Complete());
+                }
+                catch (OperationCanceledException)
+                {
+                    EnqueueAction(() => ProgressDialog.Instance.Log("DeepMeshPrior cancelled."));
                 }
                 catch (Exception ex)
                 {
@@ -3463,12 +3469,14 @@ namespace Deep3DStudio
             Task.Run(async () => {
                 try
                 {
+                    var cancellationToken = ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
                     var refiner = new Deep3DStudio.Meshing.GaussianSDFRefiner();
                     foreach (var mesh in meshes)
                     {
-                        var refined = await refiner.RefineMeshAsync(mesh.MeshData, (status, progress) => {
-                            ProgressDialog.Instance.Update(progress, status);
-                        });
+                        var refined = await refiner.RefineMeshAsync(
+                            mesh.MeshData,
+                            (status, progress) => ProgressDialog.Instance.Update(progress, status),
+                            cancellationToken);
                         if (refined != null)
                         {
                             EnqueueAction(() => {
@@ -3479,6 +3487,10 @@ namespace Deep3DStudio
                         }
                     }
                     EnqueueAction(() => ProgressDialog.Instance.Complete());
+                }
+                catch (OperationCanceledException)
+                {
+                    EnqueueAction(() => ProgressDialog.Instance.Log("GaussianSDF cancelled."));
                 }
                 catch (Exception ex)
                 {
@@ -3877,8 +3889,10 @@ namespace Deep3DStudio
                     {
                         case MeshingAlgorithm.DeepMeshPrior:
                             var deep = new Deep3DStudio.Meshing.DeepMeshPriorMesher();
-                            finalMesh = await deep.RefineMeshAsync(baseMesh, (status, progress) =>
-                                ProgressDialog.Instance.Update(progress, status));
+                            finalMesh = await deep.RefineMeshAsync(
+                                baseMesh,
+                                (status, progress) => ProgressDialog.Instance.Update(progress, status),
+                                cancellationToken);
                             break;
                         case MeshingAlgorithm.TripoSF:
                             using (var triposf = new Deep3DStudio.Model.AIModels.TripoSFInference())
@@ -3889,8 +3903,10 @@ namespace Deep3DStudio
                             break;
                         case MeshingAlgorithm.GaussianSDF:
                             var gaussian = new Deep3DStudio.Meshing.GaussianSDFRefiner();
-                            finalMesh = await gaussian.RefineMeshAsync(baseMesh, (status, progress) =>
-                                ProgressDialog.Instance.Update(progress, status));
+                            finalMesh = await gaussian.RefineMeshAsync(
+                                baseMesh,
+                                (status, progress) => ProgressDialog.Instance.Update(progress, status),
+                                cancellationToken);
                             break;
                         default:
                             finalMesh = GenerateMeshFromPointClouds(selectedPointClouds, meshingAlgo);

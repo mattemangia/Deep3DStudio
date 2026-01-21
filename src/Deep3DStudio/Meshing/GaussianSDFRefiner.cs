@@ -15,10 +15,15 @@ namespace Deep3DStudio.Meshing
     /// </summary>
     public class GaussianSDFRefiner
     {
-        public Task<MeshData> RefineMeshAsync(MeshData inputMesh, Action<string, float>? progressCallback = null)
+        public Task<MeshData> RefineMeshAsync(
+            MeshData inputMesh,
+            Action<string, float>? progressCallback = null,
+            System.Threading.CancellationToken cancellationToken = default)
         {
             return Task.Run(() =>
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 var settings = IniSettings.Instance;
                 int resolution = settings.GaussianSDFGridResolution;
                 float sigma = settings.GaussianSDFSigma;
@@ -64,8 +69,14 @@ namespace Deep3DStudio.Meshing
                     ));
                 }
 
-                Parallel.For(0, resX, x =>
+                var parallelOptions = new System.Threading.Tasks.ParallelOptions
                 {
+                    CancellationToken = cancellationToken
+                };
+
+                Parallel.For(0, resX, parallelOptions, x =>
+                {
+                    parallelOptions.CancellationToken.ThrowIfCancellationRequested();
                     for (int y = 0; y < resY; y++)
                     {
                         for (int z = 0; z < resZ; z++)
@@ -89,8 +100,9 @@ namespace Deep3DStudio.Meshing
                 // Sign correction (optional) uses the closest triangle normal as a heuristic.
 
                 progressCallback?.Invoke("Correcting SDF Signs...", 0.4f);
-                 Parallel.For(0, resX, x =>
+                 Parallel.For(0, resX, parallelOptions, x =>
                 {
+                    parallelOptions.CancellationToken.ThrowIfCancellationRequested();
                     for (int y = 0; y < resY; y++)
                     {
                         for (int z = 0; z < resZ; z++)
@@ -131,7 +143,8 @@ namespace Deep3DStudio.Meshing
                 {
                     for(int iter=0; iter<iterations; iter++)
                     {
-                        sdf = ApplyGaussianFilter(sdf, resX, resY, resZ, sigma);
+                        cancellationToken.ThrowIfCancellationRequested();
+                        sdf = ApplyGaussianFilter(sdf, resX, resY, resZ, sigma, cancellationToken);
                     }
                 }
 
@@ -140,14 +153,14 @@ namespace Deep3DStudio.Meshing
                 // 4. Extract Mesh (Marching Cubes)
                 // Use the local extractor to avoid extra dependencies.
 
-                var refinedMesh = ExtractIsoSurface(sdf, resX, resY, resZ, min, step, isoLevel);
+                var refinedMesh = ExtractIsoSurface(sdf, resX, resY, resZ, min, step, isoLevel, cancellationToken);
 
                 progressCallback?.Invoke("Refinement Complete.", 1.0f);
                 return refinedMesh;
-            });
+            }, cancellationToken);
         }
 
-        private float[,,] ApplyGaussianFilter(float[,,] input, int w, int h, int d, float sigma)
+        private float[,,] ApplyGaussianFilter(float[,,] input, int w, int h, int d, float sigma, System.Threading.CancellationToken cancellationToken)
         {
             float[,,] output = new float[w, h, d];
             int kernelRadius = (int)Math.Ceiling(sigma * 2.0f);
@@ -168,8 +181,14 @@ namespace Deep3DStudio.Meshing
             float[,,] temp2 = new float[w, h, d];
 
             // X pass
-            Parallel.For(0, d, z =>
+            var parallelOptions = new System.Threading.Tasks.ParallelOptions
             {
+                CancellationToken = cancellationToken
+            };
+
+            Parallel.For(0, d, parallelOptions, z =>
+            {
+                parallelOptions.CancellationToken.ThrowIfCancellationRequested();
                 for (int y = 0; y < h; y++)
                 {
                     for (int x = 0; x < w; x++)
@@ -186,8 +205,9 @@ namespace Deep3DStudio.Meshing
             });
 
             // Y pass
-             Parallel.For(0, d, z =>
+             Parallel.For(0, d, parallelOptions, z =>
             {
+                parallelOptions.CancellationToken.ThrowIfCancellationRequested();
                 for (int x = 0; x < w; x++)
                 {
                     for (int y = 0; y < h; y++)
@@ -204,8 +224,9 @@ namespace Deep3DStudio.Meshing
             });
 
             // Z pass
-             Parallel.For(0, h, y =>
+             Parallel.For(0, h, parallelOptions, y =>
             {
+                parallelOptions.CancellationToken.ThrowIfCancellationRequested();
                 for (int x = 0; x < w; x++)
                 {
                     for (int z = 0; z < d; z++)
@@ -328,7 +349,15 @@ namespace Deep3DStudio.Meshing
             return (a + s * edge0 + t * edge1, s, t);
         }
 
-        private MeshData ExtractIsoSurface(float[,,] grid, int resX, int resY, int resZ, Vector3 min, float step, float isoLevel)
+        private MeshData ExtractIsoSurface(
+            float[,,] grid,
+            int resX,
+            int resY,
+            int resZ,
+            Vector3 min,
+            float step,
+            float isoLevel,
+            System.Threading.CancellationToken cancellationToken)
         {
             var mesh = new MeshData();
             // Simple Marching Cubes implementation or call existing utility if available.
@@ -341,6 +370,7 @@ namespace Deep3DStudio.Meshing
 
             for (int x = 0; x < resX - 1; x++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 for (int y = 0; y < resY - 1; y++)
                 {
                     for (int z = 0; z < resZ - 1; z++)

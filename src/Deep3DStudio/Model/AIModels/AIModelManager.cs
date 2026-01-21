@@ -790,7 +790,8 @@ gc.collect()
                                             settings.DeepMeshPriorIterations,
                                             settings.DeepMeshPriorLearningRate,
                                             settings.DeepMeshPriorLaplacianWeight,
-                                            (msg, p) => Report(msg, p));
+                                            (msg, p) => Report(msg, p),
+                                            cancellationToken);
                                         currentResult.Meshes[meshIdx] = refinedMesh;
                                     }
                                 }
@@ -815,7 +816,8 @@ gc.collect()
                                     {
                                         var refinedMesh = await gsdfRefiner.RefineMeshAsync(
                                             inputMesh,
-                                            (msg, p) => Report(msg, p));
+                                            (msg, p) => Report(msg, p),
+                                            cancellationToken);
                                         currentResult.Meshes[meshIdx] = refinedMesh;
                                     }
                                 }

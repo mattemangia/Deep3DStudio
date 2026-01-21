@@ -8,7 +8,10 @@ namespace Deep3DStudio.Meshing
 {
     public class DeepMeshPriorMesher
     {
-        public async Task<MeshData?> RefineMeshAsync(MeshData inputMesh, Action<string, float>? progressCallback = null)
+        public async Task<MeshData?> RefineMeshAsync(
+            MeshData inputMesh,
+            Action<string, float>? progressCallback = null,
+            System.Threading.CancellationToken cancellationToken = default)
         {
             try
             {
@@ -22,10 +25,15 @@ namespace Deep3DStudio.Meshing
 
                 progressCallback?.Invoke("Starting DeepMeshPrior optimization...", 0.0f);
 
-                var result = await optimizer.OptimizeAsync(inputMesh, iterations, lr, lapWeight, progressCallback);
+                var result = await optimizer.OptimizeAsync(inputMesh, iterations, lr, lapWeight, progressCallback, cancellationToken);
 
                 progressCallback?.Invoke("Optimization complete.", 1.0f);
                 return result;
+            }
+            catch (OperationCanceledException)
+            {
+                progressCallback?.Invoke("DeepMeshPrior cancelled.", 0.0f);
+                throw;
             }
             catch (Exception ex)
             {
