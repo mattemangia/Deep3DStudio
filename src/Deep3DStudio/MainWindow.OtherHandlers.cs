@@ -287,37 +287,8 @@ namespace Deep3DStudio
                     return false;
                 }
 
-                _lastSceneResult = result;
-                PopulateDepthData(result);
-
-                // Update Scene with Point Cloud
-                _sceneGraph.Clear();
-
-                // Add Point Clouds (from result.Meshes acting as points)
-                int totalPoints = 0;
-                for (int i = 0; i < result.Meshes.Count; i++)
-                {
-                    var mesh = result.Meshes[i];
-                    Console.WriteLine($"PointCloud {i}: {mesh.Vertices.Count} points, {mesh.Colors.Count} colors");
-                    totalPoints += mesh.Vertices.Count;
-
-                    var pcObj = new PointCloudObject($"PointCloud_{i}", mesh);
-                    _sceneGraph.AddObject(pcObj);
-                }
-
-                AddCamerasToScene(result);
-
-                _sceneTreeView.RefreshTree();
-
-                // Log scene bounds for debugging
-                var (sceneMin, sceneMax) = _sceneGraph.GetSceneBounds();
-                Console.WriteLine($"Scene bounds: min({sceneMin.X:F2},{sceneMin.Y:F2},{sceneMin.Z:F2}) max({sceneMax.X:F2},{sceneMax.Y:F2},{sceneMax.Z:F2})");
-                Console.WriteLine($"Scene contains {_sceneGraph.GetObjectsOfType<PointCloudObject>().Count()} point clouds, {_sceneGraph.GetVisibleObjects().Count()} visible objects");
-
-                // Auto-focus on the generated point cloud
-                _viewport.FocusOnSelection();
-                _viewport.QueueDraw();
-                _statusLabel.Text = $"Point Cloud Complete: {totalPoints:N0} points, {result.Poses.Count} cameras.";
+                ApplyPointCloudResultToScene(result);
+                _statusLabel.Text = $"Point Cloud Complete: {_sceneGraph.GetObjectsOfType<PointCloudObject>().Sum(pc => pc.PointCount):N0} points, {result.Poses.Count} cameras.";
 
                 return true;
             }
@@ -329,16 +300,58 @@ namespace Deep3DStudio
             }
         }
 
+        private void ApplyPointCloudResultToScene(SceneResult result)
+        {
+            _lastSceneResult = result;
+            PopulateDepthData(result);
+
+            _sceneGraph.Clear();
+
+            IniSettings.Instance.ShowPointCloud = true;
+            IniSettings.Instance.ShowCameras = true;
+            if (_pointsToggle != null) _pointsToggle.Active = true;
+            if (_camerasToggle != null) _camerasToggle.Active = true;
+            _viewport.ShowCameras = true;
+
+            PointCloudObject? firstPc = null;
+            for (int i = 0; i < result.Meshes.Count; i++)
+            {
+                var mesh = result.Meshes[i];
+                Console.WriteLine($"PointCloud {i}: {mesh.Vertices.Count} points, {mesh.Colors.Count} colors");
+
+                var pcObj = new PointCloudObject($"PointCloud_{i}", mesh);
+                _sceneGraph.AddObject(pcObj);
+                if (firstPc == null) firstPc = pcObj;
+            }
+
+            if (firstPc != null)
+            {
+                _sceneGraph.Select(firstPc);
+            }
+
+            AddCamerasToScene(result);
+
+            _sceneTreeView.RefreshTree();
+
+            var (sceneMin, sceneMax) = _sceneGraph.GetSceneBounds();
+            Console.WriteLine($"Scene bounds: min({sceneMin.X:F2},{sceneMin.Y:F2},{sceneMin.Z:F2}) max({sceneMax.X:F2},{sceneMax.Y:F2},{sceneMax.Z:F2})");
+            Console.WriteLine($"Scene contains {_sceneGraph.GetObjectsOfType<PointCloudObject>().Count()} point clouds, {_sceneGraph.GetVisibleObjects().Count()} visible objects");
+
+            _viewport.FocusOnSelection();
+            _viewport.QueueDraw();
+        }
+
         private async Task RunMeshing()
         {
             string workflow = _workflowCombo.ActiveText;
             bool isLGM = !string.IsNullOrEmpty(workflow) && workflow.Contains("LGM");
 
-            if (!isLGM && (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0))
+            var selectedPointClouds = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
+            if (!isLGM && selectedPointClouds.Count == 0)
             {
                 // Try to build result from current scene if possible?
                 // For now, require point cloud generation first
-                ShowMessage("No point cloud data available. Please generate point cloud first or import data.");
+                ShowMessage("No point cloud selected. Please select a point cloud first.");
                 return;
             }
 
@@ -352,22 +365,37 @@ namespace Deep3DStudio
                 // Override if workflow implies a specific AI method
                 if (isLGM) meshingAlgo = MeshingAlgorithm.LGM;
 
-                if ((meshingAlgo == MeshingAlgorithm.DeepMeshPrior || meshingAlgo == MeshingAlgorithm.TripoSF) &&
-                    (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0))
+                if (meshingAlgo == MeshingAlgorithm.LGM)
                 {
-                    ShowMessage("No point cloud data available. Please generate a point cloud first or import data.");
+                    ShowMessage("LGM is image-based. Use the Image -> LGM workflow instead of point cloud meshing.");
                     return;
                 }
 
                 if (meshingAlgo == MeshingAlgorithm.DeepMeshPrior ||
                     meshingAlgo == MeshingAlgorithm.TripoSF ||
-                    meshingAlgo == MeshingAlgorithm.LGM)
+                    meshingAlgo == MeshingAlgorithm.GaussianSDF)
                 {
-                    bool aiMeshSuccess = await RunAIMeshingAsync(meshingAlgo, "AI Meshing");
-                    if (!aiMeshSuccess)
+                    var baseMesh = await Task.Run(() => GenerateMeshFromPointClouds(selectedPointClouds, MeshingAlgorithm.MarchingCubes));
+                    if (baseMesh == null || baseMesh.Vertices.Count == 0)
                     {
-                        _statusLabel.Text = "AI meshing did not return a result.";
+                        _statusLabel.Text = "Point cloud meshing failed.";
+                        return;
                     }
+
+                    var refinedMesh = await RefineMeshAsync(baseMesh, meshingAlgo);
+                    if (refinedMesh == null || refinedMesh.Vertices.Count == 0)
+                    {
+                        _statusLabel.Text = "AI refinement did not return a result.";
+                        return;
+                    }
+
+                    var aiObj = new MeshObject("Refined Mesh", refinedMesh);
+                    _sceneGraph.AddObject(aiObj);
+                    _sceneGraph.Select(aiObj);
+                    _viewport.FocusOnSelection();
+                    _statusLabel.Text = "AI meshing complete.";
+                    _sceneTreeView.RefreshTree();
+                    _viewport.QueueDraw();
                     return;
                 }
 
@@ -378,11 +406,7 @@ namespace Deep3DStudio
                 {
                     _statusLabel.Text = $"Meshing using {IniSettings.Instance.MeshingAlgo}...";
 
-                    var meshedResult = await Task.Run(() => {
-                        var (grid, min, size) = VoxelizePoints(_lastSceneResult.Meshes);
-                        IMesher mesher = GetMesher(IniSettings.Instance.MeshingAlgo);
-                        return mesher.GenerateMesh(grid, min, size, 0.5f);
-                    });
+                    var meshedResult = await Task.Run(() => GenerateMeshFromPointClouds(selectedPointClouds, IniSettings.Instance.MeshingAlgo));
 
                     Console.WriteLine($"Meshing result: {meshedResult.Vertices.Count} vertices, {meshedResult.Indices.Count} indices ({meshedResult.Indices.Count / 3} triangles)");
 
@@ -398,11 +422,7 @@ namespace Deep3DStudio
                 {
                     _statusLabel.Text = $"Meshing Interior (High Res) using {IniSettings.Instance.MeshingAlgo}...";
 
-                    var meshedResult = await Task.Run(() => {
-                        var (grid, min, size) = VoxelizePoints(_lastSceneResult.Meshes, 500);
-                        IMesher mesher = GetMesher(IniSettings.Instance.MeshingAlgo);
-                        return mesher.GenerateMesh(grid, min, size, 0.5f);
-                    });
+                    var meshedResult = await Task.Run(() => GenerateMeshFromPointClouds(selectedPointClouds, IniSettings.Instance.MeshingAlgo, 500));
 
                     Console.WriteLine($"Interior Meshing result: {meshedResult.Vertices.Count} vertices, {meshedResult.Indices.Count} indices ({meshedResult.Indices.Count / 3} triangles)");
 
@@ -420,9 +440,16 @@ namespace Deep3DStudio
                     var nerf = new VoxelGridNeRF();
 
                     var nerfSettings = IniSettings.Instance;
+                    if (_lastSceneResult == null || _lastSceneResult.Poses.Count == 0)
+                    {
+                        ShowMessage("No camera poses available. NeRF refinement requires camera data from reconstruction.");
+                        return;
+                    }
+
+                    var inputMeshes = selectedPointClouds.Select(ToMeshData).ToList();
                     await Task.Run(() =>
                     {
-                        nerf.InitializeFromMesh(_lastSceneResult.Meshes);
+                        nerf.InitializeFromMesh(inputMeshes);
                         nerf.Train(_lastSceneResult.Poses, iterations: nerfSettings.NeRFIterations);
                     });
 
@@ -454,6 +481,62 @@ namespace Deep3DStudio
                 _statusLabel.Text = "Error during meshing: " + ex.Message;
                 Console.WriteLine(ex);
             }
+        }
+
+        private MeshData GenerateMeshFromPointClouds(List<PointCloudObject> pointClouds, MeshingAlgorithm algorithm, int maxRes = 200)
+        {
+            var meshes = pointClouds.Select(ToMeshData).ToList();
+            var (grid, min, size) = VoxelizePoints(meshes, maxRes);
+            IMesher mesher = GetMesher(algorithm);
+            return mesher.GenerateMesh(grid, min, size, 0.5f);
+        }
+
+        private async Task<MeshData?> RefineMeshAsync(MeshData inputMesh, MeshingAlgorithm algorithm)
+        {
+            switch (algorithm)
+            {
+                case MeshingAlgorithm.DeepMeshPrior:
+                    var deepMeshPrior = new DeepMeshPriorMesher();
+                    return await deepMeshPrior.RefineMeshAsync(inputMesh, (status, progress) =>
+                        Application.Invoke((s, e) => _statusLabel.Text = status));
+
+                case MeshingAlgorithm.TripoSF:
+                    return await Task.Run(() =>
+                    {
+                        using var tripo = new AIModels.TripoSFInference();
+                        return tripo.RefineMesh(inputMesh);
+                    });
+
+                case MeshingAlgorithm.GaussianSDF:
+                    var gaussian = new GaussianSDFRefiner();
+                    return await gaussian.RefineMeshAsync(inputMesh, (status, progress) =>
+                        Application.Invoke((s, e) => _statusLabel.Text = status));
+            }
+
+            return inputMesh;
+        }
+
+        private MeshData ToMeshData(PointCloudObject pointCloud)
+        {
+            var mesh = new MeshData();
+            mesh.Vertices.AddRange(pointCloud.Points);
+
+            if (pointCloud.Colors.Count >= pointCloud.Points.Count)
+            {
+                mesh.Colors.AddRange(pointCloud.Colors.Take(pointCloud.Points.Count));
+            }
+            else
+            {
+                for (int i = 0; i < pointCloud.Points.Count; i++)
+                {
+                    if (i < pointCloud.Colors.Count)
+                        mesh.Colors.Add(pointCloud.Colors[i]);
+                    else
+                        mesh.Colors.Add(new OpenTK.Mathematics.Vector3(1f, 1f, 1f));
+                }
+            }
+
+            return mesh;
         }
 
         private async Task<bool> RunAIMeshingAsync(MeshingAlgorithm algorithm, string? contextLabel = null)

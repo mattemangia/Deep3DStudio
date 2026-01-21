@@ -184,12 +184,12 @@ namespace Deep3DStudio
             // Run Point Cloud - uses engine from Settings
             var runPointsBtn = new ToolButton(AppIconFactory.GenerateIcon("pointcloud", iconSize), "Points");
             runPointsBtn.TooltipText = $"Generate Point Cloud with {GetCurrentEngineName()} (standalone)";
-            runPointsBtn.Clicked += (s, e) => OnRunSingleStep(GetReconstructionStep());
+            runPointsBtn.Clicked += OnGeneratePointCloud;
             toolbar.Insert(runPointsBtn, -1);
 
             var runMeshBtn = new ToolButton(AppIconFactory.GenerateIcon("mesh", iconSize), "Mesh");
             runMeshBtn.TooltipText = "Generate Mesh from existing Point Cloud (standalone)";
-            runMeshBtn.Clicked += (s, e) => OnRunSingleStep(AIModels.WorkflowStep.PoissonReconstruction);
+            runMeshBtn.Clicked += OnGenerateMesh;
             toolbar.Insert(runMeshBtn, -1);
 
             var runBtn = new ToolButton(AppIconFactory.GenerateIcon("run", iconSize), "Run");

@@ -22,9 +22,10 @@ namespace Deep3DStudio
     {
         private async void OnAIRefine(object? sender, EventArgs e)
         {
-            if (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0)
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count == 0)
             {
-                ShowMessage("No geometry", "Please generate a point cloud or mesh first.");
+                ShowMessage("No mesh selected", "Please select a mesh to refine.");
                 return;
             }
 
@@ -32,17 +33,72 @@ namespace Deep3DStudio
             switch (refineSetting)
             {
                 case MeshRefinementMethod.DeepMeshPrior:
-                    await RunAIMeshingAsync(MeshingAlgorithm.DeepMeshPrior, "Mesh Optimization (DeepMeshPrior)");
+                    await RefineSelectedMeshesAsync(selectedMeshes, MeshRefinementMethod.DeepMeshPrior);
                     break;
                 case MeshRefinementMethod.TripoSF:
-                    await RunAIMeshingAsync(MeshingAlgorithm.TripoSF, "Mesh Refinement (TripoSF)");
+                    await RefineSelectedMeshesAsync(selectedMeshes, MeshRefinementMethod.TripoSF);
                     break;
                 case MeshRefinementMethod.GaussianSDF:
-                    await RunAIMeshingAsync(MeshingAlgorithm.GaussianSDF, "Mesh Refinement (GaussianSDF)");
+                    await RefineSelectedMeshesAsync(selectedMeshes, MeshRefinementMethod.GaussianSDF);
                     break;
                 default:
                     ShowMessage("No refinement method selected", "Please choose a mesh refinement model in Settings.");
                     break;
+            }
+        }
+
+        private async Task RefineSelectedMeshesAsync(List<MeshObject> meshes, MeshRefinementMethod method)
+        {
+            string label = method switch
+            {
+                MeshRefinementMethod.DeepMeshPrior => "DeepMeshPrior Optimization",
+                MeshRefinementMethod.TripoSF => "TripoSF Refinement",
+                MeshRefinementMethod.GaussianSDF => "GaussianSDF Refinement",
+                _ => "Mesh Refinement"
+            };
+
+            _statusLabel.Text = $"{label}...";
+            try
+            {
+                foreach (var meshObj in meshes)
+                {
+                    MeshData? refined = null;
+                    switch (method)
+                    {
+                        case MeshRefinementMethod.DeepMeshPrior:
+                            var deep = new DeepMeshPriorMesher();
+                            refined = await deep.RefineMeshAsync(meshObj.MeshData, (status, progress) =>
+                                Application.Invoke((s, e) => _statusLabel.Text = status));
+                            break;
+                        case MeshRefinementMethod.TripoSF:
+                            refined = await Task.Run(() =>
+                            {
+                                using var tripo = new AIModels.TripoSFInference();
+                                return tripo.RefineMesh(meshObj.MeshData);
+                            });
+                            break;
+                        case MeshRefinementMethod.GaussianSDF:
+                            var gaussian = new GaussianSDFRefiner();
+                            refined = await gaussian.RefineMeshAsync(meshObj.MeshData, (status, progress) =>
+                                Application.Invoke((s, e) => _statusLabel.Text = status));
+                            break;
+                    }
+
+                    if (refined != null && refined.Vertices.Count > 0)
+                    {
+                        meshObj.MeshData = refined;
+                        meshObj.UpdateBounds();
+                    }
+                }
+
+                _viewport.QueueDraw();
+                _sceneTreeView.RefreshTree();
+                _statusLabel.Text = $"{label} complete.";
+            }
+            catch (Exception ex)
+            {
+                ShowMessage("Refinement failed", ex.Message);
+                _statusLabel.Text = $"{label} failed.";
             }
         }
 
@@ -321,10 +377,18 @@ namespace Deep3DStudio
         /// </summary>
         private async void OnRunSingleStep(AIModels.WorkflowStep step)
         {
+            if (step == AIModels.WorkflowStep.PoissonReconstruction)
+            {
+                await RunMeshing();
+                return;
+            }
+
             // Validate prerequisites for each step
             switch (step)
             {
                 case AIModels.WorkflowStep.Dust3rReconstruction:
+                case AIModels.WorkflowStep.Mast3rReconstruction:
+                case AIModels.WorkflowStep.Must3rReconstruction:
                 case AIModels.WorkflowStep.SfMReconstruction:
                     if (_imagePaths.Count < 2)
                     {
@@ -347,7 +411,6 @@ namespace Deep3DStudio
                 case AIModels.WorkflowStep.DeepMeshPriorRefinement:
                 case AIModels.WorkflowStep.TripoSFRefinement:
                 case AIModels.WorkflowStep.GaussianSDFRefinement:
-                case AIModels.WorkflowStep.PoissonReconstruction:
                 case AIModels.WorkflowStep.MeshSmoothing:
                 case AIModels.WorkflowStep.MeshDecimation:
                 case AIModels.WorkflowStep.UniRigAutoRig:
@@ -400,7 +463,17 @@ namespace Deep3DStudio
                     Application.Invoke((s, e) =>
                     {
                         _lastSceneResult = result;
-                        UpdateSceneFromResult(result);
+                        if (step == AIModels.WorkflowStep.Dust3rReconstruction ||
+                            step == AIModels.WorkflowStep.Mast3rReconstruction ||
+                            step == AIModels.WorkflowStep.Must3rReconstruction ||
+                            step == AIModels.WorkflowStep.SfMReconstruction)
+                        {
+                            ApplyPointCloudResultToScene(result);
+                        }
+                        else
+                        {
+                            UpdateSceneFromResult(result);
+                        }
                         _statusLabel.Text = $"{stepName} completed successfully.";
                         UI.ProgressDialog.Instance.Complete();
                     });

@@ -29,6 +29,7 @@ namespace Deep3DStudio
         private ThreeDView _viewport;
         private SceneGraph _sceneGraph;
         private ImGuiIconFactory _iconFactory;
+        private SceneResult? _lastSceneResult;
 
         // State
         private int _selectedWorkflow = 0;
@@ -1079,7 +1080,7 @@ namespace Deep3DStudio
                 ImGui.SameLine();
                 DrawToolbarButton("##Points", IconType.Cloud, false, () => RunSingleStep(GetReconstructionStep()), $"Generate Point Cloud ({GetCurrentEngineName()})", size);
                 ImGui.SameLine();
-                DrawToolbarButton("##Mesh", IconType.Mesh, false, () => RunSingleStep(WorkflowStep.PoissonReconstruction), "Generate Mesh from Points", size);
+                DrawToolbarButton("##Mesh", IconType.Mesh, false, RunMeshFromSelectedPointClouds, "Generate Mesh from Points", size);
 
                 ImGui.SameLine();
                 ImGui.Text("|");
@@ -1213,15 +1214,15 @@ namespace Deep3DStudio
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Refinement Models");
 
                 if (ImGui.ImageButton("##NeRF", _iconFactory.GetIcon(IconType.NeRF), size))
-                    RunSingleStep(WorkflowStep.NeRFRefinement);
+                    RunNeRFRefinementFromSelection();
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("NeRF Refinement");
 
                 if (ImGui.ImageButton("##DeepMeshPrior", _iconFactory.GetIcon(IconType.Refine), size))
-                    RunSingleStep(WorkflowStep.DeepMeshPriorRefinement);
+                    RunDeepMeshPriorRefinement();
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("DeepMeshPrior Refinement");
 
                 if (ImGui.ImageButton("##TripoSF", _iconFactory.GetIcon(IconType.Optimize), size))
-                    RunSingleStep(WorkflowStep.TripoSFRefinement);
+                    RunTripoSFRefinement();
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("TripoSF Refinement");
 
                 ImGui.Spacing();
@@ -1231,7 +1232,7 @@ namespace Deep3DStudio
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Mesh Generation");
 
                 if (ImGui.ImageButton("##Poisson", _iconFactory.GetIcon(IconType.MeshGen), size))
-                    RunSingleStep(WorkflowStep.PoissonReconstruction);
+                    RunMeshFromSelectedPointClouds();
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Poisson Mesh Reconstruction");
 
                 if (ImGui.ImageButton("##AutoRig", _iconFactory.GetIcon(IconType.Rig), size))
@@ -3435,6 +3436,7 @@ namespace Deep3DStudio
                         {
                             EnqueueAction(() => {
                                 mesh.MeshData = refined;
+                                mesh.UpdateBounds();
                                 ProgressDialog.Instance.Log($"Refined: {mesh.Name}");
                             });
                         }
@@ -3471,6 +3473,7 @@ namespace Deep3DStudio
                         {
                             EnqueueAction(() => {
                                 mesh.MeshData = refined;
+                                mesh.UpdateBounds();
                                 ProgressDialog.Instance.Log($"Refined: {mesh.Name}");
                             });
                         }
@@ -3488,21 +3491,8 @@ namespace Deep3DStudio
         {
             // TripoSF (SparseFlex) is a mesh refinement model
             // It takes an existing mesh and produces a higher-resolution refined mesh
-            MeshObject? inputMesh = null;
-            lock (_sceneGraph)
-            {
-                // Find first mesh in scene to refine
-                foreach (var obj in _sceneGraph.AllObjects)
-                {
-                    if (obj is MeshObject meshObj && meshObj.MeshData.Vertices.Count > 0)
-                    {
-                        inputMesh = meshObj;
-                        break;
-                    }
-                }
-            }
-
-            if (inputMesh == null)
+            var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (meshes.Count == 0)
             {
                 _logBuffer += "Error: TripoSF requires a loaded mesh. Generate or load a mesh first.\n";
                 return;
@@ -3513,24 +3503,19 @@ namespace Deep3DStudio
                 try
                 {
                     var triposf = new Deep3DStudio.Model.AIModels.TripoSFInference();
-                    var refinedMesh = triposf.RefineMesh(inputMesh.MeshData);
-
-                    if (refinedMesh.Vertices.Count > 0)
+                    foreach (var mesh in meshes)
                     {
-                        EnqueueAction(() => {
-                            var obj = new MeshObject("TripoSF_Refined", refinedMesh);
-                            lock (_sceneGraph)
-                            {
-                                _sceneGraph.AddObject(obj);
-                            }
-                            ProgressDialog.Instance.Log($"TripoSF refinement complete: {refinedMesh.Vertices.Count} vertices, {refinedMesh.Indices.Count / 3} triangles.");
-                            ProgressDialog.Instance.Complete();
-                        });
+                        var refinedMesh = triposf.RefineMesh(mesh.MeshData);
+                        if (refinedMesh.Vertices.Count > 0)
+                        {
+                            EnqueueAction(() => {
+                                mesh.MeshData = refinedMesh;
+                                mesh.UpdateBounds();
+                                ProgressDialog.Instance.Log($"TripoSF refinement complete: {mesh.Name}");
+                            });
+                        }
                     }
-                    else
-                    {
-                        EnqueueAction(() => ProgressDialog.Instance.Fail(new Exception("TripoSF refinement returned empty mesh")));
-                    }
+                    EnqueueAction(() => ProgressDialog.Instance.Complete());
                 }
                 catch (Exception ex)
                 {
@@ -3631,6 +3616,12 @@ namespace Deep3DStudio
         /// </summary>
         private async void RunSingleStep(WorkflowStep step)
         {
+            if (step == WorkflowStep.PoissonReconstruction)
+            {
+                RunMeshFromSelectedPointClouds();
+                return;
+            }
+
             // Validate prerequisites for each step
             switch (step)
             {
@@ -3708,6 +3699,17 @@ namespace Deep3DStudio
 
                 if (result != null)
                 {
+                    if (step == WorkflowStep.Dust3rReconstruction ||
+                        step == WorkflowStep.Mast3rReconstruction ||
+                        step == WorkflowStep.Must3rReconstruction ||
+                        step == WorkflowStep.SfMReconstruction)
+                    {
+                        ApplyPointCloudResultToScene(result, stepName);
+                        ProgressDialog.Instance.Log($"{stepName} complete. Added {result.Meshes.Count} point cloud(s).");
+                        ProgressDialog.Instance.Complete();
+                        return;
+                    }
+
                     foreach (var mesh in result.Meshes)
                     {
                         if (mesh.Vertices.Count > 0)
@@ -3763,6 +3765,311 @@ namespace Deep3DStudio
                 WorkflowStep.FilterPointCloud => "Filter Point Cloud",
                 _ => step.ToString()
             };
+        }
+
+        private void ApplyPointCloudResultToScene(SceneResult result, string stepName)
+        {
+            _lastSceneResult = result;
+            ClearReconstructionObjects();
+
+            IniSettings.Instance.ShowPointCloud = true;
+            IniSettings.Instance.ShowCameras = true;
+
+            PointCloudObject? firstPc = null;
+            for (int i = 0; i < result.Meshes.Count; i++)
+            {
+                var mesh = result.Meshes[i];
+                if (mesh.Vertices.Count == 0) continue;
+                var pcObj = new PointCloudObject($"{stepName} Points {i + 1}", mesh);
+                lock (_sceneGraph)
+                {
+                    _sceneGraph.AddObject(pcObj);
+                }
+                if (firstPc == null) firstPc = pcObj;
+            }
+
+            if (firstPc != null)
+            {
+                _sceneGraph.Select(firstPc);
+            }
+
+            for (int i = 0; i < result.Poses.Count; i++)
+            {
+                var pose = result.Poses[i];
+                var camObj = new CameraObject($"Camera {i + 1}", pose);
+                lock (_sceneGraph)
+                {
+                    _sceneGraph.AddObject(camObj);
+                }
+            }
+
+            PopulateDepthData(result);
+            _viewport.FocusOnSelection();
+        }
+
+        private void ClearReconstructionObjects()
+        {
+            var toRemove = _sceneGraph.GetAllObjects()
+                .Where(o => o is PointCloudObject || o is CameraObject)
+                .ToList();
+
+            foreach (var obj in toRemove)
+            {
+                _sceneGraph.RemoveObject(obj);
+            }
+        }
+
+        private void RunMeshFromSelectedPointClouds()
+        {
+            var selectedPointClouds = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
+            if (selectedPointClouds.Count == 0)
+            {
+                ShowError("No Point Cloud Selected", "Please select a point cloud to generate a mesh.");
+                return;
+            }
+
+            var meshingAlgo = IniSettings.Instance.MeshingAlgo;
+            if (meshingAlgo == MeshingAlgorithm.LGM)
+            {
+                ShowError("LGM Is Image-Based", "Use the Image -> LGM workflow instead of point cloud meshing.");
+                return;
+            }
+
+            ProgressDialog.Instance.Start("Meshing point cloud...", OperationType.Processing);
+            Task.Run(async () =>
+            {
+                try
+                {
+                    var baseMesh = GenerateMeshFromPointClouds(selectedPointClouds, MeshingAlgorithm.MarchingCubes);
+                    MeshData? finalMesh = baseMesh;
+
+                    switch (meshingAlgo)
+                    {
+                        case MeshingAlgorithm.DeepMeshPrior:
+                            var deep = new Deep3DStudio.Meshing.DeepMeshPriorMesher();
+                            finalMesh = await deep.RefineMeshAsync(baseMesh, (status, progress) =>
+                                ProgressDialog.Instance.Update(progress, status));
+                            break;
+                        case MeshingAlgorithm.TripoSF:
+                            using (var triposf = new Deep3DStudio.Model.AIModels.TripoSFInference())
+                            {
+                                finalMesh = triposf.RefineMesh(baseMesh);
+                            }
+                            break;
+                        case MeshingAlgorithm.GaussianSDF:
+                            var gaussian = new Deep3DStudio.Meshing.GaussianSDFRefiner();
+                            finalMesh = await gaussian.RefineMeshAsync(baseMesh, (status, progress) =>
+                                ProgressDialog.Instance.Update(progress, status));
+                            break;
+                        default:
+                            finalMesh = GenerateMeshFromPointClouds(selectedPointClouds, meshingAlgo);
+                            break;
+                    }
+
+                    if (finalMesh == null || finalMesh.Vertices.Count == 0)
+                    {
+                        EnqueueAction(() => ProgressDialog.Instance.Fail(new Exception("Meshing returned empty geometry.")));
+                        return;
+                    }
+
+                    EnqueueAction(() =>
+                    {
+                        var obj = new MeshObject("Reconstructed Mesh", finalMesh);
+                        lock (_sceneGraph)
+                        {
+                            _sceneGraph.AddObject(obj);
+                        }
+                        _sceneGraph.Select(obj);
+                        _viewport.FocusOnSelection();
+                        ProgressDialog.Instance.Complete();
+                    });
+                }
+                catch (Exception ex)
+                {
+                    EnqueueAction(() => ProgressDialog.Instance.Fail(ex));
+                }
+            });
+        }
+
+        private void RunNeRFRefinementFromSelection()
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            var selectedPointClouds = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
+            if (selectedMeshes.Count == 0 && selectedPointClouds.Count == 0)
+            {
+                _logBuffer += "Error: No mesh or point cloud selected for NeRF refinement.\n";
+                return;
+            }
+
+            var poses = _sceneGraph.GetObjectsOfType<CameraObject>()
+                .Select(c => c.Pose)
+                .Where(p => p != null)
+                .Select(p => p!)
+                .ToList();
+
+            if (poses.Count == 0)
+            {
+                _logBuffer += "Error: No camera poses available for NeRF refinement.\n";
+                return;
+            }
+
+            ProgressDialog.Instance.Start("NeRF Refinement...", OperationType.Processing);
+            Task.Run(() =>
+            {
+                try
+                {
+                    var inputMeshes = new List<MeshData>();
+                    foreach (var mesh in selectedMeshes)
+                    {
+                        EnsureMeshColors(mesh.MeshData);
+                        inputMeshes.Add(mesh.MeshData);
+                    }
+
+                    foreach (var pc in selectedPointClouds)
+                    {
+                        var mesh = ToMeshData(pc);
+                        EnsureMeshColors(mesh);
+                        inputMeshes.Add(mesh);
+                    }
+
+                    var nerf = new VoxelGridNeRF();
+                    nerf.InitializeFromMesh(inputMeshes);
+                    nerf.Train(poses, iterations: IniSettings.Instance.NeRFIterations);
+                    var refined = nerf.GetMesh(GetMesher(IniSettings.Instance.MeshingAlgo));
+
+                    if (refined.Vertices.Count == 0)
+                    {
+                        EnqueueAction(() => ProgressDialog.Instance.Fail(new Exception("NeRF returned empty geometry.")));
+                        return;
+                    }
+
+                    EnqueueAction(() =>
+                    {
+                        var obj = new MeshObject("NeRF Mesh", refined);
+                        lock (_sceneGraph)
+                        {
+                            _sceneGraph.AddObject(obj);
+                        }
+                        _sceneGraph.Select(obj);
+                        _viewport.FocusOnSelection();
+                        ProgressDialog.Instance.Complete();
+                    });
+                }
+                catch (Exception ex)
+                {
+                    EnqueueAction(() => ProgressDialog.Instance.Fail(ex));
+                }
+            });
+        }
+
+        private MeshData GenerateMeshFromPointClouds(List<PointCloudObject> pointClouds, MeshingAlgorithm algorithm, int maxRes = 200)
+        {
+            var meshes = pointClouds.Select(ToMeshData).ToList();
+            var (grid, min, size) = VoxelizePoints(meshes, maxRes);
+            var mesher = GetMesher(algorithm);
+            return mesher.GenerateMesh(grid, min, size, 0.5f);
+        }
+
+        private MeshData ToMeshData(PointCloudObject pointCloud)
+        {
+            var mesh = new MeshData();
+            mesh.Vertices.AddRange(pointCloud.Points);
+
+            if (pointCloud.Colors.Count >= pointCloud.Points.Count)
+            {
+                mesh.Colors.AddRange(pointCloud.Colors.Take(pointCloud.Points.Count));
+            }
+            else
+            {
+                for (int i = 0; i < pointCloud.Points.Count; i++)
+                {
+                    if (i < pointCloud.Colors.Count)
+                        mesh.Colors.Add(pointCloud.Colors[i]);
+                    else
+                        mesh.Colors.Add(new Vector3(1f, 1f, 1f));
+                }
+            }
+
+            return mesh;
+        }
+
+        private void EnsureMeshColors(MeshData mesh)
+        {
+            while (mesh.Colors.Count < mesh.Vertices.Count)
+            {
+                mesh.Colors.Add(new Vector3(1f, 1f, 1f));
+            }
+        }
+
+        private IMesher GetMesher(MeshingAlgorithm algo)
+        {
+            return algo switch
+            {
+                MeshingAlgorithm.Poisson => new PoissonMesher(),
+                MeshingAlgorithm.GreedyMeshing => new GreedyMesher(),
+                MeshingAlgorithm.SurfaceNets => new SurfaceNetsMesher(),
+                MeshingAlgorithm.Blocky => new BlockMesher(),
+                _ => new MarchingCubesMesher()
+            };
+        }
+
+        private (float[,,], Vector3 min, float voxelSize) VoxelizePoints(List<MeshData> meshes, int maxRes = 200)
+        {
+            var min = new Vector3(float.MaxValue);
+            var max = new Vector3(float.MinValue);
+            foreach (var m in meshes)
+            {
+                foreach (var v in m.Vertices)
+                {
+                    min = Vector3.ComponentMin(min, v);
+                    max = Vector3.ComponentMax(max, v);
+                }
+            }
+
+            float voxelSize = 0.02f;
+            int w = (int)((max.X - min.X) / voxelSize) + 5;
+            int h = (int)((max.Y - min.Y) / voxelSize) + 5;
+            int d = (int)((max.Z - min.Z) / voxelSize) + 5;
+
+            if (w > maxRes)
+            {
+                voxelSize *= (w / (float)maxRes);
+                w = maxRes;
+                h = (int)((max.Y - min.Y) / voxelSize) + 5;
+                d = (int)((max.Z - min.Z) / voxelSize) + 5;
+            }
+
+            float[,,] grid = new float[w, h, d];
+
+            foreach (var m in meshes)
+            {
+                foreach (var v in m.Vertices)
+                {
+                    int x = (int)((v.X - min.X) / voxelSize);
+                    int y = (int)((v.Y - min.Y) / voxelSize);
+                    int z = (int)((v.Z - min.Z) / voxelSize);
+                    if (x >= 0 && x < w && y >= 0 && y < h && z >= 0 && z < d)
+                    {
+                        grid[x, y, z] = 1.0f;
+                    }
+                }
+            }
+
+            float[,,] smooth = new float[w, h, d];
+            for (int x = 1; x < w - 1; x++)
+                for (int y = 1; y < h - 1; y++)
+                    for (int z = 1; z < d - 1; z++)
+                    {
+                        if (grid[x, y, z] > 0)
+                        {
+                            smooth[x, y, z] = 1;
+                            smooth[x + 1, y, z] = 1; smooth[x - 1, y, z] = 1;
+                            smooth[x, y + 1, z] = 1; smooth[x, y - 1, z] = 1;
+                            smooth[x, y, z + 1] = 1; smooth[x, y, z - 1] = 1;
+                        }
+                    }
+
+            return (smooth, min, voxelSize);
         }
 
         private void PopulateDepthData(SceneResult result)

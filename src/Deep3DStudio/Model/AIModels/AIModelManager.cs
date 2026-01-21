@@ -607,21 +607,25 @@ gc.collect()
                             break;
 
                         case WorkflowStep.TripoSFRefinement:
-                            // TripoSF logic: If we have an original image, re-generate high quality
-                            if (imagePaths != null && imagePaths.Count > 0)
+                            if (currentResult != null && currentResult.Meshes.Count > 0)
                             {
                                 progressCallback?.Invoke("Running TripoSF refinement...", progress);
-                                var refinedMesh = TripoSF?.GenerateFromImage(imagePaths[0]);
-                                if (refinedMesh != null && refinedMesh.Vertices.Count > 0)
+                                for (int meshIdx = 0; meshIdx < currentResult.Meshes.Count; meshIdx++)
                                 {
-                                    if(currentResult.Meshes.Count == 0) currentResult.Meshes.Add(refinedMesh);
-                                    else currentResult.Meshes[0] = refinedMesh;
-                                    progressCallback?.Invoke($"TripoSF refinement complete. {refinedMesh.Vertices.Count} vertices.", progress + 0.1f);
+                                    var inputMesh = currentResult.Meshes[meshIdx];
+                                    if (inputMesh.Vertices.Count == 0) continue;
+
+                                    var refinedMesh = TripoSF?.RefineMesh(inputMesh);
+                                    if (refinedMesh != null && refinedMesh.Vertices.Count > 0)
+                                    {
+                                        currentResult.Meshes[meshIdx] = refinedMesh;
+                                    }
                                 }
-                                else
-                                {
-                                    progressCallback?.Invoke("TripoSF refinement failed.", progress);
-                                }
+                                progressCallback?.Invoke("TripoSF refinement complete.", progress + 0.1f);
+                            }
+                            else
+                            {
+                                progressCallback?.Invoke("TripoSF refinement skipped - no mesh available.", progress);
                             }
                             break;
 
