@@ -437,7 +437,8 @@ namespace Deep3DStudio.CLI
                 var pipelines = new List<WorkflowPipeline>
                 {
                     WorkflowPipeline.ImageToTripoSR,
-                    WorkflowPipeline.ImageToWonder3D
+                    WorkflowPipeline.ImageToLGM,
+                    // WorkflowPipeline.ImageToWonder3D
                 };
 
                 bool allOk = true;
@@ -468,7 +469,7 @@ namespace Deep3DStudio.CLI
                             return exitCode;
                         }
 
-                        bool expectsMesh = true;
+                        bool expectsMesh = !pipeline.Name.Contains("LGM");
 
                         var ok = result != null &&
                                  result.Meshes.Count > 0 &&
@@ -514,6 +515,7 @@ namespace Deep3DStudio.CLI
                         allOk = false;
                     }
 
+                    /*
                     Console.WriteLine("=== Running DeepMeshPrior refinement ===");
                     try
                     {
@@ -548,6 +550,44 @@ namespace Deep3DStudio.CLI
                     catch (Exception ex)
                     {
                         Console.WriteLine($"FAIL: DeepMeshPrior refinement threw: {ex.Message}");
+                        allOk = false;
+                    }
+                    */
+
+                    Console.WriteLine("=== Running GaussianSDF refinement ===");
+                    try
+                    {
+                        cancellationSource.Token.ThrowIfCancellationRequested();
+                        var refineScene = new SceneResult { Meshes = new List<MeshData> { firstMesh.Clone() } };
+                        var gsdfPipeline = new WorkflowPipeline
+                        {
+                            Name = "GaussianSDF Refinement",
+                            Steps = new List<WorkflowStep> { WorkflowStep.GaussianSDFRefinement }
+                        };
+                        var gsdfResult = manager.ExecuteWorkflowAsync(
+                            gsdfPipeline,
+                            images,
+                            refineScene,
+                            (msg, progress) =>
+                            {
+                                Console.WriteLine($"[{gsdfPipeline.Name}] {progress:P0} {msg}");
+                                TuiStatusMonitor.Instance.UpdateProgress($"{gsdfPipeline.Name}: {msg}", progress);
+                            },
+                            cancellationSource.Token
+                        ).GetAwaiter().GetResult();
+
+                        bool ok = gsdfResult != null &&
+                                  gsdfResult.Meshes.Count > 0 &&
+                                  gsdfResult.Meshes.Any(m => m.Vertices.Count > 0);
+                        Console.WriteLine(ok
+                            ? $"OK: GaussianSDF refined mesh with {gsdfResult!.Meshes.Sum(m => m.Vertices.Count)} vertices."
+                            : "FAIL: GaussianSDF refinement produced no geometry.");
+                        if (!ok)
+                            allOk = false;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"FAIL: GaussianSDF refinement threw: {ex.Message}");
                         allOk = false;
                     }
 

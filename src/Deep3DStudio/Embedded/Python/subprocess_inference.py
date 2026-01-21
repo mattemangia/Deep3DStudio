@@ -174,6 +174,18 @@ def _sanitize_for_json(obj):
         return {k: _sanitize_for_json(v) for k, v in obj.items()}
     return obj
 
+def recursive_to_device(obj, device):
+    import torch
+    if torch.is_tensor(obj):
+        return obj.to(device)
+    if isinstance(obj, dict):
+        return {k: recursive_to_device(v, device) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [recursive_to_device(x, device) for x in obj]
+    if isinstance(obj, tuple):
+        return tuple(recursive_to_device(x, device) for x in obj)
+    return obj
+
 def _write_json_output(output_path, result):
     try:
         clean = _sanitize_for_json(result)
@@ -1169,6 +1181,7 @@ def infer_triposr(images_data, resolution=256, mc_resolution=256):
                     if current_device.type != "cpu":
                         log(f"TripoSR failed on {current_device} ({e}), falling back to CPU...")
                         model = model.to("cpu").float()
+                        scene_codes = recursive_to_device(scene_codes, "cpu")
                         meshes = model.extract_mesh(scene_codes, resolution=mc_resolution, has_vertex_color=True)
                     else:
                         raise e
@@ -1266,30 +1279,36 @@ def infer_triposf(mesh_path):
 
             # Marching cubes
             # Ensure grid is on CPU for marching cubes
-            grid_tensor = torch.from_numpy(sdf).float().cpu().unsqueeze(0)
+            # The CPU implementation of torchmcubes REQUIRES 3D input (D, H, W)
+            grid_tensor = torch.from_numpy(sdf).float().cpu()
             try:
+                # Try 3D input first (standard for CPU extension)
                 verts, faces = marching_cubes(grid_tensor, 0.0)
             except RuntimeError as e:
-                # Catch "vol must be a CPU tensor" or other C++ extension errors
-                # Fallback to PyMCubes stub if available or raise
-                if "mcubes" in sys.modules and hasattr(sys.modules["torchmcubes"], "marching_cubes"):
-                     log(f"torchmcubes extension failed ({e}), trying stub...")
-                     # Use the stub implementation directly if installed/available
-                     # We can access the stub via the private _install_torchmcubes_stub scope if needed, 
-                     # but here we rely on the fact that if the import above worked, we are using *some* implementation.
-                     # If the extension failed, we try to force the stub logic manually here.
-                     try:
-                         import mcubes
-                         verts_np, faces_np = mcubes.marching_cubes(sdf, 0.0)
-                         verts = torch.from_numpy(verts_np.astype(np.float32))
-                         faces = torch.from_numpy(faces_np.astype(np.int64))
-                     except ImportError:
+                # Catch "vol must be 4-dimension" or other extension errors
+                try:
+                    # Try 4D input (1, D, H, W) as some versions/CUDA might expect this
+                    verts, faces = marching_cubes(grid_tensor.unsqueeze(0), 0.0)
+                except RuntimeError:
+                    # Fallback to PyMCubes stub if available or raise
+                    if "mcubes" in sys.modules and hasattr(sys.modules["torchmcubes"], "marching_cubes"):
+                         log(f"torchmcubes extension failed ({e}), trying stub...")
+                         # Use the stub implementation directly if installed/available
+                         try:
+                             import mcubes
+                             verts_np, faces_np = mcubes.marching_cubes(sdf, 0.0)
+                             verts = torch.from_numpy(verts_np.astype(np.float32))
+                             faces = torch.from_numpy(faces_np.astype(np.int64))
+                         except ImportError:
+                             raise e
+                    else:
                          raise e
-                else:
-                     raise e
 
             verts = verts[0].cpu().numpy() if verts.ndim > 2 else verts.cpu().numpy()
             faces = faces[0].cpu().numpy() if faces.ndim > 2 else faces.cpu().numpy()
+
+            if len(verts) == 0:
+                raise Exception("Marching cubes produced 0 vertices")
 
             # Denormalize
             verts = (verts / (resolution / 2) - 1) * scale + center
