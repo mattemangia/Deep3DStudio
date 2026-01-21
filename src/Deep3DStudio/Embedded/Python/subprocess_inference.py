@@ -1146,7 +1146,16 @@ def infer_triposr(images_data, resolution=256, mc_resolution=256):
             scene_codes = model([img], device=device)
             # extract_mesh may require has_vertex_color argument in newer versions
             try:
-                meshes = model.extract_mesh(scene_codes, resolution=mc_resolution, has_vertex_color=True)
+                try:
+                    meshes = model.extract_mesh(scene_codes, resolution=mc_resolution, has_vertex_color=True)
+                except RuntimeError as e:
+                    # Fallback to CPU if OOM or tensor device error
+                    if model.device.type != "cpu":
+                        log(f"TripoSR failed on {model.device} ({e}), falling back to CPU...")
+                        model = model.to("cpu")
+                        meshes = model.extract_mesh(scene_codes, resolution=mc_resolution, has_vertex_color=True)
+                    else:
+                        raise e
             except TypeError:
                 meshes = model.extract_mesh(scene_codes, resolution=mc_resolution)
 
@@ -1240,11 +1249,31 @@ def infer_triposf(mesh_path):
             sdf = gaussian_filter(sdf.astype(np.float32), sigma=1.5)
 
             # Marching cubes
-            grid_tensor = torch.from_numpy(sdf).float().to(device).unsqueeze(0)
-            verts, faces = marching_cubes(grid_tensor, 0.0)
+            # Ensure grid is on CPU for marching cubes
+            grid_tensor = torch.from_numpy(sdf).float().cpu().unsqueeze(0)
+            try:
+                verts, faces = marching_cubes(grid_tensor, 0.0)
+            except RuntimeError as e:
+                # Catch "vol must be a CPU tensor" or other C++ extension errors
+                # Fallback to PyMCubes stub if available or raise
+                if "mcubes" in sys.modules and hasattr(sys.modules["torchmcubes"], "marching_cubes"):
+                     log(f"torchmcubes extension failed ({e}), trying stub...")
+                     # Use the stub implementation directly if installed/available
+                     # We can access the stub via the private _install_torchmcubes_stub scope if needed, 
+                     # but here we rely on the fact that if the import above worked, we are using *some* implementation.
+                     # If the extension failed, we try to force the stub logic manually here.
+                     try:
+                         import mcubes
+                         verts_np, faces_np = mcubes.marching_cubes(sdf, 0.0)
+                         verts = torch.from_numpy(verts_np.astype(np.float32))
+                         faces = torch.from_numpy(faces_np.astype(np.int64))
+                     except ImportError:
+                         raise e
+                else:
+                     raise e
 
-            verts = verts[0].cpu().numpy()
-            faces = faces[0].cpu().numpy()
+            verts = verts[0].cpu().numpy() if verts.ndim > 2 else verts.cpu().numpy()
+            faces = faces[0].cpu().numpy() if faces.ndim > 2 else faces.cpu().numpy()
 
             # Denormalize
             verts = (verts / (resolution / 2) - 1) * scale + center
@@ -1300,7 +1329,20 @@ def infer_wonder3d(images_data, num_steps=50, guidance_scale=3.0):
         results = []
 
         with torch.no_grad():
-            output = model(img, num_inference_steps=num_steps, guidance_scale=guidance_scale)
+            try:
+                output = model(img, num_inference_steps=num_steps, guidance_scale=guidance_scale)
+            except RuntimeError as e:
+                # Catch OOM or other runtime errors and try CPU fallback
+                err_msg = str(e).lower()
+                if "memory" in err_msg or "allocate" in err_msg:
+                    if model.device.type != "cpu":
+                        log(f"Wonder3D failed on {model.device} ({e}), falling back to CPU...")
+                        model = model.to("cpu")
+                        output = model(img, num_inference_steps=num_steps, guidance_scale=guidance_scale)
+                    else:
+                        raise e
+                else:
+                    raise e
 
             if hasattr(output, 'meshes') and output.meshes:
                 mesh = output.meshes[0]
