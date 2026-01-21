@@ -1,6 +1,35 @@
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build artifacts
+bin/
+obj/
 src/Deep3DStudio/bin/
 src/Deep3DStudio/obj/
+src/Deep3DStudio.Cross/bin/
+src/Deep3DStudio.Cross/obj/
 
-# Python cache
+# Logs
+*.log
+
+# Python cache and environments
 __pycache__/
 *.pyc
+scripts/dist/win_amd64/
+scripts/dist/linux_x64/
+scripts/dist/osx_arm64/
+scripts/dist/python_env.zip
+
+# Model weights
+scripts/dist/models/
+
+# Local tools and SDKs
+.dotnet/
+.sdk/
+
+# Temporary directories
+temp_unirig/
+dust3r_repo/
