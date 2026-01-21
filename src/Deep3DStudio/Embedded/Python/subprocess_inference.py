@@ -1442,66 +1442,75 @@ def run_inference(model_name, input_path, output_path, weights_path=None, device
     mesh_input_path = kwargs.get('mesh_input_path')
     log(f"Inference: model={model_name}, input={input_path}, mesh_input={mesh_input_path}")
 
-    # Check if model is loaded, if not load it first
-    # This is necessary because each subprocess call is a new process
-    if model_name not in loaded_models:
+    def _ensure_loaded(target_device):
+        if model_name in loaded_models:
+            return {"success": True}
         if weights_path:
             log(f"Model not loaded, loading {model_name} from {weights_path}")
-            load_result = load_model(model_name, weights_path, device_str)
-            if not load_result.get('success'):
-                _write_json_output(output_path, load_result)
-                return load_result
-        else:
-            result = {"success": False, "error": f"{model_name} not loaded and no weights path provided"}
-            _write_json_output(output_path, result)
-            return result
+            return load_model(model_name, weights_path, target_device)
+        return {"success": False, "error": f"{model_name} not loaded and no weights path provided"}
 
-    # Handle mesh-input models (like triposf/unirig) that take mesh path directly
-    if mesh_input_path and model_name in ('triposf', 'unirig'):
-        if model_name == 'triposf':
-            result = infer_triposf(mesh_input_path)
-        else:
+    def _run_core():
+        # Handle mesh-input models (like triposf/unirig) that take mesh path directly
+        if mesh_input_path and model_name in ('triposf', 'unirig'):
+            if model_name == 'triposf':
+                return infer_triposf(mesh_input_path)
             import trimesh
             mesh = trimesh.load(mesh_input_path, force='mesh')
             mesh_data = {
                 "vertices": mesh.vertices.tolist() if hasattr(mesh.vertices, "tolist") else list(mesh.vertices),
                 "faces": mesh.faces.reshape(-1).tolist() if hasattr(mesh.faces, "reshape") else list(mesh.faces)
             }
-            result = infer_unirig(mesh_data, kwargs.get('max_joints', 50), kwargs.get('max_bones_per_vertex', 4))
-        _write_json_output(output_path, result)
-        log(f"Results written to {output_path}")
-        return result
+            return infer_unirig(mesh_data, kwargs.get('max_joints', 50), kwargs.get('max_bones_per_vertex', 4))
 
-    # Read input JSON for image-based models
-    with open(input_path, 'r') as f:
-        input_data = json.load(f)
+        # Read input JSON for image-based models
+        with open(input_path, 'r') as f:
+            input_data = json.load(f)
 
-    images_data = input_data.get('images', [])
-    mesh_data = input_data.get('mesh', None)
+        images_data = input_data.get('images', [])
+        mesh_data = input_data.get('mesh', None)
 
-    # Route to appropriate inference function
-    if model_name in ['mast3r', 'dust3r', 'must3r']:
-        result = infer_stereo_model(model_name, images_data, kwargs.get('use_retrieval', True))
-    elif model_name == 'triposr':
-        result = infer_triposr(images_data, kwargs.get('resolution', 256), kwargs.get('mc_resolution', 256))
-    elif model_name == 'triposf':
-        # TripoSF uses mesh input, not images
-        mesh_input_path = kwargs.get('mesh_input_path')
-        if mesh_input_path:
-            result = infer_triposf(mesh_input_path)
+        # Route to appropriate inference function
+        if model_name in ['mast3r', 'dust3r', 'must3r']:
+            return infer_stereo_model(model_name, images_data, kwargs.get('use_retrieval', True))
+        if model_name == 'triposr':
+            return infer_triposr(images_data, kwargs.get('resolution', 256), kwargs.get('mc_resolution', 256))
+        if model_name == 'triposf':
+            if mesh_input_path:
+                return infer_triposf(mesh_input_path)
+            return {"success": False, "error": "TripoSF requires mesh input (--mesh-input)"}
+        if model_name == 'wonder3d':
+            return infer_wonder3d(images_data, kwargs.get('num_steps', 50), kwargs.get('guidance_scale', 3.0))
+        if model_name == 'lgm':
+            return infer_lgm(images_data)
+        if model_name == 'unirig':
+            return infer_unirig(mesh_data, kwargs.get('max_joints', 50), kwargs.get('max_bones_per_vertex', 4))
+        return {"success": False, "error": f"Unknown model: {model_name}"}
+
+    load_result = _ensure_loaded(device_str)
+    if not load_result.get('success'):
+        _write_json_output(output_path, load_result)
+        return load_result
+
+    result = _run_core()
+    try:
+        import torch
+        import torch_directml
+        auto_uses_directml = device_str == "auto" and not torch.cuda.is_available()
+    except Exception:
+        torch_directml = None
+        auto_uses_directml = False
+
+    if (device_str == "directml" or (device_str == "auto" and torch_directml and auto_uses_directml)) and not result.get("success", False):
+        log("DirectML inference failed; retrying on CPU.")
+        unload_model(model_name)
+        load_result = _ensure_loaded("cpu")
+        if load_result.get('success'):
+            result = _run_core()
         else:
-            result = {"success": False, "error": "TripoSF requires mesh input (--mesh-input)"}
-    elif model_name == 'wonder3d':
-        result = infer_wonder3d(images_data, kwargs.get('num_steps', 50), kwargs.get('guidance_scale', 3.0))
-    elif model_name == 'lgm':
-        result = infer_lgm(images_data)
-    elif model_name == 'unirig':
-        result = infer_unirig(mesh_data, kwargs.get('max_joints', 50), kwargs.get('max_bones_per_vertex', 4))
-    else:
-        result = {"success": False, "error": f"Unknown model: {model_name}"}
+            result = load_result
 
     _write_json_output(output_path, result)
-
     log(f"Results written to {output_path}")
     return result
 
