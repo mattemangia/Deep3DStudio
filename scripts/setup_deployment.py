@@ -479,7 +479,20 @@ def setup_python_embed(target_dir, target_platform):
                 for pkg_name, git_url in git_packages:
                     print(f"  Installing {pkg_name} from {git_url}...")
                     git_cmd = pip_cmd + [git_url]
-                    git_proc = subprocess.Popen(git_cmd, env=clean_env,
+                    pkg_env = clean_env
+                    if pkg_name == "torchmcubes":
+                        pkg_env = clean_env.copy()
+                        print("  NOTE: Installing torchmcubes with CUDA disabled (CPU build).")
+                        pkg_env["FORCE_CUDA"] = "0"
+                        pkg_env["USE_CUDA"] = "0"
+                        pkg_env["CUDA_HOME"] = ""
+                        pkg_env["CUDA_PATH"] = ""
+                        pkg_env["TORCH_CUDA_ARCH_LIST"] = ""
+                        pkg_env["CMAKE_ARGS"] = (pkg_env.get("CMAKE_ARGS", "") + " -DWITH_CUDA=OFF").strip()
+                        if "PATH" in pkg_env:
+                            path_parts = [p for p in pkg_env["PATH"].split(";") if "CUDA" not in p.upper()]
+                            pkg_env["PATH"] = ";".join(path_parts)
+                    git_proc = subprocess.Popen(git_cmd, env=pkg_env,
                                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                                 text=True, bufsize=1)
                     for line in git_proc.stdout:
