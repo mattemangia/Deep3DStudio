@@ -33,3 +33,47 @@ scripts/dist/models/
 # Temporary directories
 temp_unirig/
 dust3r_repo/
+
+# CLion
+.idea/
+
+# Rider
+.idea/
+obj/
+bin/
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python/
+env/
+venv/
+
+# Logs
+logs/
+*.log
+
+# Build artifacts
+build/
+dist/
+
+# Local files
+.claude/
+scripts/dist/
+test_lgm.glb
+test_mast3r.obj
+test_output.obj
+triposf/
+triposf_repo/
+triposg/
+triposg_repo/
+triposr_repo/
+src/Deep3DStudio/CLI/
+src/Dust3rApp/
