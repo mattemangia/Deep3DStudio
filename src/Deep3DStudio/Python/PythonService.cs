@@ -355,6 +355,16 @@ namespace Deep3DStudio.Python
 
         private void EnsurePythonEnvironment()
         {
+            EnsurePythonEnvironment(force: false);
+        }
+
+        public bool ReextractPythonEnvironment()
+        {
+            return EnsurePythonEnvironment(force: true);
+        }
+
+        private bool EnsurePythonEnvironment(bool force)
+        {
             string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string targetDir = Path.Combine(appData, "Deep3DStudio", "python");
             string sourceZip = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "python_env.zip");
@@ -375,12 +385,12 @@ namespace Deep3DStudio.Python
                 {
                     Log($"Using local 'python' directory at: {localPython}");
                     // No progress report needed - environment already exists
-                    return;
+                    return true;
                 }
                 Log("Warning: python_env.zip not found and no local python dir.");
                 Log("  AI features will be disabled. Please ensure python_env.zip is in the application directory.");
                 // No progress report needed - this is an error state
-                return;
+                return false;
             }
 
             // Simple version check or existence check
@@ -391,7 +401,7 @@ namespace Deep3DStudio.Python
             // Aggressive: Always delete and unzip? Slow.
             // Compromise: Check if zip is newer than target folder creation time?
 
-            bool shouldExtract = false;
+            bool shouldExtract = force;
             if (!Directory.Exists(targetDir))
             {
                 shouldExtract = true;
@@ -425,14 +435,17 @@ namespace Deep3DStudio.Python
                     ExtractZipWithProgress(sourceZip, targetDir);
 
                     ReportExtractionProgress("Python environment ready", 1.0f);
+                    return true;
                 }
                 catch (Exception ex)
                 {
                     Log($"Failed to extract python env: {ex.Message}");
                     ReportExtractionProgress($"Extraction failed: {ex.Message}", 1.0f);
+                    return false;
                 }
             }
             // else: No extraction needed, no progress report needed
+            return true;
         }
 
         private void ExtractZipWithProgress(string sourceZip, string targetDir)

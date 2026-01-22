@@ -53,14 +53,11 @@ namespace Deep3DStudio.CLI
             // Ensure we have a console window on Windows
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                IntPtr handle = GetConsoleWindow();
-                if (handle == IntPtr.Zero)
+                if (!EnsureConsoleWindow())
                 {
-                    AllocConsole();
-                }
-                else
-                {
-                    ShowWindow(handle, SW_SHOW);
+                    _isRunning = false;
+                    _initEvent.Set();
+                    return;
                 }
             }
 
@@ -228,6 +225,41 @@ namespace Deep3DStudio.CLI
                 _initEvent.Set();
                 File.WriteAllText("tui_error.log", $"TUI Init Failed: {ex}\n");
             }
+        }
+
+        private bool EnsureConsoleWindow()
+        {
+            IntPtr handle = GetConsoleWindow();
+            if (handle == IntPtr.Zero)
+            {
+                if (!AllocConsole())
+                {
+                    return false;
+                }
+                handle = GetConsoleWindow();
+                if (handle == IntPtr.Zero)
+                {
+                    return false;
+                }
+            }
+
+            ShowWindow(handle, SW_SHOW);
+
+            try
+            {
+                var stdout = Console.OpenStandardOutput();
+                var writer = new StreamWriter(stdout) { AutoFlush = true };
+                Console.SetOut(writer);
+                Console.SetError(writer);
+                var stdin = Console.OpenStandardInput();
+                Console.SetIn(new StreamReader(stdin));
+            }
+            catch
+            {
+                // Ignore; if handles are already valid, no need to reset.
+            }
+
+            return true;
         }
 
         public void SetCancellationTokenSource(CancellationTokenSource? tokenSource)

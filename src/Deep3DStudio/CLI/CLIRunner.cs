@@ -5,6 +5,7 @@ using System.Linq;
 using Deep3DStudio.Model;
 using Deep3DStudio.Model.AIModels;
 using Deep3DStudio.Configuration;
+using Deep3DStudio.Python;
 
 namespace Deep3DStudio.CLI
 {
@@ -42,11 +43,25 @@ namespace Deep3DStudio.CLI
                     return RunTestProblematicModels();
                 case "nerf":
                     return RunNeRFWorkflow();
+                case "reextract-python":
+                case "reextract-env":
+                case "reextract-python-env":
+                    return RunPythonReextract();
                 default:
                     Console.Error.WriteLine($"Unknown CLI command: {_options.Command}");
                     PrintHelp();
                     return 1;
             }
+        }
+
+        private static int RunPythonReextract()
+        {
+            Console.WriteLine("Re-extracting Python environment...");
+            bool ok = PythonService.Instance.ReextractPythonEnvironment();
+            Console.WriteLine(ok
+                ? "Python environment re-extracted successfully."
+                : "Python environment re-extraction failed. Check logs for details.");
+            return ok ? 0 : 1;
         }
 
         private int RunTestAllModels()
@@ -885,6 +900,7 @@ namespace Deep3DStudio.CLI
             Console.WriteLine("  --input             Input path");
             Console.WriteLine("  --output            Output path");
             Console.WriteLine("  --nerf-iterations   Override NeRF iteration count (Ctrl+C cancels and returns partial mesh)");
+            Console.WriteLine("  --command reextract-python   Force re-extraction of the embedded Python environment");
             Console.WriteLine("  --verbose, -v       Verbose logging");
             Console.WriteLine("  --help, -h, -?      Show this help");
         }
