@@ -58,7 +58,7 @@ jobs:
       run: dotnet build src/${{ matrix.project }}/${{ matrix.project }}.csproj --configuration Release --no-restore
 
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: ${{ matrix.project }}-${{ matrix.rid }}
         path: src/${{ matrix.project }}/bin/Release/net8.0/
