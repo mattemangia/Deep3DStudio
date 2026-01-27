@@ -38,9 +38,9 @@ namespace Deep3DStudio.IO
         {
             var plyData = new PlyData();
 
+            // 1. Read Header
             using (var fs = File.OpenRead(filepath))
             {
-                // 1. Read Header
                 var headerLines = new List<string>();
                 int readByte = 0;
                 var sb = new StringBuilder();
@@ -52,7 +52,10 @@ namespace Deep3DStudio.IO
                         var line = sb.ToString().Trim();
                         headerLines.Add(line);
                         sb.Clear();
-                        if (line == "end_header") break;
+                        if (line == "end_header") 
+                        {
+                            break;
+                        }
                     }
                     else
                     {
@@ -72,12 +75,15 @@ namespace Deep3DStudio.IO
 
                     if (parts[0] == "format")
                     {
+                        if (parts.Length < 2) continue;
                         if (parts[1].Contains("binary")) isBinary = true;
                         if (parts[1] == "binary_big_endian") { isBinary = true; isBigEndian = true; }
                     }
                     else if (parts[0] == "element")
                     {
-                        currentElement = new PlyElement { Name = parts[1], Count = int.Parse(parts[2]) };
+                        if (parts.Length < 3) continue;
+                        if (!TryParseInt(parts[2], out int count)) continue;
+                        currentElement = new PlyElement { Name = parts[1], Count = count };
                         elements.Add(currentElement);
                     }
                     else if (parts[0] == "property")
@@ -87,6 +93,7 @@ namespace Deep3DStudio.IO
                             var prop = new PlyProperty();
                             if (parts[1] == "list")
                             {
+                                if (parts.Length < 5) continue;
                                 prop.Name = parts[4];
                                 prop.Type = PlyPropertyType.List;
                                 prop.ListCountType = ParseType(parts[2]);
@@ -94,6 +101,7 @@ namespace Deep3DStudio.IO
                             }
                             else
                             {
+                                if (parts.Length < 3) continue;
                                 prop.Name = parts[2];
                                 prop.Type = ParseType(parts[1]);
                             }
@@ -102,69 +110,99 @@ namespace Deep3DStudio.IO
                     }
                 }
 
-                // 2. Read Body
-                // We assume sequential elements as defined in header
-
-                using (var reader = isBinary ? (BinaryReader)new BinaryReader(fs) : null)
-                using (var textReader = !isBinary ? new StreamReader(fs, Encoding.ASCII, false, 1024, true) : null)
-                {
-                    // Pre-allocate if possible
-                    foreach(var el in elements) {
-                        if (el.Name == "vertex") {
-                            plyData.Vertices.Capacity = el.Count;
-                            plyData.Colors.Capacity = el.Count;
-                            plyData.UVs.Capacity = el.Count;
-                        }
-                        else if (el.Name == "face") {
-                            plyData.Indices.Capacity = el.Count * 3;
-                        }
+                // Pre-allocate
+                foreach(var el in elements) {
+                    if (el.Name == "vertex") {
+                        plyData.Vertices.Capacity = el.Count;
+                        plyData.Colors.Capacity = el.Count;
+                        plyData.UVs.Capacity = el.Count;
                     }
+                    else if (el.Name == "face") {
+                        plyData.Indices.Capacity = el.Count * 3;
+                    }
+                }
 
-                    foreach(var element in elements)
+                // 2. Read Body
+                if (isBinary)
+                {
+                    // For binary, continue using the stream.
+                    // BinaryReader takes ownership of stream, so we use leaveOpen=true to let the outer using dispose fs.
+                    using (var reader = new BinaryReader(fs, Encoding.ASCII, leaveOpen: true))
                     {
-                        if (element.Name == "vertex")
+                        foreach(var element in elements)
                         {
-                            for(int i=0; i<element.Count; i++)
+                            if (element.Name == "vertex")
                             {
-                                float x=0, y=0, z=0;
-                                float r=0.8f, g=0.8f, b=0.8f;
-                                float u=0, v=0;
-
-                                if (isBinary)
+                                for(int i=0; i<element.Count; i++)
                                 {
+                                    float x=0, y=0, z=0;
+                                    float r=0.8f, g=0.8f, b=0.8f;
+                                    float u=0, v=0;
+
                                     ReadBinaryVertex(reader, element.Properties, isBigEndian, ref x, ref y, ref z, ref r, ref g, ref b, ref u, ref v);
+                                    
+                                    plyData.Vertices.Add(new Vector3(x, y, z));
+                                    plyData.Colors.Add(new Vector3(r, g, b));
+                                    plyData.UVs.Add(new Vector2(u, v));
                                 }
-                                else
-                                {
-                                    ReadAsciiVertex(textReader, element.Properties, ref x, ref y, ref z, ref r, ref g, ref b, ref u, ref v);
-                                }
-
-                                plyData.Vertices.Add(new Vector3(x, y, z));
-                                plyData.Colors.Add(new Vector3(r, g, b));
-                                plyData.UVs.Add(new Vector2(u, v));
                             }
-                        }
-                        else if (element.Name == "face")
-                        {
-                            for(int i=0; i<element.Count; i++)
+                            else if (element.Name == "face")
                             {
-                                if (isBinary)
+                                for(int i=0; i<element.Count; i++)
                                 {
                                     ReadBinaryFace(reader, element.Properties, isBigEndian, plyData.Indices);
                                 }
-                                else
+                            }
+                            else
+                            {
+                                // Skip other elements
+                                for(int i=0; i<element.Count; i++)
                                 {
-                                    ReadAsciiFace(textReader, element.Properties, plyData.Indices);
+                                    SkipBinaryElement(reader, element.Properties, isBigEndian);
                                 }
                             }
                         }
-                        else
+                    }
+                }
+                else
+                {
+                    // For ASCII, verify stream position is correct (StreamReader might have buffering issues if we mix ReadByte and StreamReader)
+                    // But since we read until end_header\n, the stream position should be correct for the start of body.
+                    using (var textReader = new StreamReader(fs, Encoding.ASCII, detectEncodingFromByteOrderMarks: false, bufferSize: 4096, leaveOpen: true))
+                    {
+                        foreach(var element in elements)
                         {
-                            // Skip other elements
-                            for(int i=0; i<element.Count; i++)
+                            if (element.Name == "vertex")
                             {
-                                if (isBinary) SkipBinaryElement(reader, element.Properties, isBigEndian);
-                                else if (textReader != null) textReader.ReadLine();
+                                for(int i=0; i<element.Count; i++)
+                                {
+                                    float x=0, y=0, z=0;
+                                    float r=0.8f, g=0.8f, b=0.8f;
+                                    float u=0, v=0;
+
+                                    if (!ReadAsciiVertex(textReader, element.Properties, ref x, ref y, ref z, ref r, ref g, ref b, ref u, ref v))
+                                        break;
+
+                                    plyData.Vertices.Add(new Vector3(x, y, z));
+                                    plyData.Colors.Add(new Vector3(r, g, b));
+                                    plyData.UVs.Add(new Vector2(u, v));
+                                }
+                            }
+                            else if (element.Name == "face")
+                            {
+                                for(int i=0; i<element.Count; i++)
+                                {
+                                    if (!ReadAsciiFace(textReader, element.Properties, plyData.Indices))
+                                        break;
+                                }
+                            }
+                            else
+                            {
+                                // Skip other elements
+                                for(int i=0; i<element.Count; i++)
+                                {
+                                    textReader.ReadLine();
+                                }
                             }
                         }
                     }
@@ -190,28 +228,46 @@ namespace Deep3DStudio.IO
             }
         }
 
-        private static void ReadAsciiVertex(StreamReader reader, List<PlyProperty> props, ref float x, ref float y, ref float z, ref float r, ref float g, ref float b, ref float u, ref float v)
+        private static bool ReadAsciiVertex(StreamReader reader, List<PlyProperty> props, ref float x, ref float y, ref float z, ref float r, ref float g, ref float b, ref float u, ref float v)
         {
             var line = reader.ReadLine();
-            if (line == null) return;
-            var parts = line.Split(new[]{' '}, StringSplitOptions.RemoveEmptyEntries);
+            if (line == null) return false;
+            var parts = line.Split(new[] { ' ', '\t', ',' }, StringSplitOptions.RemoveEmptyEntries);
 
-            for(int p=0; p<props.Count && p<parts.Length; p++)
+            int partIdx = 0;
+            for (int p = 0; p < props.Count && partIdx < parts.Length; p++)
             {
                 var prop = props[p];
-                double val = double.Parse(parts[p], CultureInfo.InvariantCulture); // Read as double first
+                if (prop.Type == PlyPropertyType.List)
+                {
+                    if (!TryParseInt(parts[partIdx++], out int count)) return true;
+                    partIdx = Math.Min(parts.Length, partIdx + count);
+                    continue;
+                }
 
-                ApplyProperty(prop.Name, val, ref x, ref y, ref z, ref r, ref g, ref b, ref u, ref v);
+                if (TryParseDouble(parts[partIdx++], out double val))
+                {
+                    ApplyProperty(prop.Name, val, ref x, ref y, ref z, ref r, ref g, ref b, ref u, ref v);
+                }
             }
+
+            return true;
         }
 
         private static void ReadBinaryVertex(BinaryReader reader, List<PlyProperty> props, bool be, ref float x, ref float y, ref float z, ref float r, ref float g, ref float b, ref float u, ref float v)
         {
-             foreach(var prop in props)
-             {
-                 double val = ReadValue(reader, prop.Type, be);
-                 ApplyProperty(prop.Name, val, ref x, ref y, ref z, ref r, ref g, ref b, ref u, ref v);
-             }
+            foreach (var prop in props)
+            {
+                if (prop.Type == PlyPropertyType.List)
+                {
+                    int count = (int)ReadValue(reader, prop.ListCountType, be);
+                    for (int i = 0; i < count; i++) ReadValue(reader, prop.ListItemType, be);
+                    continue;
+                }
+
+                double val = ReadValue(reader, prop.Type, be);
+                ApplyProperty(prop.Name, val, ref x, ref y, ref z, ref r, ref g, ref b, ref u, ref v);
+            }
         }
 
         private static void ApplyProperty(string name, double val, ref float x, ref float y, ref float z, ref float r, ref float g, ref float b, ref float u, ref float v)
@@ -238,23 +294,29 @@ namespace Deep3DStudio.IO
             else if (name == "t" || name == "v" || name == "texture_v") v = (float)val;
         }
 
-        private static void ReadAsciiFace(StreamReader reader, List<PlyProperty> props, List<int> indices)
+        private static bool ReadAsciiFace(StreamReader reader, List<PlyProperty> props, List<int> indices)
         {
              var line = reader.ReadLine();
-             if (line == null) return;
-             var parts = line.Split(new[]{' '}, StringSplitOptions.RemoveEmptyEntries);
+             if (line == null) return false;
+             var parts = line.Split(new[]{' ', '\t', ','}, StringSplitOptions.RemoveEmptyEntries);
 
              int partIdx = 0;
              foreach(var prop in props)
              {
                  if (prop.Type == PlyPropertyType.List)
                  {
-                     int count = int.Parse(parts[partIdx++]);
+                     if (partIdx >= parts.Length || !TryParseInt(parts[partIdx++], out int count)) return true;
                      if (prop.Name == "vertex_indices" || prop.Name == "vertex_index")
                      {
                          var faceIndices = new List<int>();
-                         for(int c=0; c<count; c++)
-                             faceIndices.Add(int.Parse(parts[partIdx++]));
+                         for(int c=0; c<count && partIdx < parts.Length; c++)
+                         {
+                             if (TryParseInt(parts[partIdx++], out int idx))
+                                 faceIndices.Add(idx);
+                         }
+
+                         // Ignore faces with too many vertices (likely a point cloud saved as a single polygon)
+                         if (faceIndices.Count > 32) return true;
 
                          // Triangulate
                          for(int i=1; i<faceIndices.Count-1; i++)
@@ -274,6 +336,7 @@ namespace Deep3DStudio.IO
                      partIdx++;
                  }
              }
+             return true;
         }
 
         private static void ReadBinaryFace(BinaryReader reader, List<PlyProperty> props, bool be, List<int> indices)
@@ -288,6 +351,9 @@ namespace Deep3DStudio.IO
                         var faceIndices = new List<int>();
                         for(int c=0; c<count; c++)
                             faceIndices.Add((int)ReadValue(reader, prop.ListItemType, be));
+
+                        // Ignore faces with too many vertices (likely a point cloud saved as a single polygon)
+                        if (faceIndices.Count > 32) continue;
 
                         // Triangulate
                         for(int i=1; i<faceIndices.Count-1; i++)
@@ -311,18 +377,18 @@ namespace Deep3DStudio.IO
 
         private static void SkipBinaryElement(BinaryReader reader, List<PlyProperty> props, bool be)
         {
-             foreach(var prop in props)
-             {
-                 if (prop.Type == PlyPropertyType.List)
-                 {
-                     int count = (int)ReadValue(reader, prop.ListCountType, be);
-                     for(int c=0; c<count; c++) ReadValue(reader, prop.ListItemType, be);
-                 }
-                 else
-                 {
-                     ReadValue(reader, prop.Type, be);
-                 }
-             }
+            foreach(var prop in props)
+            {
+                if (prop.Type == PlyPropertyType.List)
+                {
+                    int count = (int)ReadValue(reader, prop.ListCountType, be);
+                    for(int c=0; c<count; c++) ReadValue(reader, prop.ListItemType, be);
+                }
+                else
+                {
+                    ReadValue(reader, prop.Type, be);
+                }
+            }
         }
 
         private static double ReadValue(BinaryReader br, PlyPropertyType type, bool be)
@@ -341,11 +407,25 @@ namespace Deep3DStudio.IO
             return 0;
         }
 
-        private static short ReadShortBE(BinaryReader br) { var b = br.ReadBytes(2); Array.Reverse(b); return BitConverter.ToInt16(b, 0); }
-        private static ushort ReadUShortBE(BinaryReader br) { var b = br.ReadBytes(2); Array.Reverse(b); return BitConverter.ToUInt16(b, 0); }
-        private static int ReadIntBE(BinaryReader br) { var b = br.ReadBytes(4); Array.Reverse(b); return BitConverter.ToInt32(b, 0); }
-        private static uint ReadUIntBE(BinaryReader br) { var b = br.ReadBytes(4); Array.Reverse(b); return BitConverter.ToUInt32(b, 0); }
-        private static float ReadFloatBE(BinaryReader br) { var b = br.ReadBytes(4); Array.Reverse(b); return BitConverter.ToSingle(b, 0); }
-        private static double ReadDoubleBE(BinaryReader br) { var b = br.ReadBytes(8); Array.Reverse(b); return BitConverter.ToDouble(b, 0); }
+        private static bool TryParseDouble(string value, out double result)
+        {
+            if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out result))
+                return true;
+            return double.TryParse(value, NumberStyles.Float, CultureInfo.CurrentCulture, out result);
+        }
+
+        private static bool TryParseInt(string value, out int result)
+        {
+            if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out result))
+                return true;
+            return int.TryParse(value, NumberStyles.Integer, CultureInfo.CurrentCulture, out result);
+        }
+
+        private static short ReadShortBE(BinaryReader br) { var b = br.ReadBytes(2); if (b.Length < 2) throw new EndOfStreamException(); Array.Reverse(b); return BitConverter.ToInt16(b, 0); }
+        private static ushort ReadUShortBE(BinaryReader br) { var b = br.ReadBytes(2); if (b.Length < 2) throw new EndOfStreamException(); Array.Reverse(b); return BitConverter.ToUInt16(b, 0); }
+        private static int ReadIntBE(BinaryReader br) { var b = br.ReadBytes(4); if (b.Length < 4) throw new EndOfStreamException(); Array.Reverse(b); return BitConverter.ToInt32(b, 0); }
+        private static uint ReadUIntBE(BinaryReader br) { var b = br.ReadBytes(4); if (b.Length < 4) throw new EndOfStreamException(); Array.Reverse(b); return BitConverter.ToUInt32(b, 0); }
+        private static float ReadFloatBE(BinaryReader br) { var b = br.ReadBytes(4); if (b.Length < 4) throw new EndOfStreamException(); Array.Reverse(b); return BitConverter.ToSingle(b, 0); }
+        private static double ReadDoubleBE(BinaryReader br) { var b = br.ReadBytes(8); if (b.Length < 8) throw new EndOfStreamException(); Array.Reverse(b); return BitConverter.ToDouble(b, 0); }
     }
 }

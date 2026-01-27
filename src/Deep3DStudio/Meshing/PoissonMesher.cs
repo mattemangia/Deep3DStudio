@@ -134,6 +134,7 @@ namespace Deep3DStudio.Meshing
             float[,,] x = new float[w, h, d]; // Initial guess 0 (Dirichlet boundary conditions implied)
             float[,,] r = (float[,,])rhs.Clone(); // Residual r = b - Ax. Since x=0, r = b (rhs)
             float[,,] p = (float[,,])r.Clone(); // Search direction
+            float[,,] Ap = new float[w, h, d]; // Pre-allocate buffer for matrix-vector product
 
             double rsold = DotProduct(r, r);
 
@@ -144,7 +145,7 @@ namespace Deep3DStudio.Meshing
 
                 // Apply Negative Laplacian operator (A * p)
                 // This operator must be Positive Definite.
-                float[,,] Ap = ApplyNegativeLaplacian(p);
+                ApplyNegativeLaplacian(p, Ap);
 
                 double pAp = DotProduct(p, Ap);
 
@@ -195,13 +196,12 @@ namespace Deep3DStudio.Meshing
             return x;
         }
 
-        private float[,,] ApplyNegativeLaplacian(float[,,] u)
+        private void ApplyNegativeLaplacian(float[,,] u, float[,,] result)
         {
             int w = u.GetLength(0);
             int h = u.GetLength(1);
             int d = u.GetLength(2);
-            float[,,] result = new float[w, h, d];
-
+            
             // Negative Laplacian Operator (-L)
             // Standard Discrete Laplacian L(u) = Sum(neighbors) - 6*u(center)
             // Negative Laplacian -L(u) = 6*u(center) - Sum(neighbors)
@@ -222,8 +222,6 @@ namespace Deep3DStudio.Meshing
                     }
                 }
             });
-
-            return result;
         }
 
         private double DotProduct(float[,,] a, float[,,] b)
