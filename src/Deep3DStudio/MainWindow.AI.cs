@@ -22,24 +22,17 @@ namespace Deep3DStudio
     {
         private async void OnAIRefine(object? sender, EventArgs e)
         {
-            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
-            if (selectedMeshes.Count == 0)
-            {
-                ShowMessage("No mesh selected", "Please select a mesh to refine.");
-                return;
-            }
-
             var refineSetting = IniSettings.Instance.MeshRefinement;
             switch (refineSetting)
             {
                 case MeshRefinementMethod.DeepMeshPrior:
-                    await RefineSelectedMeshesAsync(selectedMeshes, MeshRefinementMethod.DeepMeshPrior);
+                    await TryRefineFromSelectionAsync(MeshRefinementMethod.DeepMeshPrior);
                     break;
                 case MeshRefinementMethod.TripoSF:
-                    await RefineSelectedMeshesAsync(selectedMeshes, MeshRefinementMethod.TripoSF);
+                    await TryRefineFromSelectionAsync(MeshRefinementMethod.TripoSF);
                     break;
                 case MeshRefinementMethod.GaussianSDF:
-                    await RefineSelectedMeshesAsync(selectedMeshes, MeshRefinementMethod.GaussianSDF);
+                    await TryRefineFromSelectionAsync(MeshRefinementMethod.GaussianSDF);
                     break;
                 default:
                     ShowMessage("No refinement method selected", "Please choose a mesh refinement model in Settings.");
@@ -140,56 +133,135 @@ namespace Deep3DStudio
 
         private void OnDeepMeshPriorRefine(object? sender, EventArgs e)
         {
-            if (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0)
-            {
-                ShowMessage("No Mesh", "Please generate a mesh first before optimizing.");
-                return;
-            }
-
-            _statusLabel.Text = "Running DeepMeshPrior optimization...";
-            var pipeline = new AIModels.WorkflowPipeline
-            {
-                Name = "DeepMeshPrior Optimization",
-                Steps = new List<AIModels.WorkflowStep> { AIModels.WorkflowStep.DeepMeshPriorRefinement }
-            };
-            RunAIWorkflowAsync(pipeline);
+            _ = RunRefineWithFallbackAsync(MeshRefinementMethod.DeepMeshPrior,
+                "DeepMeshPrior Optimization",
+                new AIModels.WorkflowPipeline
+                {
+                    Name = "DeepMeshPrior Optimization",
+                    Steps = new List<AIModels.WorkflowStep> { AIModels.WorkflowStep.DeepMeshPriorRefinement }
+                });
         }
 
         private void OnTripoSFRefine(object? sender, EventArgs e)
         {
-            var selectedMesh = GetSelectedMesh();
-            if (selectedMesh == null && (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0))
-            {
-                ShowMessage("No Mesh", "Please generate or select a mesh to refine with TripoSF.");
-                return;
-            }
-
-            _statusLabel.Text = "Running TripoSF mesh refinement...";
-            // Create a custom workflow for TripoSF refinement
-            var pipeline = new AIModels.WorkflowPipeline
-            {
-                Name = "TripoSF Refinement",
-                Steps = new List<AIModels.WorkflowStep> { AIModels.WorkflowStep.TripoSFRefinement }
-            };
-            RunAIWorkflowAsync(pipeline);
+            _ = RunRefineWithFallbackAsync(MeshRefinementMethod.TripoSF,
+                "TripoSF Refinement",
+                new AIModels.WorkflowPipeline
+                {
+                    Name = "TripoSF Refinement",
+                    Steps = new List<AIModels.WorkflowStep> { AIModels.WorkflowStep.TripoSFRefinement }
+                });
         }
 
         private void OnGaussianSDFRefine(object? sender, EventArgs e)
         {
-            var selectedMesh = GetSelectedMesh();
-            if (selectedMesh == null && (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0))
+            _ = RunRefineWithFallbackAsync(MeshRefinementMethod.GaussianSDF,
+                "GaussianSDF Refinement",
+                new AIModels.WorkflowPipeline
+                {
+                    Name = "GaussianSDF Refinement",
+                    Steps = new List<AIModels.WorkflowStep> { AIModels.WorkflowStep.GaussianSDFRefinement }
+                });
+        }
+
+        private async Task RunRefineWithFallbackAsync(MeshRefinementMethod method, string label, AIModels.WorkflowPipeline fallbackPipeline)
+        {
+            if (_meshingInProgress)
             {
-                ShowMessage("No Mesh", "Please generate or select a mesh to refine with GaussianSDF.");
+                _statusLabel.Text = "Meshing already in progress.";
                 return;
             }
 
-            _statusLabel.Text = "Running GaussianSDF mesh refinement...";
-            var pipeline = new AIModels.WorkflowPipeline
+            bool refined = await TryRefineFromSelectionAsync(method);
+            if (refined) return;
+
+            if (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0)
             {
-                Name = "GaussianSDF Refinement",
-                Steps = new List<AIModels.WorkflowStep> { AIModels.WorkflowStep.GaussianSDFRefinement }
+                ShowMessage("No Mesh", $"Please generate or select a mesh to refine with {label}.");
+                return;
+            }
+
+            _statusLabel.Text = $"Running {label}...";
+            RunAIWorkflowAsync(fallbackPipeline);
+        }
+
+        private async Task<bool> TryRefineFromSelectionAsync(MeshRefinementMethod method)
+        {
+            if (_meshingInProgress)
+            {
+                _statusLabel.Text = "Meshing already in progress.";
+                return true;
+            }
+
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count > 0)
+            {
+                await RefineSelectedMeshesAsync(selectedMeshes, method);
+                return true;
+            }
+
+            var selectedPointClouds = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
+            if (selectedPointClouds.Count == 0 && _sceneTreeView != null)
+            {
+                selectedPointClouds = _sceneTreeView.GetSelectedObjects().OfType<PointCloudObject>().ToList();
+            }
+
+            if (selectedPointClouds.Count == 0)
+            {
+                ShowMessage("No selection", "Please select a mesh or point cloud to refine.");
+                return false;
+            }
+
+            MeshingAlgorithm baseAlgo = IniSettings.Instance.MeshingAlgo;
+            if (baseAlgo == MeshingAlgorithm.DeepMeshPrior ||
+                baseAlgo == MeshingAlgorithm.TripoSF ||
+                baseAlgo == MeshingAlgorithm.GaussianSDF ||
+                baseAlgo == MeshingAlgorithm.LGM)
+            {
+                if (baseAlgo == MeshingAlgorithm.LGM)
+                {
+                    _statusLabel.Text = "LGM is image-based. Using MarchingCubes for point cloud meshing.";
+                    while (Application.EventsPending()) Application.RunIteration();
+                }
+                baseAlgo = MeshingAlgorithm.MarchingCubes;
+            }
+
+            _statusLabel.Text = $"Meshing point cloud ({baseAlgo}) for refinement...";
+            while (Application.EventsPending()) Application.RunIteration();
+
+            var baseMesh = await Task.Run(() => GenerateMeshFromPointClouds(selectedPointClouds, baseAlgo));
+            if (baseMesh == null || baseMesh.Vertices.Count == 0 || baseMesh.Indices.Count == 0)
+            {
+                ShowMessage("Meshing failed", "Point cloud meshing produced no faces. Try a different meshing algorithm in Settings.");
+                _statusLabel.Text = "Point cloud meshing failed.";
+                return true;
+            }
+
+            MeshingAlgorithm refineAlgo = method switch
+            {
+                MeshRefinementMethod.DeepMeshPrior => MeshingAlgorithm.DeepMeshPrior,
+                MeshRefinementMethod.TripoSF => MeshingAlgorithm.TripoSF,
+                MeshRefinementMethod.GaussianSDF => MeshingAlgorithm.GaussianSDF,
+                _ => MeshingAlgorithm.MarchingCubes
             };
-            RunAIWorkflowAsync(pipeline);
+
+            var cancellationToken = UI.ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
+            var refinedMesh = await RefineMeshAsync(baseMesh, refineAlgo, cancellationToken);
+            if (refinedMesh == null || refinedMesh.Vertices.Count == 0 || refinedMesh.Indices.Count == 0)
+            {
+                ShowMessage("Refinement failed", "AI refinement returned no geometry.");
+                _statusLabel.Text = "Refinement failed.";
+                return true;
+            }
+
+            var refinedObj = new MeshObject("Refined Mesh", refinedMesh);
+            _sceneGraph.AddObject(refinedObj);
+            _sceneGraph.Select(refinedObj);
+            _sceneTreeView.RefreshTree();
+            _viewport.FocusOnSelection();
+            _viewport.QueueDraw();
+            _statusLabel.Text = "Refinement complete.";
+            return true;
         }
 
         private void OnMultiViewDeepMeshPriorWorkflow(object? sender, EventArgs e)

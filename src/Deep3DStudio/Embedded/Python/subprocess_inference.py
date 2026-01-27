@@ -1233,6 +1233,9 @@ def infer_triposf(mesh_path):
         input_mesh = trimesh.load(mesh_path, force='mesh')
         log(f"Loaded input mesh: {len(input_mesh.vertices)} vertices, {len(input_mesh.faces)} faces")
 
+        if input_mesh.faces is None or len(input_mesh.faces) == 0:
+            return {"success": False, "error": "TripoSF requires a mesh with faces (input has no faces)."}
+
         results = []
 
         # Sample points from mesh for VAE input
@@ -1249,78 +1252,86 @@ def infer_triposf(mesh_path):
         # This is a placeholder that demonstrates the mesh refinement pipeline
         log("Processing mesh with TripoSF refinement...")
 
-        # Simplify and remesh for demonstration
-        # In practice, this would run through the SparseFlex VAE
-        try:
-            # Try using torchmcubes for marching cubes if available
-            from torchmcubes import marching_cubes
-
-            # Create SDF from point cloud
-            resolution = 128
-            voxel_size = 2.0 / resolution
-
-            # Normalize points to [-1, 1]
-            points_np = points.cpu().numpy()
-            center = points_np.mean(axis=0)
-            scale = np.abs(points_np - center).max() * 1.1
-            points_normalized = (points_np - center) / scale
-
-            # Simple voxelization
-            grid = np.zeros((resolution, resolution, resolution), dtype=np.float32)
-            indices = ((points_normalized + 1) * (resolution / 2)).astype(int)
-            indices = np.clip(indices, 0, resolution - 1)
-            for idx in indices:
-                grid[idx[0], idx[1], idx[2]] = 1.0
-
-            # Apply gaussian blur for SDF
-            from scipy.ndimage import gaussian_filter, distance_transform_edt
-            sdf = distance_transform_edt(1 - grid) - distance_transform_edt(grid)
-            sdf = gaussian_filter(sdf.astype(np.float32), sigma=1.5)
-
-            # Marching cubes
-            # Ensure grid is on CPU for marching cubes
-            # The CPU implementation of torchmcubes REQUIRES 3D input (D, H, W)
-            grid_tensor = torch.from_numpy(sdf).float().cpu()
+        # NOTE: The SparseFlex VAE is not fully wired here. The previous placeholder
+        # used an internal marching-cubes step that often fails and produces radial artifacts.
+        # We now default to using a cleaned/smoothed version of the input mesh.
+        skip_mc = os.environ.get("DEEP3D_TRIPOSF_SKIP_MC", "1") != "0"
+        if skip_mc:
+            log("TripoSF: skipping internal marching cubes; using cleaned input mesh.")
+            refined = input_mesh.copy()
             try:
-                # Try 3D input first (standard for CPU extension)
-                verts, faces = marching_cubes(grid_tensor, 0.0)
-            except RuntimeError as e:
-                # Catch "vol must be 4-dimension" or other extension errors
-                try:
-                    # Try 4D input (1, D, H, W) as some versions/CUDA might expect this
-                    verts, faces = marching_cubes(grid_tensor.unsqueeze(0), 0.0)
-                except RuntimeError:
-                    # Fallback to PyMCubes stub if available or raise
-                    if "mcubes" in sys.modules and hasattr(sys.modules["torchmcubes"], "marching_cubes"):
-                         log(f"torchmcubes extension failed ({e}), trying stub...")
-                         # Use the stub implementation directly if installed/available
-                         try:
-                             import mcubes
-                             verts_np, faces_np = mcubes.marching_cubes(sdf, 0.0)
-                             verts = torch.from_numpy(verts_np.astype(np.float32))
-                             faces = torch.from_numpy(faces_np.astype(np.int64))
-                         except ImportError:
-                             raise e
-                    else:
-                         raise e
-
-            verts = verts[0].cpu().numpy() if verts.ndim > 2 else verts.cpu().numpy()
-            faces = faces[0].cpu().numpy() if faces.ndim > 2 else faces.cpu().numpy()
-
-            if len(verts) == 0:
-                raise Exception("Marching cubes produced 0 vertices")
-
-            # Denormalize
-            verts = (verts / (resolution / 2) - 1) * scale + center
-
-            log(f"Refined mesh: {len(verts)} vertices, {len(faces)} faces")
-
-        except Exception as mc_error:
-            log(f"Marching cubes failed ({mc_error}), using input mesh")
-            # Fallback: return the input mesh with subdivision
-            refined = input_mesh.subdivide()
+                refined.remove_degenerate_faces()
+                refined.remove_duplicate_faces()
+                refined.remove_infinite_values()
+                refined.remove_unreferenced_vertices()
+                refined.process(validate=True)
+                if hasattr(trimesh, "smoothing"):
+                    try:
+                        trimesh.smoothing.filter_laplacian(refined, iterations=10)
+                    except Exception:
+                        pass
+            except Exception as clean_error:
+                log(f"TripoSF cleanup warning: {clean_error}")
             verts = refined.vertices
             faces = refined.faces
+            log(f"Refined mesh (cleanup): {len(verts)} vertices, {len(faces)} faces")
+        else:
+            # Simplify and remesh for demonstration (legacy path)
+            # In practice, this would run through the SparseFlex VAE
+            try:
+                from torchmcubes import marching_cubes
+
+                resolution = 128
+                voxel_size = 2.0 / resolution
+
+                points_np = points.cpu().numpy()
+                center = points_np.mean(axis=0)
+                scale = np.abs(points_np - center).max() * 1.1
+                points_normalized = (points_np - center) / scale
+
+                grid = np.zeros((resolution, resolution, resolution), dtype=np.float32)
+                indices = ((points_normalized + 1) * (resolution / 2)).astype(int)
+                indices = np.clip(indices, 0, resolution - 1)
+                for idx in indices:
+                    grid[idx[0], idx[1], idx[2]] = 1.0
+
+                from scipy.ndimage import gaussian_filter, distance_transform_edt
+                sdf = distance_transform_edt(1 - grid) - distance_transform_edt(grid)
+                sdf = gaussian_filter(sdf.astype(np.float32), sigma=1.5)
+
+                grid_tensor = torch.from_numpy(sdf).float().cpu()
+                try:
+                    verts, faces = marching_cubes(grid_tensor, 0.0)
+                except RuntimeError as e:
+                    try:
+                        verts, faces = marching_cubes(grid_tensor.unsqueeze(0), 0.0)
+                    except RuntimeError:
+                        if "mcubes" in sys.modules and hasattr(sys.modules["torchmcubes"], "marching_cubes"):
+                             log(f"torchmcubes extension failed ({e}), trying stub...")
+                             try:
+                                 import mcubes
+                                 verts_np, faces_np = mcubes.marching_cubes(sdf, 0.0)
+                                 verts = torch.from_numpy(verts_np.astype(np.float32))
+                                 faces = torch.from_numpy(faces_np.astype(np.int64))
+                             except ImportError:
+                                 raise e
+                        else:
+                             raise e
+
+                verts = verts[0].cpu().numpy() if verts.ndim > 2 else verts.cpu().numpy()
+                faces = faces[0].cpu().numpy() if faces.ndim > 2 else faces.cpu().numpy()
+
+                if len(verts) == 0:
+                    raise Exception("Marching cubes produced 0 vertices")
+
+                verts = (verts / (resolution / 2) - 1) * scale + center
+                log(f"Refined mesh: {len(verts)} vertices, {len(faces)} faces")
+
+            except Exception as mc_error:
+                log(f"Marching cubes failed ({mc_error}), using input mesh")
+                refined = input_mesh.subdivide()
+                verts = refined.vertices
+                faces = refined.faces
 
         # Flatten faces and convert to native Python int for JSON serialization
         face_indices = []

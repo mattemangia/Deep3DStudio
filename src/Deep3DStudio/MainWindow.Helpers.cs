@@ -504,18 +504,35 @@ namespace Deep3DStudio
                 }
             }
 
+            // Calculate voxel size based on tight bounds first
+            float initialSizeX = max.X - min.X;
+            float initialSizeY = max.Y - min.Y;
+            float initialSizeZ = max.Z - min.Z;
+            float maxDim = Math.Max(initialSizeX, Math.Max(initialSizeY, initialSizeZ));
+            
             float voxelSize = 0.02f;
-            int w = (int)((max.X - min.X) / voxelSize) + 5;
-            int h = (int)((max.Y - min.Y) / voxelSize) + 5;
-            int d = (int)((max.Z - min.Z) / voxelSize) + 5;
-
-            if (w > maxRes)
+            if (maxRes > 0)
             {
-                voxelSize *= (w / (float)maxRes);
-                w = maxRes;
-                h = (int)((max.Y - min.Y) / voxelSize) + 5;
-                d = (int)((max.Z - min.Z) / voxelSize) + 5;
+                voxelSize = maxDim / (maxRes - 10); // Leave room for padding
             }
+
+            // Add padding (margin) to ensure points aren't at the grid boundary
+            // This is critical for Poisson reconstruction and Gradient calculation
+            var padding = new OpenTK.Mathematics.Vector3(voxelSize * 5);
+            min -= padding;
+            max += padding;
+
+            int w = (int)((max.X - min.X) / voxelSize) + 1;
+            int h = (int)((max.Y - min.Y) / voxelSize) + 1;
+            int d = (int)((max.Z - min.Z) / voxelSize) + 1;
+
+            // Clamp max resolution just in case
+            if (w > maxRes + 10) voxelSize *= (float)w / maxRes; // Adjust if still too big
+            
+            // Re-calculate dims with final voxel size
+            w = (int)((max.X - min.X) / voxelSize) + 1;
+            h = (int)((max.Y - min.Y) / voxelSize) + 1;
+            d = (int)((max.Z - min.Z) / voxelSize) + 1;
 
             float[,,] grid = new float[w, h, d];
 
@@ -526,28 +543,53 @@ namespace Deep3DStudio
                     int x = (int)((v.X - min.X) / voxelSize);
                     int y = (int)((v.Y - min.Y) / voxelSize);
                     int z = (int)((v.Z - min.Z) / voxelSize);
-                    if (x >= 0 && x < w && y >= 0 && y < h && z >= 0 && z < d)
+                    if (x >= 1 && x < w - 1 && y >= 1 && y < h - 1 && z >= 1 && z < d - 1)
                     {
                         grid[x, y, z] = 1.0f;
                     }
                 }
             }
 
-            float[,,] smooth = new float[w, h, d];
-            for (int x = 1; x < w - 1; x++)
-                for (int y = 1; y < h - 1; y++)
-                    for (int z = 1; z < d - 1; z++)
+            // Apply smoothing (Box Blur) to create a continuous density field
+            // This is crucial for Poisson Mesher (gradients) and Marching Cubes (smooth surface)
+            int smoothPasses = 3;
+            float[,,] current = grid;
+            float[,,] next = new float[w, h, d];
+
+            for (int iter = 0; iter < smoothPasses; iter++)
+            {
+                Parallel.For(1, w - 1, x =>
+                {
+                    for (int y = 1; y < h - 1; y++)
                     {
-                        if (grid[x, y, z] > 0)
+                        for (int z = 1; z < d - 1; z++)
                         {
-                            smooth[x, y, z] = 1;
-                            smooth[x + 1, y, z] = 1; smooth[x - 1, y, z] = 1;
-                            smooth[x, y + 1, z] = 1; smooth[x, y - 1, z] = 1;
-                            smooth[x, y, z + 1] = 1; smooth[x, y, z - 1] = 1;
+                            float sum = 0;
+                            int count = 0;
+
+                            for (int dx = -1; dx <= 1; dx++)
+                            {
+                                for (int dy = -1; dy <= 1; dy++)
+                                {
+                                    for (int dz = -1; dz <= 1; dz++)
+                                    {
+                                        sum += current[x + dx, y + dy, z + dz];
+                                        count++;
+                                    }
+                                }
+                            }
+                            next[x, y, z] = sum / count;
                         }
                     }
+                });
 
-            return (smooth, min, voxelSize);
+                // Swap buffers
+                var temp = current;
+                current = next;
+                next = temp; // Reuse buffer
+            }
+
+            return (current, min, voxelSize);
         }
     }
 }

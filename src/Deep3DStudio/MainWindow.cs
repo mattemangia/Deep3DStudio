@@ -37,6 +37,7 @@ namespace Deep3DStudio
         private Box? _rightPanel;
 
         private bool _isDirty = false;
+        private bool _meshingInProgress = false;
 
         // UI References for updates
         private ComboBoxText _workflowCombo = null!;

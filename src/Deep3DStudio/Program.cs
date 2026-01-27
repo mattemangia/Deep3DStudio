@@ -43,6 +43,19 @@ namespace Deep3DStudio
                     TuiStatusMonitor.Instance.UpdateProgress($"{stage}: {msg}", prog);
                 };
 
+                // Initialize Python environment for CLI
+                Console.WriteLine("Initializing Python environment...");
+                try
+                {
+                    PythonService.Instance.Initialize();
+                    Console.WriteLine("Python environment ready.");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Python initialization error: {ex.Message}");
+                    // Continue, as some CLI commands might not need Python
+                }
+
                 var exitCode = RunCLI(cliOptions);
                 TuiStatusMonitor.Instance.Stop();
                 return exitCode;

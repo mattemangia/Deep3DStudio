@@ -13,6 +13,7 @@ namespace Deep3DStudio.CLI
         public string? OutputPath { get; private set; }
         public string? ModelName { get; private set; }
         public int? NerfIterations { get; private set; }
+        public int? VoxelResolution { get; private set; }
         public IReadOnlyList<string> ExtraArgs => _extraArgs;
 
         private readonly List<string> _extraArgs = new();
@@ -69,6 +70,12 @@ namespace Deep3DStudio.CLI
                         if (i + 1 < args.Length && int.TryParse(args[++i], out var nerfIterations))
                         {
                             options.NerfIterations = nerfIterations;
+                        }
+                        break;
+                    case "--voxel-res":
+                        if (i + 1 < args.Length && int.TryParse(args[++i], out var voxelRes))
+                        {
+                            options.VoxelResolution = voxelRes;
                         }
                         break;
                     default:

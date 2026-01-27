@@ -343,71 +343,81 @@ namespace Deep3DStudio
 
         private async Task RunMeshing()
         {
-            string workflow = _workflowCombo.ActiveText;
-            bool isLGM = !string.IsNullOrEmpty(workflow) && workflow.Contains("LGM");
-
-            var selectedPointClouds = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
-            if (!isLGM && selectedPointClouds.Count == 0)
+            if (_meshingInProgress)
             {
-                // Try to build result from current scene if possible?
-                // For now, require point cloud generation first
-                ShowMessage("No point cloud selected. Please select a point cloud first.");
+                _statusLabel.Text = "Meshing already in progress.";
                 return;
             }
 
-            _statusLabel.Text = $"Meshing ({workflow})...";
-            while (Application.EventsPending()) Application.RunIteration();
-
+            _meshingInProgress = true;
             try
             {
-                var cancellationToken = UI.ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
-                var meshingAlgo = IniSettings.Instance.MeshingAlgo;
+                string workflow = _workflowCombo.ActiveText;
+                bool isLGM = !string.IsNullOrEmpty(workflow) && workflow.Contains("LGM");
 
-                // Override if workflow implies a specific AI method
-                if (isLGM) meshingAlgo = MeshingAlgorithm.LGM;
-
-                if (meshingAlgo == MeshingAlgorithm.LGM)
+                var selectedPointClouds = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
+                if (!isLGM && selectedPointClouds.Count == 0 && _sceneTreeView != null)
                 {
-                    ShowMessage("LGM is image-based. Use the Image -> LGM workflow instead of point cloud meshing.");
+                    selectedPointClouds = _sceneTreeView.GetSelectedObjects().OfType<PointCloudObject>().ToList();
+                }
+                if (!isLGM && selectedPointClouds.Count == 0)
+                {
+                    // Try to build result from current scene if possible?
+                    // For now, require point cloud generation first
+                    ShowMessage("No point cloud selected. Please select a point cloud first.");
                     return;
                 }
 
-                if (meshingAlgo == MeshingAlgorithm.DeepMeshPrior ||
-                    meshingAlgo == MeshingAlgorithm.TripoSF ||
-                    meshingAlgo == MeshingAlgorithm.GaussianSDF)
+                _statusLabel.Text = $"Meshing ({workflow})...";
+                while (Application.EventsPending()) Application.RunIteration();
+
+                try
                 {
-                    var baseMesh = await Task.Run(() => GenerateMeshFromPointClouds(selectedPointClouds, MeshingAlgorithm.MarchingCubes));
-                    if (baseMesh == null || baseMesh.Vertices.Count == 0)
+                    var cancellationToken = UI.ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
+                    var meshingAlgo = IniSettings.Instance.MeshingAlgo;
+
+                    // Override if workflow implies a specific AI method
+                    if (isLGM) meshingAlgo = MeshingAlgorithm.LGM;
+
+                    if (meshingAlgo == MeshingAlgorithm.LGM)
                     {
-                        _statusLabel.Text = "Point cloud meshing failed.";
+                        ShowMessage("LGM is image-based. Use the Image -> LGM workflow instead of point cloud meshing.");
                         return;
                     }
 
-                    var refinedMesh = await RefineMeshAsync(baseMesh, meshingAlgo, cancellationToken);
-                    if (refinedMesh == null || refinedMesh.Vertices.Count == 0)
+                    if (meshingAlgo == MeshingAlgorithm.DeepMeshPrior ||
+                        meshingAlgo == MeshingAlgorithm.TripoSF ||
+                        meshingAlgo == MeshingAlgorithm.GaussianSDF)
                     {
-                        _statusLabel.Text = "AI refinement did not return a result.";
+                        // Use Poisson reconstruction for better topology before refinement
+                        var baseMesh = await Task.Run(() => GenerateMeshFromPointClouds(selectedPointClouds, MeshingAlgorithm.Poisson));
+                        if (baseMesh == null || baseMesh.Vertices.Count == 0)
+                        {
+                            _statusLabel.Text = "Base meshing failed.";
+                            return;
+                        }
+
+                        var refinedMesh = await RefineMeshAsync(baseMesh, meshingAlgo, cancellationToken);
+                        if (refinedMesh == null || refinedMesh.Vertices.Count == 0)
+                        {
+                            _statusLabel.Text = "AI refinement did not return a result.";
+                            return;
+                        }
+
+                        var aiObj = new MeshObject("Refined Mesh", refinedMesh);
+                        _sceneGraph.AddObject(aiObj);
+                        _sceneGraph.Select(aiObj);
+                        _viewport.FocusOnSelection();
+                        _statusLabel.Text = "AI meshing complete.";
+                        _sceneTreeView.RefreshTree();
+                        _viewport.QueueDraw();
                         return;
                     }
 
-                    var aiObj = new MeshObject("Refined Mesh", refinedMesh);
-                    _sceneGraph.AddObject(aiObj);
-                    _sceneGraph.Select(aiObj);
-                    _viewport.FocusOnSelection();
-                    _statusLabel.Text = "AI meshing complete.";
-                    _sceneTreeView.RefreshTree();
-                    _viewport.QueueDraw();
-                    return;
-                }
+                    int maxRes = (!string.IsNullOrEmpty(workflow) && workflow.Contains("Interior")) ? 500 : 200;
+                    _statusLabel.Text = $"Meshing using {meshingAlgo}...";
 
-                // Remove reconstruction meshes generated by previous runs to avoid clutter while keeping imported assets.
-                // For simplicity, operations below use the data stored in _lastSceneResult.
-
-                if (workflow == "Dust3r (Fast)")
-                {
-                    _statusLabel.Text = $"Meshing using {IniSettings.Instance.MeshingAlgo}...";
-
-                    var meshedResult = await Task.Run(() => GenerateMeshFromPointClouds(selectedPointClouds, IniSettings.Instance.MeshingAlgo));
+                    var meshedResult = await Task.Run(() => GenerateMeshFromPointClouds(selectedPointClouds, meshingAlgo, maxRes));
 
                     Console.WriteLine($"Meshing result: {meshedResult.Vertices.Count} vertices, {meshedResult.Indices.Count} indices ({meshedResult.Indices.Count / 3} triangles)");
 
@@ -415,90 +425,34 @@ namespace Deep3DStudio
                     {
                         var meshObj = new MeshObject("Reconstructed Mesh", meshedResult);
                         _sceneGraph.AddObject(meshObj);
+                        _sceneGraph.Select(meshObj);
                         _viewport.FocusOnSelection();
                     }
                     _statusLabel.Text = "Meshing Complete.";
+
+                    _sceneTreeView.RefreshTree();
+                    _viewport.QueueDraw();
+
+                    var (meshes, pcs, cams, verts, tris) = _sceneGraph.GetStatistics();
+                    _statusLabel.Text += $" | {meshes} meshes, {verts:N0} vertices";
                 }
-                else if (workflow == "Interior Scan")
+                catch (OperationCanceledException)
                 {
-                    _statusLabel.Text = $"Meshing Interior (High Res) using {IniSettings.Instance.MeshingAlgo}...";
-
-                    var meshedResult = await Task.Run(() => GenerateMeshFromPointClouds(selectedPointClouds, IniSettings.Instance.MeshingAlgo, 500));
-
-                    Console.WriteLine($"Interior Meshing result: {meshedResult.Vertices.Count} vertices, {meshedResult.Indices.Count} indices ({meshedResult.Indices.Count / 3} triangles)");
-
-                    if (meshedResult.Vertices.Count > 0)
-                    {
-                        var meshObj = new MeshObject("Interior Mesh", meshedResult);
-                        _sceneGraph.AddObject(meshObj);
-                        _viewport.FocusOnSelection();
-                    }
-                    _statusLabel.Text = "Interior Meshing Complete.";
+                    _statusLabel.Text = "Meshing cancelled.";
                 }
-                else
+                catch (Exception ex)
                 {
-                    var nerfSettings = IniSettings.Instance;
-                    if (_lastSceneResult == null || _lastSceneResult.Poses.Count == 0)
+                    _statusLabel.Text = "Error during meshing: " + ex.Message;
+                    Console.WriteLine(ex);
+                    if (UI.ProgressDialog.Instance.IsVisible)
                     {
-                        ShowMessage("No camera poses available. NeRF refinement requires camera data from reconstruction.");
-                        return;
-                    }
-
-                    _statusLabel.Text = "Initializing NeRF Voxel Grid...";
-                    var nerf = new VoxelGridNeRF();
-                    UI.ProgressDialog.Instance.Start("NeRF Refinement...", UI.OperationType.Processing);
-                    var nerfToken = UI.ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
-
-                    var inputMeshes = selectedPointClouds.Select(ToMeshData).ToList();
-                    await Task.Run(() =>
-                    {
-                        nerf.InitializeFromMesh(inputMeshes);
-                        bool cancelled = nerf.Train(_lastSceneResult.Poses, iterations: nerfSettings.NeRFIterations, cancellationToken: nerfToken);
-                        if (cancelled)
-                        {
-                            UI.ProgressDialog.Instance.Log("NeRF cancelled. Returning partial mesh.");
-                        }
-                    });
-
-                    _statusLabel.Text = $"Extracting NeRF Mesh ({IniSettings.Instance.MeshingAlgo})...";
-
-                    var nerfMesh = await Task.Run(() => {
-                        return nerf.GetMesh(GetMesher(IniSettings.Instance.MeshingAlgo));
-                    });
-
-                    Console.WriteLine($"NeRF Meshing result: {nerfMesh.Vertices.Count} vertices, {nerfMesh.Indices.Count} indices ({nerfMesh.Indices.Count / 3} triangles)");
-
-                    if (nerfMesh.Vertices.Count > 0)
-                    {
-                        var meshObj = new MeshObject("NeRF Mesh", nerfMesh);
-                        _sceneGraph.AddObject(meshObj);
-                        _viewport.FocusOnSelection();
-                    }
-                    _statusLabel.Text = "NeRF Meshing Complete.";
-                    if (!nerfToken.IsCancellationRequested)
-                    {
-                        UI.ProgressDialog.Instance.Complete();
+                        UI.ProgressDialog.Instance.Fail(ex);
                     }
                 }
-
-                _sceneTreeView.RefreshTree();
-                _viewport.QueueDraw();
-
-                var (meshes, pcs, cams, verts, tris) = _sceneGraph.GetStatistics();
-                _statusLabel.Text += $" | {meshes} meshes, {verts:N0} vertices";
             }
-            catch (OperationCanceledException)
+            finally
             {
-                _statusLabel.Text = "Meshing cancelled.";
-            }
-            catch (Exception ex)
-            {
-                _statusLabel.Text = "Error during meshing: " + ex.Message;
-                Console.WriteLine(ex);
-                if (UI.ProgressDialog.Instance.IsVisible)
-                {
-                    UI.ProgressDialog.Instance.Fail(ex);
-                }
+                _meshingInProgress = false;
             }
         }
 

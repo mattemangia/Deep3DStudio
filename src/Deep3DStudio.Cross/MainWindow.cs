@@ -435,7 +435,7 @@ namespace Deep3DStudio
                     Logger.Debug($"Image already loaded, skipping: {file}");
                 }
             }
-            else if (ext == ".obj" || ext == ".ply" || ext == ".glb" || ext == ".stl")
+            else if (ext == ".obj" || ext == ".glb" || ext == ".stl")
             {
                 ProgressDialog.Instance.Start($"Importing {Path.GetFileName(file)}...", OperationType.ImportExport);
                 Task.Run(() => {
@@ -463,7 +463,7 @@ namespace Deep3DStudio
                     }
                 });
             }
-            else if (ext == ".xyz")
+            else if (ext == ".xyz" || ext == ".ply")
             {
                 ProgressDialog.Instance.Start($"Importing {Path.GetFileName(file)}...", OperationType.ImportExport);
                 Task.Run(() => {
@@ -472,6 +472,7 @@ namespace Deep3DStudio
                         var pc = PointCloudImporter.Load(file);
                         if (pc != null)
                         {
+                            IniSettings.Instance.ShowPointCloud = true;
                             lock (_sceneGraph)
                             {
                                 _sceneGraph.AddObject(pc);

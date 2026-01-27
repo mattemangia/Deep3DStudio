@@ -1354,6 +1354,26 @@ def get_model(**kwargs) -> ModelSpec:
 
     print("  Patches applied successfully")
 
+def verify_embedded_triposf_patch():
+    """
+    Ensure the embedded TripoSF refinement script contains the skip-MC safeguard.
+    This keeps deployment aligned with repo patches.
+    """
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    embedded_path = os.path.join(repo_root, "src", "Deep3DStudio", "Embedded", "Python", "subprocess_inference.py")
+    if not os.path.exists(embedded_path):
+        print(f"WARNING: Embedded subprocess_inference.py not found at {embedded_path}")
+        return
+
+    with open(embedded_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    if "DEEP3D_TRIPOSF_SKIP_MC" not in content:
+        print("ERROR: Embedded TripoSF patch missing (DEEP3D_TRIPOSF_SKIP_MC not found).")
+        print("Please update src/Deep3DStudio/Embedded/Python/subprocess_inference.py before deploying.")
+        raise RuntimeError("Embedded TripoSF patch missing")
+    print("Embedded TripoSF patch verified.")
+
 
 def obfuscate_and_clean(python_dir, target_platform):
     """
@@ -1497,15 +1517,16 @@ if __name__ == "__main__":
              print("WARNING: You are running on Linux but targeting a non-Linux platform.")
              print("This will likely FAIL.")
 
-        if setup_python_embed(python_dir, target_platform):
-            setup_models(models_dir, python_dir, target_platform)
+    if setup_python_embed(python_dir, target_platform):
+        setup_models(models_dir, python_dir, target_platform)
 
             # Apply patches to model packages
             if "win" in target_platform:
                 site_packages = os.path.join(python_dir, "python", "Lib", "site-packages")
             else:
                 site_packages = os.path.join(python_dir, "python", "lib", "python3.10", "site-packages")
-            apply_patches(site_packages)
+        apply_patches(site_packages)
+        verify_embedded_triposf_patch()
 
             obfuscate_and_clean(python_dir, target_platform)
 

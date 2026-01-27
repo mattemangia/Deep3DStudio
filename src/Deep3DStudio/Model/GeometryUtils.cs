@@ -580,30 +580,46 @@ namespace Deep3DStudio.Model
 
             Vector3[] vertList = new Vector3[12];
             Vector3[] colList = new Vector3[12];
+            bool[] edgeValid = new bool[12];
 
-            if ((edgeTable[cubeIndex] & 1) != 0) VertexInterp(isoLevel, poss[0], poss[1], vals[0], vals[1], cVals[0], cVals[1], out vertList[0], out colList[0]);
-            if ((edgeTable[cubeIndex] & 2) != 0) VertexInterp(isoLevel, poss[1], poss[2], vals[1], vals[2], cVals[1], cVals[2], out vertList[1], out colList[1]);
-            if ((edgeTable[cubeIndex] & 4) != 0) VertexInterp(isoLevel, poss[2], poss[3], vals[2], vals[3], cVals[2], cVals[3], out vertList[2], out colList[2]);
-            if ((edgeTable[cubeIndex] & 8) != 0) VertexInterp(isoLevel, poss[3], poss[0], vals[3], vals[0], cVals[3], cVals[0], out vertList[3], out colList[3]);
-            if ((edgeTable[cubeIndex] & 16) != 0) VertexInterp(isoLevel, poss[4], poss[5], vals[4], vals[5], cVals[4], cVals[5], out vertList[4], out colList[4]);
-            if ((edgeTable[cubeIndex] & 32) != 0) VertexInterp(isoLevel, poss[5], poss[6], vals[5], vals[6], cVals[5], cVals[6], out vertList[5], out colList[5]);
-            if ((edgeTable[cubeIndex] & 64) != 0) VertexInterp(isoLevel, poss[6], poss[7], vals[6], vals[7], cVals[6], cVals[7], out vertList[6], out colList[6]);
-            if ((edgeTable[cubeIndex] & 128) != 0) VertexInterp(isoLevel, poss[7], poss[4], vals[7], vals[4], cVals[7], cVals[4], out vertList[7], out colList[7]);
-            if ((edgeTable[cubeIndex] & 256) != 0) VertexInterp(isoLevel, poss[0], poss[4], vals[0], vals[4], cVals[0], cVals[4], out vertList[8], out colList[8]);
-            if ((edgeTable[cubeIndex] & 512) != 0) VertexInterp(isoLevel, poss[1], poss[5], vals[1], vals[5], cVals[1], cVals[5], out vertList[9], out colList[9]);
-            if ((edgeTable[cubeIndex] & 1024) != 0) VertexInterp(isoLevel, poss[2], poss[6], vals[2], vals[6], cVals[2], cVals[6], out vertList[10], out colList[10]);
-            if ((edgeTable[cubeIndex] & 2048) != 0) VertexInterp(isoLevel, poss[3], poss[7], vals[3], vals[7], cVals[3], cVals[7], out vertList[11], out colList[11]);
+            if ((edgeTable[cubeIndex] & 1) != 0) { VertexInterp(isoLevel, poss[0], poss[1], vals[0], vals[1], cVals[0], cVals[1], out vertList[0], out colList[0]); edgeValid[0] = true; }
+            if ((edgeTable[cubeIndex] & 2) != 0) { VertexInterp(isoLevel, poss[1], poss[2], vals[1], vals[2], cVals[1], cVals[2], out vertList[1], out colList[1]); edgeValid[1] = true; }
+            if ((edgeTable[cubeIndex] & 4) != 0) { VertexInterp(isoLevel, poss[2], poss[3], vals[2], vals[3], cVals[2], cVals[3], out vertList[2], out colList[2]); edgeValid[2] = true; }
+            if ((edgeTable[cubeIndex] & 8) != 0) { VertexInterp(isoLevel, poss[3], poss[0], vals[3], vals[0], cVals[3], cVals[0], out vertList[3], out colList[3]); edgeValid[3] = true; }
+            if ((edgeTable[cubeIndex] & 16) != 0) { VertexInterp(isoLevel, poss[4], poss[5], vals[4], vals[5], cVals[4], cVals[5], out vertList[4], out colList[4]); edgeValid[4] = true; }
+            if ((edgeTable[cubeIndex] & 32) != 0) { VertexInterp(isoLevel, poss[5], poss[6], vals[5], vals[6], cVals[5], cVals[6], out vertList[5], out colList[5]); edgeValid[5] = true; }
+            if ((edgeTable[cubeIndex] & 64) != 0) { VertexInterp(isoLevel, poss[6], poss[7], vals[6], vals[7], cVals[6], cVals[7], out vertList[6], out colList[6]); edgeValid[6] = true; }
+            if ((edgeTable[cubeIndex] & 128) != 0) { VertexInterp(isoLevel, poss[7], poss[4], vals[7], vals[4], cVals[7], cVals[4], out vertList[7], out colList[7]); edgeValid[7] = true; }
+            if ((edgeTable[cubeIndex] & 256) != 0) { VertexInterp(isoLevel, poss[0], poss[4], vals[0], vals[4], cVals[0], cVals[4], out vertList[8], out colList[8]); edgeValid[8] = true; }
+            if ((edgeTable[cubeIndex] & 512) != 0) { VertexInterp(isoLevel, poss[1], poss[5], vals[1], vals[5], cVals[1], cVals[5], out vertList[9], out colList[9]); edgeValid[9] = true; }
+            if ((edgeTable[cubeIndex] & 1024) != 0) { VertexInterp(isoLevel, poss[2], poss[6], vals[2], vals[6], cVals[2], cVals[6], out vertList[10], out colList[10]); edgeValid[10] = true; }
+            if ((edgeTable[cubeIndex] & 2048) != 0) { VertexInterp(isoLevel, poss[3], poss[7], vals[3], vals[7], cVals[3], cVals[7], out vertList[11], out colList[11]); edgeValid[11] = true; }
 
             for (int i = 0; i < 15 && triTable[cubeIndex, i] != -1; i += 3)
             {
-                verts.Add(vertList[triTable[cubeIndex, i]]);
-                cols.Add(colList[triTable[cubeIndex, i]]);
+                int e0 = triTable[cubeIndex, i];
+                int e1 = triTable[cubeIndex, i + 1];
+                int e2 = triTable[cubeIndex, i + 2];
 
-                verts.Add(vertList[triTable[cubeIndex, i+1]]);
-                cols.Add(colList[triTable[cubeIndex, i+1]]);
+                if (e0 < 0 || e1 < 0 || e2 < 0) break;
+                if (!edgeValid[e0] || !edgeValid[e1] || !edgeValid[e2]) continue;
 
-                verts.Add(vertList[triTable[cubeIndex, i+2]]);
-                cols.Add(colList[triTable[cubeIndex, i+2]]);
+                var v0 = vertList[e0];
+                var v1 = vertList[e1];
+                var v2 = vertList[e2];
+
+                var edge1 = v1 - v0;
+                var edge2 = v2 - v0;
+                if (Vector3.Cross(edge1, edge2).LengthSquared < 1e-10f) continue;
+
+                verts.Add(v0);
+                cols.Add(colList[e0]);
+
+                verts.Add(v1);
+                cols.Add(colList[e1]);
+
+                verts.Add(v2);
+                cols.Add(colList[e2]);
             }
         }
 

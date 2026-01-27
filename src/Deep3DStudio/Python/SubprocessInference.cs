@@ -314,6 +314,11 @@ namespace Deep3DStudio.Python
                 psi.Environment["PYTHONHOME"] = pythonHome;
             }
 
+            if (_modelName.Equals("triposf", StringComparison.OrdinalIgnoreCase))
+            {
+                psi.Environment["DEEP3D_TRIPOSF_SKIP_MC"] = "1";
+            }
+
             using var process = new Process { StartInfo = psi };
             var stdout = new StringBuilder();
             var stderr = new StringBuilder();

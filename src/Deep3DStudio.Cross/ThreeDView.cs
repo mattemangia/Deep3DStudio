@@ -594,21 +594,20 @@ namespace Deep3DStudio.Viewport
 
                 if (obj is PointCloudObject pc && s.ShowPointCloud)
                 {
-                    GL.PointSize(pc.PointSize);
-                    GL.Begin(PrimitiveType.Points);
-                    bool hasColors = pc.Colors.Count >= pc.Points.Count;
-                    for(int i=0; i<pc.Points.Count; i++)
+                    DrawPointCloud(pc.Points, pc.Colors, pc.PointSize);
+                    if (obj.Selected)
                     {
-                        if(hasColors) { var c = pc.Colors[i]; GL.Color3(c.X, c.Y, c.Z); }
-                        else GL.Color3(1.0f, 1.0f, 1.0f);
-                        GL.Vertex3(pc.Points[i]);
+                        DrawBoundingBox(obj);
                     }
-                    GL.End();
                 }
 
                 if (obj is MeshObject mesh)
                 {
                     bool isSelected = obj.Selected;
+                    if ((s.ShowPointCloud || mesh.ShowAsPointCloud) && mesh.MeshData != null && mesh.MeshData.Vertices.Count > 0)
+                    {
+                        DrawPointCloud(mesh.MeshData.Vertices, mesh.MeshData.Colors, mesh.PointSize);
+                    }
 
                     if (s.ShowWireframe || mesh.ShowWireframe) GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Line);
                     else GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
@@ -673,6 +672,29 @@ namespace Deep3DStudio.Viewport
 
                 GL.PopMatrix();
             }
+        }
+
+        private static void DrawPointCloud(IReadOnlyList<Vector3> points, IReadOnlyList<Vector3> colors, float pointSize)
+        {
+            if (points.Count == 0) return;
+
+            GL.PointSize(pointSize);
+            GL.Begin(PrimitiveType.Points);
+            bool hasColors = colors.Count >= points.Count;
+            for (int i = 0; i < points.Count; i++)
+            {
+                if (hasColors)
+                {
+                    var c = colors[i];
+                    GL.Color3(c.X, c.Y, c.Z);
+                }
+                else
+                {
+                    GL.Color3(1.0f, 1.0f, 1.0f);
+                }
+                GL.Vertex3(points[i]);
+            }
+            GL.End();
         }
 
         private void UploadTexture(MeshData mesh)

@@ -50,8 +50,19 @@ namespace Deep3DStudio
                             try
                             {
                                 var meshData = MeshImporter.Load(path);
-                                var meshObj = new MeshObject(System.IO.Path.GetFileNameWithoutExtension(path), meshData);
-                                _sceneGraph.AddObject(meshObj);
+                                
+                                // If mesh has no faces (e.g. they were filtered out or empty), treat as Point Cloud
+                                if (meshData.Indices.Count == 0 && meshData.Vertices.Count > 0)
+                                {
+                                    var pcObj = new PointCloudObject(System.IO.Path.GetFileNameWithoutExtension(path), meshData);
+                                    _sceneGraph.AddObject(pcObj);
+                                    Console.WriteLine($"Imported {path} as Point Cloud (0 faces)");
+                                }
+                                else
+                                {
+                                    var meshObj = new MeshObject(System.IO.Path.GetFileNameWithoutExtension(path), meshData);
+                                    _sceneGraph.AddObject(meshObj);
+                                }
                                 importedCount++;
                             }
                             catch (Exception ex)

@@ -196,6 +196,13 @@ namespace Deep3DStudio.Scene
         {
             ObjectType = SceneObjectType.Mesh;
             MeshData = mesh;
+
+            // Ensure normals are valid for shading
+            if (MeshData != null && (MeshData.Normals.Count != MeshData.Vertices.Count || MeshData.Normals.All(n => n == Vector3.Zero)))
+            {
+                MeshData.RecalculateNormals();
+            }
+
             UpdateBounds();
             Console.WriteLine($"MeshObject '{name}' created: {VertexCount} vertices, {TriangleCount} triangles, bounds: ({BoundsMin.X:F2},{BoundsMin.Y:F2},{BoundsMin.Z:F2}) to ({BoundsMax.X:F2},{BoundsMax.Y:F2},{BoundsMax.Z:F2})");
         }

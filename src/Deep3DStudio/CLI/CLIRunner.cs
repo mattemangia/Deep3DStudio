@@ -6,6 +6,9 @@ using Deep3DStudio.Model;
 using Deep3DStudio.Model.AIModels;
 using Deep3DStudio.Configuration;
 using Deep3DStudio.Python;
+using Deep3DStudio.IO;
+using Deep3DStudio.Scene;
+using Deep3DStudio.Meshing;
 
 namespace Deep3DStudio.CLI
 {
@@ -43,6 +46,9 @@ namespace Deep3DStudio.CLI
                     return RunTestProblematicModels();
                 case "nerf":
                     return RunNeRFWorkflow();
+                case "pc-mesh-triposf":
+                case "pointcloud-mesh-triposf":
+                    return RunPointCloudToMeshTripoSF();
                 case "reextract-python":
                 case "reextract-env":
                 case "reextract-python-env":
@@ -415,6 +421,202 @@ namespace Deep3DStudio.CLI
                 manager.UnloadAllModels();
                 TuiStatusMonitor.Instance.SetCancellationTokenSource(null);
             }
+        }
+
+        private int RunPointCloudToMeshTripoSF()
+        {
+            if (string.IsNullOrWhiteSpace(_options.InputPath) || !File.Exists(_options.InputPath))
+            {
+                Console.Error.WriteLine("Point cloud input not found. Provide --input <file.ply|file.xyz>.");
+                return 1;
+            }
+
+            var inputPath = Path.GetFullPath(_options.InputPath);
+            Console.WriteLine($"Loading point cloud: {inputPath}");
+
+            PointCloudObject pc;
+            try
+            {
+                pc = PointCloudImporter.Load(inputPath);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed to load point cloud: {ex.Message}");
+                return 1;
+            }
+
+            if (pc.Points.Count == 0)
+            {
+                Console.Error.WriteLine("Point cloud is empty. Aborting.");
+                return 1;
+            }
+
+            using var cancellationSource = new System.Threading.CancellationTokenSource();
+            TuiStatusMonitor.Instance.SetCancellationTokenSource(cancellationSource);
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;
+                cancellationSource.Cancel();
+                Console.WriteLine("Cancellation requested. Stopping after current step...");
+            };
+
+            try
+            {
+                int targetRes = _options.VoxelResolution.HasValue ? Math.Clamp(_options.VoxelResolution.Value, 32, 512) : 128;
+                Console.WriteLine($"Voxelizing point cloud (targetRes={targetRes})...");
+                var voxelized = VoxelizePointCloud(pc.Points, targetRes);
+                if (voxelized.grid == null)
+                {
+                    Console.Error.WriteLine("Voxelization failed.");
+                    return 1;
+                }
+
+                Console.WriteLine("Running marching cubes...");
+                var mesher = new MarchingCubesMesher();
+                var baseMesh = mesher.GenerateMesh(voxelized.grid, voxelized.origin, voxelized.voxelSize, 0.5f);
+                Console.WriteLine($"Marching cubes: {baseMesh.Vertices.Count} vertices, {baseMesh.Indices.Count / 3} triangles");
+
+                if (baseMesh.Vertices.Count == 0 || baseMesh.Indices.Count == 0)
+                {
+                    Console.Error.WriteLine("Marching cubes produced no geometry.");
+                    return 1;
+                }
+
+                var baseOutputPath = GetDefaultOutputPath(inputPath, "_mc.ply");
+                if (!string.IsNullOrWhiteSpace(_options.OutputPath))
+                {
+                    var dir = Path.GetDirectoryName(_options.OutputPath) ?? Environment.CurrentDirectory;
+                    baseOutputPath = Path.Combine(dir, Path.GetFileNameWithoutExtension(_options.OutputPath) + "_mc.ply");
+                }
+                Console.WriteLine($"Saving base mesh to: {baseOutputPath}");
+                MeshExporter.Save(baseOutputPath, baseMesh);
+
+                Console.WriteLine("Running TripoSF refinement...");
+                using var tripo = new TripoSFInference();
+                var refined = tripo.RefineMesh(baseMesh, cancellationSource.Token);
+
+                if (refined == null || refined.Vertices.Count == 0 || refined.Indices.Count == 0)
+                {
+                    Console.Error.WriteLine("TripoSF produced no geometry.");
+                    return 1;
+                }
+
+                var outputPath = string.IsNullOrWhiteSpace(_options.OutputPath)
+                    ? GetDefaultOutputPath(inputPath, "_tripoSF.ply")
+                    : _options.OutputPath;
+
+                Console.WriteLine($"Saving refined mesh to: {outputPath}");
+                MeshExporter.Save(outputPath, refined);
+                Console.WriteLine("Done.");
+                return 0;
+            }
+            catch (OperationCanceledException)
+            {
+                Console.Error.WriteLine("Cancelled.");
+                return 1;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Failed: {ex.Message}");
+                return 1;
+            }
+            finally
+            {
+                AIModelManager.Instance.UnloadAllModels();
+                TuiStatusMonitor.Instance.SetCancellationTokenSource(null);
+            }
+        }
+
+        private static string GetDefaultOutputPath(string inputPath, string suffix)
+        {
+            var dir = Path.GetDirectoryName(inputPath) ?? Environment.CurrentDirectory;
+            var name = Path.GetFileNameWithoutExtension(inputPath);
+            return Path.Combine(dir, $"{name}{suffix}");
+        }
+
+        private static (float[,,]? grid, OpenTK.Mathematics.Vector3 origin, float voxelSize) VoxelizePointCloud(
+            IList<OpenTK.Mathematics.Vector3> points,
+            int targetRes)
+        {
+            if (points.Count == 0 || targetRes < 16)
+                return (null, OpenTK.Mathematics.Vector3.Zero, 0.02f);
+
+            var min = new OpenTK.Mathematics.Vector3(float.MaxValue);
+            var max = new OpenTK.Mathematics.Vector3(float.MinValue);
+
+            foreach (var v in points)
+            {
+                min = OpenTK.Mathematics.Vector3.ComponentMin(min, v);
+                max = OpenTK.Mathematics.Vector3.ComponentMax(max, v);
+            }
+
+            var size = max - min;
+            float maxDim = Math.Max(size.X, Math.Max(size.Y, size.Z));
+            if (maxDim <= 0)
+                return (null, min, 0.02f);
+
+            float voxelSize = maxDim / Math.Max(2, targetRes - 1);
+            int w = Math.Min(targetRes, (int)Math.Ceiling(size.X / voxelSize) + 3);
+            int h = Math.Min(targetRes, (int)Math.Ceiling(size.Y / voxelSize) + 3);
+            int d = Math.Min(targetRes, (int)Math.Ceiling(size.Z / voxelSize) + 3);
+
+            if (w <= 2 || h <= 2 || d <= 2)
+                return (null, min, voxelSize);
+
+            var grid = new float[w, h, d];
+            foreach (var v in points)
+            {
+                int x = (int)((v.X - min.X) / voxelSize);
+                int y = (int)((v.Y - min.Y) / voxelSize);
+                int z = (int)((v.Z - min.Z) / voxelSize);
+                if (x >= 0 && x < w && y >= 0 && y < h && z >= 0 && z < d)
+                {
+                    grid[x, y, z] = 1.0f;
+                }
+            }
+
+            // Apply smoothing (Box Blur) to create a continuous density field
+            // This is crucial for Poisson Mesher (gradients) and Marching Cubes (smooth surface)
+            int smoothPasses = 3;
+            var current = grid;
+            var next = new float[w, h, d];
+
+            for (int iter = 0; iter < smoothPasses; iter++)
+            {
+                // Simple parallel implementation (using Parallel.For if available, or just loops)
+                // Since this is CLI, we can use System.Threading.Tasks.Parallel
+                System.Threading.Tasks.Parallel.For(1, w - 1, x =>
+                {
+                    for (int y = 1; y < h - 1; y++)
+                    {
+                        for (int z = 1; z < d - 1; z++)
+                        {
+                            float sum = 0;
+                            int count = 0;
+
+                            for (int dx = -1; dx <= 1; dx++)
+                            {
+                                for (int dy = -1; dy <= 1; dy++)
+                                {
+                                    for (int dz = -1; dz <= 1; dz++)
+                                    {
+                                        sum += current[x + dx, y + dy, z + dz];
+                                        count++;
+                                    }
+                                }
+                            }
+                            next[x, y, z] = sum / count;
+                        }
+                    }
+                });
+
+                // Swap buffers
+                var temp = current;
+                current = next;
+                next = temp; // Reuse buffer
+            }
+
+            return (current, min, voxelSize);
         }
 
         private int RunTestProblematicModels()
@@ -893,6 +1095,7 @@ namespace Deep3DStudio.CLI
             Console.WriteLine("Usage:");
             Console.WriteLine("  --cli --command test-all [--input <file|dir>] [--verbose]");
             Console.WriteLine("  --cli --command nerf [--input <file|dir>] [--nerf-iterations N]");
+            Console.WriteLine("  --cli --command pc-mesh-triposf --input <file.ply|file.xyz> [--output <file.ply>] [--voxel-res N]");
             Console.WriteLine("Options:");
             Console.WriteLine("  --cli, --headless   Run without GUI");
             Console.WriteLine("  --command, --mode   CLI command to run");

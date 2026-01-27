@@ -60,6 +60,9 @@ namespace Deep3DStudio.IO
                 {
                     if (parts.Length >= 4)
                     {
+                        // Ignore faces with too many vertices (likely a point cloud saved as a single polygon)
+                        if (parts.Length > 130) continue;
+
                         // Triangulate fan
                         for (int i = 2; i < parts.Length - 1; i++)
                         {
