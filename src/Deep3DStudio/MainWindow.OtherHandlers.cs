@@ -356,17 +356,30 @@ namespace Deep3DStudio
                 bool isLGM = !string.IsNullOrEmpty(workflow) && workflow.Contains("LGM");
 
                 var selectedPointClouds = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
+                Console.WriteLine($"[Meshing] Selected point clouds from sceneGraph: {selectedPointClouds.Count}");
+
                 if (!isLGM && selectedPointClouds.Count == 0 && _sceneTreeView != null)
                 {
                     selectedPointClouds = _sceneTreeView.GetSelectedObjects().OfType<PointCloudObject>().ToList();
+                    Console.WriteLine($"[Meshing] Selected point clouds from treeView: {selectedPointClouds.Count}");
                 }
+
+                // Fallback: use all point clouds in the scene if none are selected
                 if (!isLGM && selectedPointClouds.Count == 0)
                 {
-                    // Try to build result from current scene if possible?
-                    // For now, require point cloud generation first
-                    ShowMessage("No point cloud selected. Please select a point cloud first.");
+                    selectedPointClouds = _sceneGraph.GetObjectsOfType<PointCloudObject>().ToList();
+                    Console.WriteLine($"[Meshing] Fallback to all point clouds in scene: {selectedPointClouds.Count}");
+                }
+
+                if (!isLGM && selectedPointClouds.Count == 0)
+                {
+                    ShowMessage("No point cloud found. Please import a point cloud first.");
                     return;
                 }
+
+                // Log point cloud stats
+                int totalPoints = selectedPointClouds.Sum(pc => pc.PointCount);
+                Console.WriteLine($"[Meshing] Total points to mesh: {totalPoints}");
 
                 _statusLabel.Text = $"Meshing ({workflow})...";
                 while (Application.EventsPending()) Application.RunIteration();
@@ -458,10 +471,33 @@ namespace Deep3DStudio
 
         private MeshData GenerateMeshFromPointClouds(List<PointCloudObject> pointClouds, MeshingAlgorithm algorithm, int maxRes = 200)
         {
+            Console.WriteLine($"[Meshing] GenerateMeshFromPointClouds: {pointClouds.Count} point clouds, algorithm={algorithm}, maxRes={maxRes}");
+
             var meshes = pointClouds.Select(ToMeshData).ToList();
+            int totalVerts = meshes.Sum(m => m.Vertices.Count);
+            Console.WriteLine($"[Meshing] Total vertices from point clouds: {totalVerts}");
+
             var (grid, min, size) = VoxelizePoints(meshes, maxRes);
+            int gridX = grid.GetLength(0);
+            int gridY = grid.GetLength(1);
+            int gridZ = grid.GetLength(2);
+            Console.WriteLine($"[Meshing] Voxel grid: {gridX}x{gridY}x{gridZ}, origin=({min.X:F2},{min.Y:F2},{min.Z:F2}), voxelSize={size:F4}");
+
+            // Count non-zero voxels
+            int nonZeroVoxels = 0;
+            for (int x = 0; x < gridX; x++)
+                for (int y = 0; y < gridY; y++)
+                    for (int z = 0; z < gridZ; z++)
+                        if (grid[x, y, z] > 0.01f) nonZeroVoxels++;
+            Console.WriteLine($"[Meshing] Non-zero voxels: {nonZeroVoxels}");
+
             IMesher mesher = GetMesher(algorithm);
-            return mesher.GenerateMesh(grid, min, size, 0.5f);
+            Console.WriteLine($"[Meshing] Running {mesher.GetType().Name}...");
+
+            var result = mesher.GenerateMesh(grid, min, size, 0.5f);
+            Console.WriteLine($"[Meshing] Result: {result.Vertices.Count} vertices, {result.Indices.Count} indices");
+
+            return result;
         }
 
         private async Task<MeshData?> RefineMeshAsync(

@@ -50,18 +50,20 @@ namespace Deep3DStudio
                             try
                             {
                                 var meshData = MeshImporter.Load(path);
-                                
+
                                 // If mesh has no faces (e.g. they were filtered out or empty), treat as Point Cloud
                                 if (meshData.Indices.Count == 0 && meshData.Vertices.Count > 0)
                                 {
                                     var pcObj = new PointCloudObject(System.IO.Path.GetFileNameWithoutExtension(path), meshData);
                                     _sceneGraph.AddObject(pcObj);
+                                    _sceneGraph.Select(pcObj);
                                     Console.WriteLine($"Imported {path} as Point Cloud (0 faces)");
                                 }
                                 else
                                 {
                                     var meshObj = new MeshObject(System.IO.Path.GetFileNameWithoutExtension(path), meshData);
                                     _sceneGraph.AddObject(meshObj);
+                                    _sceneGraph.Select(meshObj);
                                 }
                                 importedCount++;
                             }
@@ -76,6 +78,7 @@ namespace Deep3DStudio
                             {
                                 var pcObj = PointCloudImporter.Load(path);
                                 _sceneGraph.AddObject(pcObj);
+                                _sceneGraph.Select(pcObj);
                                 importedCount++;
                             }
                             catch (Exception ex)
@@ -106,8 +109,9 @@ namespace Deep3DStudio
                 if (importedCount > 0)
                 {
                     _statusLabel.Text = $"Imported {importedCount} 3D objects";
-                    _viewport.QueueDraw();
                     _sceneTreeView.RefreshTree();
+                    _viewport.FocusOnSelection();
+                    _viewport.QueueDraw();
                 }
             }
             Gtk.Drag.Finish(args.Context, true, false, args.Time);

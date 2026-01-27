@@ -206,7 +206,9 @@ namespace Deep3DStudio
                     string path = fc.Filename;
                     var pcObj = PointCloudImporter.Load(path);
                     _sceneGraph.AddObject(pcObj);
+                    _sceneGraph.Select(pcObj);
                     _sceneTreeView.RefreshTree();
+                    _viewport.FocusOnSelection();
                     _viewport.QueueDraw();
                     _statusLabel.Text = $"Imported point cloud from {path}";
                 }
