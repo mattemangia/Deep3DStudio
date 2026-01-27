@@ -1511,7 +1511,13 @@ namespace Deep3DStudio
         private void RenderSceneGraph()
         {
             int i = 0;
-            foreach (var obj in _sceneGraph.GetVisibleObjects())
+            SceneObject? objectToDelete = null;
+            SceneObject? objectToDuplicate = null;
+
+            // Take a snapshot of visible objects to avoid collection modification during iteration
+            var visibleObjects = _sceneGraph.GetVisibleObjects().ToList();
+
+            foreach (var obj in visibleObjects)
             {
                 bool selected = obj.Selected;
                 string name = obj.Name ?? $"Object {obj.Id}";
@@ -1554,13 +1560,24 @@ namespace Deep3DStudio
                             _renameBuffer = obj.Name ?? "";
                         }
                         if (ImGui.MenuItem("Focus")) _viewport.FocusOnObject(obj);
-                        if (ImGui.MenuItem("Delete")) _sceneGraph.RemoveObject(obj);
-                        if (ImGui.MenuItem("Duplicate")) OnDuplicateObject(obj);
+                        if (ImGui.MenuItem("Delete")) objectToDelete = obj;
+                        if (ImGui.MenuItem("Duplicate")) objectToDuplicate = obj;
                         ImGui.EndPopup();
                     }
                 }
 
                 i++;
+            }
+
+            // Perform deferred operations after iteration is complete
+            if (objectToDelete != null)
+            {
+                _sceneGraph.RemoveObject(objectToDelete);
+                _isDirty = true;
+            }
+            if (objectToDuplicate != null)
+            {
+                OnDuplicateObject(objectToDuplicate);
             }
 
             if (_sceneGraph.ObjectCount == 0)
