@@ -20,11 +20,20 @@ using System.Threading.Tasks;
 using System.IO;
 using System.Linq;
 using Deep3DStudio.UI;
+using System.Reflection;
 
 namespace Deep3DStudio
 {
     public partial class MainWindow : GameWindow
     {
+        private enum PendingUnsavedAction
+        {
+            None,
+            Exit,
+            NewProject,
+            OpenProject
+        }
+
         private ImGuiController _controller;
         private ThreeDView _viewport;
         private SceneGraph _sceneGraph;
@@ -150,7 +159,10 @@ namespace Deep3DStudio
         // Project State
         private bool _isDirty = false;
         private string _currentProjectPath = "";
-        private bool _showExitConfirmation = false;
+        private bool _showUnsavedChangesPrompt = false;
+        private PendingUnsavedAction _pendingUnsavedAction = PendingUnsavedAction.None;
+        private string? _pendingOpenProjectPath = null;
+        private bool _executePendingActionAfterSave = false;
 
         // Popup Management
         private string? _popupToOpen = null;
@@ -345,12 +357,34 @@ namespace Deep3DStudio
             Title = title + ": OpenGL Version: " + GL.GetString(StringName.Version);
         }
 
+        private static string GetAppVersionText()
+        {
+            var assembly = Assembly.GetExecutingAssembly();
+            var informational = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            if (!string.IsNullOrWhiteSpace(informational))
+            {
+                var clean = informational.Split('+')[0];
+                return $"Version {clean}";
+            }
+
+            var version = assembly.GetName().Version;
+            return version != null ? $"Version {version}" : "Version unknown";
+        }
+
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
         {
-            if (_isDirty && !_showExitConfirmation)
+            if (_showUnsavedChangesPrompt)
             {
                 e.Cancel = true;
-                _showExitConfirmation = true;
+                base.OnClosing(e);
+                return;
+            }
+
+            if (_isDirty && !_showUnsavedChangesPrompt)
+            {
+                e.Cancel = true;
+                _pendingUnsavedAction = PendingUnsavedAction.Exit;
+                _showUnsavedChangesPrompt = true;
             }
             base.OnClosing(e);
         }
@@ -723,7 +757,7 @@ namespace Deep3DStudio
                 ImGui.TextColored(new System.Numerics.Vector4(0.4f, 0.9f, 0.4f, 1.0f), status);
             }
 
-            string version = "Version 1.0.0";
+            string version = GetAppVersionText();
             var verSize = ImGui.CalcTextSize(version);
             ImGui.SetCursorPos(new System.Numerics.Vector2(ClientSize.X - verSize.X - 10, ClientSize.Y - 25));
             ImGui.TextDisabled(version);
@@ -747,40 +781,52 @@ namespace Deep3DStudio
                 _popupToOpen = null;
             }
 
-            // Exit Confirmation
-            if (_showExitConfirmation)
+            // Unsaved changes prompt
+            if (_showUnsavedChangesPrompt)
             {
-                ImGui.OpenPopup("Really Exit?");
+                ImGui.OpenPopup("Unsaved Changes");
 
                 // Center the modal
                 var io = ImGui.GetIO();
                 ImGui.SetNextWindowPos(new System.Numerics.Vector2(io.DisplaySize.X * 0.5f, io.DisplaySize.Y * 0.5f), ImGuiCond.Always, new System.Numerics.Vector2(0.5f, 0.5f));
 
-                if (ImGui.BeginPopupModal("Really Exit?", ref _showExitConfirmation, ImGuiWindowFlags.AlwaysAutoResize))
+                if (ImGui.BeginPopupModal("Unsaved Changes", ref _showUnsavedChangesPrompt, ImGuiWindowFlags.AlwaysAutoResize))
                 {
-                    ImGui.Text("You have unsaved changes. Do you want to save before exiting?");
+                    ImGui.Text("You have unsaved changes. Do you want to save before continuing?");
                     ImGui.Separator();
 
-                    if (ImGui.Button("Save & Exit", new System.Numerics.Vector2(120, 0)))
+                    if (ImGui.Button("Save", new System.Numerics.Vector2(120, 0)))
                     {
                         ImGui.CloseCurrentPopup();
-                        _showExitConfirmation = false;
-                        OnSaveProject(true);
+                        _showUnsavedChangesPrompt = false;
+                        if (_pendingUnsavedAction == PendingUnsavedAction.Exit)
+                        {
+                            ClearPendingUnsavedAction();
+                            OnSaveProject(true);
+                        }
+                        else
+                        {
+                            _executePendingActionAfterSave = true;
+                            OnSaveProject();
+                        }
                     }
                     ImGui.SameLine();
 
-                    if (ImGui.Button("Discard Changes", new System.Numerics.Vector2(120, 0)))
+                    if (ImGui.Button("Discard", new System.Numerics.Vector2(120, 0)))
                     {
                         ImGui.CloseCurrentPopup();
-                        _isDirty = false; // Prevent loop
-                        Close();
+                        _showUnsavedChangesPrompt = false;
+                        _isDirty = false;
+                        ExecutePendingUnsavedActionAndClear();
                     }
                     ImGui.SetItemDefaultFocus();
                     ImGui.SameLine();
                     if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0)))
                     {
                         ImGui.CloseCurrentPopup();
-                        _showExitConfirmation = false;
+                        _showUnsavedChangesPrompt = false;
+                        _executePendingActionAfterSave = false;
+                        ClearPendingUnsavedAction();
                     }
 
                     ImGui.EndPopup();
@@ -2371,7 +2417,7 @@ namespace Deep3DStudio
 
                 ImGui.Spacing();
 
-                string version = "Version 1.0.0";
+                string version = GetAppVersionText();
                 var verSize = ImGui.CalcTextSize(version);
                 ImGui.SetCursorPosX((windowWidth - verSize.X) * 0.5f);
                 ImGui.Text(version);
@@ -2492,6 +2538,14 @@ namespace Deep3DStudio
 
         private void OnNewProject()
         {
+            if (!EnsureCanProceedWithUnsavedChanges(PendingUnsavedAction.NewProject))
+                return;
+
+            PerformNewProject();
+        }
+
+        private void PerformNewProject()
+        {
             _sceneGraph.Clear();
             ClearImages();
             _logBuffer = "";
@@ -2502,6 +2556,14 @@ namespace Deep3DStudio
         }
 
         private void OnOpenProject(string? path = null)
+        {
+            if (!EnsureCanProceedWithUnsavedChanges(PendingUnsavedAction.OpenProject, path))
+                return;
+
+            PerformOpenProject(path);
+        }
+
+        private void PerformOpenProject(string? path = null)
         {
             if (path == null)
             {
@@ -2583,6 +2645,43 @@ namespace Deep3DStudio
             });
         }
 
+        private bool EnsureCanProceedWithUnsavedChanges(PendingUnsavedAction action, string? openProjectPath = null)
+        {
+            if (!_isDirty)
+                return true;
+
+            _pendingUnsavedAction = action;
+            _pendingOpenProjectPath = openProjectPath;
+            _showUnsavedChangesPrompt = true;
+            return false;
+        }
+
+        private void ExecutePendingUnsavedActionAndClear()
+        {
+            var action = _pendingUnsavedAction;
+            var openPath = _pendingOpenProjectPath;
+            ClearPendingUnsavedAction();
+
+            switch (action)
+            {
+                case PendingUnsavedAction.Exit:
+                    Close();
+                    break;
+                case PendingUnsavedAction.NewProject:
+                    PerformNewProject();
+                    break;
+                case PendingUnsavedAction.OpenProject:
+                    PerformOpenProject(openPath);
+                    break;
+            }
+        }
+
+        private void ClearPendingUnsavedAction()
+        {
+            _pendingUnsavedAction = PendingUnsavedAction.None;
+            _pendingOpenProjectPath = null;
+        }
+
         private void OnSaveProject(bool exitAfter = false)
         {
             if (string.IsNullOrEmpty(_currentProjectPath))
@@ -2595,9 +2694,6 @@ namespace Deep3DStudio
             Task.Run(() => {
                 try
                 {
-                    // Copy lists to avoid collection modification exceptions if scene changes during save
-                    SceneGraph graphSnapshot;
-                    List<string> imagesSnapshot;
                     lock (_sceneGraph)
                     {
                         CrossProjectManager.SaveProject(_currentProjectPath, _sceneGraph, _loadedImages);
@@ -2608,7 +2704,15 @@ namespace Deep3DStudio
                         UpdateTitle();
                         ProgressDialog.Instance.Log($"Project saved: {_currentProjectPath}");
                         ProgressDialog.Instance.Complete();
-                        if (exitAfter) Close();
+                        if (exitAfter)
+                        {
+                            Close();
+                        }
+                        else if (_executePendingActionAfterSave)
+                        {
+                            _executePendingActionAfterSave = false;
+                            ExecutePendingUnsavedActionAndClear();
+                        }
                     });
                 }
                 catch (Exception ex)
@@ -2626,6 +2730,11 @@ namespace Deep3DStudio
                 if (!path.EndsWith(".d3d")) path += ".d3d";
                 _currentProjectPath = path;
                 OnSaveProject(exitAfter);
+            }
+            else
+            {
+                _executePendingActionAfterSave = false;
+                ClearPendingUnsavedAction();
             }
         }
 
@@ -3548,7 +3657,11 @@ namespace Deep3DStudio
                 }
                 catch (Exception ex)
                 {
-                    ProgressDialog.Instance.Fail(ex);
+                    EnqueueAction(() =>
+                    {
+                        _executePendingActionAfterSave = false;
+                        ProgressDialog.Instance.Fail(ex);
+                    });
                 }
             });
         }

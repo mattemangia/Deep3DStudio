@@ -16,6 +16,7 @@ using System.Threading.Tasks;
 using System.Linq;
 using Action = System.Action;
 using System.IO;
+using System.Reflection;
 
 namespace Deep3DStudio
 {
@@ -56,7 +57,16 @@ namespace Deep3DStudio
                     string path = fc.Filename;
                     if (!path.EndsWith(".d3d")) path += ".d3d";
 
-                    ProjectManager.SaveProject(path, this, _sceneGraph, _imagePaths);
+                    var projectImages = _imageBrowser.GetImages()
+                        .Where(img => !string.IsNullOrWhiteSpace(img.FilePath))
+                        .Select(img => new ProjectImage
+                        {
+                            FilePath = img.FilePath,
+                            Alias = string.IsNullOrWhiteSpace(img.DisplayName) ? System.IO.Path.GetFileName(img.FilePath) : img.DisplayName
+                        })
+                        .ToList();
+
+                    ProjectManager.SaveProject(path, this, _sceneGraph, _imagePaths, projectImages);
                     _statusLabel.Text = $"Project saved to {path}";
                     _isDirty = false;
                     UpdateTitle();
@@ -97,17 +107,38 @@ namespace Deep3DStudio
                     _sceneGraph.Clear();
                     _lastSceneResult = null;
 
-                    // Restore images
-                    foreach (var imgPath in state.ImagePaths)
+                    // Restore images (prefer rich entries with alias; fallback to legacy ImagePaths)
+                    if (state.Images != null && state.Images.Count > 0)
                     {
-                        if (System.IO.File.Exists(imgPath))
+                        foreach (var projectImage in state.Images)
                         {
-                            _imagePaths.Add(imgPath);
-                            _imageBrowser.AddImage(imgPath);
+                            if (projectImage == null || string.IsNullOrWhiteSpace(projectImage.FilePath))
+                                continue;
+
+                            if (System.IO.File.Exists(projectImage.FilePath))
+                            {
+                                _imagePaths.Add(projectImage.FilePath);
+                                _imageBrowser.AddImage(projectImage.FilePath, projectImage.Alias);
+                            }
+                            else
+                            {
+                                Console.WriteLine($"Warning: Image not found at {projectImage.FilePath}");
+                            }
                         }
-                        else
+                    }
+                    else
+                    {
+                        foreach (var imgPath in state.ImagePaths)
                         {
-                            Console.WriteLine($"Warning: Image not found at {imgPath}");
+                            if (System.IO.File.Exists(imgPath))
+                            {
+                                _imagePaths.Add(imgPath);
+                                _imageBrowser.AddImage(imgPath);
+                            }
+                            else
+                            {
+                                Console.WriteLine($"Warning: Image not found at {imgPath}");
+                            }
                         }
                     }
 
@@ -451,6 +482,20 @@ namespace Deep3DStudio
             _statusLabel.Text = "Flipped normals";
         }
 
+        private static string GetAppVersionText()
+        {
+            var assembly = Assembly.GetExecutingAssembly();
+            var informational = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            if (!string.IsNullOrWhiteSpace(informational))
+            {
+                var clean = informational.Split('+')[0];
+                return $"Version {clean}";
+            }
+
+            var version = assembly.GetName().Version;
+            return version != null ? $"Version {version}" : "Version unknown";
+        }
+
         private void OnShowAbout(object? sender, EventArgs e)
         {
             var aboutDialog = new Dialog("About Deep3D Studio", this, DialogFlags.Modal);
@@ -495,7 +540,7 @@ namespace Deep3DStudio
             labelTitle.Markup = "<span size='x-large' weight='bold' foreground='#FFFFFF'>Deep3D Studio</span>";
             vbox.PackStart(labelTitle, false, false, 0);
 
-            var labelDesc = new Label("A 3D reconstruction tool using Dust3r and NeRF.\n\nVersion 1.0");
+            var labelDesc = new Label($"A 3D reconstruction tool using Dust3r and NeRF.\n\n{GetAppVersionText()}");
             labelDesc.Justify = Justification.Center;
             labelDesc.ModifyFg(StateType.Normal, new Gdk.Color(220, 220, 220));
             vbox.PackStart(labelDesc, false, false, 0);

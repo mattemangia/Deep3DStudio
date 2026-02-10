@@ -26,7 +26,7 @@ namespace Deep3DStudio.UI
         private const int MaxDisplaySize = 800;
 
         public ImagePreviewDialog(Gtk.Window parent, ImageEntry entry) : base(
-            entry.FileName,
+            string.IsNullOrWhiteSpace(entry.DisplayName) ? entry.FileName : entry.DisplayName,
             parent,
             DialogFlags.Modal | DialogFlags.DestroyWithParent,
             "Close", ResponseType.Close)

@@ -17,15 +17,36 @@ namespace Deep3DStudio.Model
             IncludeFields = true
         };
 
-        public static void SaveProject(string filePath, MainWindow window, SceneGraph sceneGraph, List<string> imagePaths)
+        public static void SaveProject(
+            string filePath,
+            MainWindow window,
+            SceneGraph sceneGraph,
+            List<string> imagePaths,
+            List<ProjectImage>? images = null)
         {
             var state = new ProjectState();
-            state.ImagePaths = new List<string>(imagePaths);
-            state.Images = imagePaths.Select(p => new ProjectImage
+            if (images != null && images.Count > 0)
             {
-                FilePath = p,
-                Alias = Path.GetFileName(p)
-            }).ToList();
+                state.Images = images
+                    .Where(i => i != null && !string.IsNullOrWhiteSpace(i.FilePath))
+                    .Select(i => new ProjectImage
+                    {
+                        FilePath = i.FilePath,
+                        Alias = string.IsNullOrWhiteSpace(i.Alias) ? Path.GetFileName(i.FilePath) : i.Alias
+                    })
+                    .ToList();
+                state.ImagePaths = state.Images.Select(i => i.FilePath).ToList();
+            }
+            else
+            {
+                state.ImagePaths = new List<string>(imagePaths);
+                state.Images = imagePaths.Select(p => new ProjectImage
+                {
+                    FilePath = p,
+                    Alias = Path.GetFileName(p)
+                }).ToList();
+            }
+
             state.Scene = ConvertSceneToDTO(sceneGraph.Root);
             state.LastModified = DateTime.Now;
 

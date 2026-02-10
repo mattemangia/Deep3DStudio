@@ -9,11 +9,12 @@
 </p>
 
 <p align="center">
-  <a href="#features">Features</a> •
-  <a href="#installation">Installation</a> •
-  <a href="#usage">Usage</a> •
-  <a href="#building-from-source">Building</a> •
-  <a href="#contributing">Contributing</a> •
+  <a href="#features">Features</a> |
+  <a href="#installation">Installation</a> |
+  <a href="#usage">Usage</a> |
+  <a href="#cli-headless">CLI</a> |
+  <a href="#building-from-source">Building</a> |
+  <a href="#contributing">Contributing</a> |
   <a href="#license">License</a>
 </p>
 
@@ -23,7 +24,10 @@
 
 Deep3D Studio is a comprehensive AI-powered 3D reconstruction application that combines state-of-the-art deep learning models with traditional computer vision techniques. It enables users to create high-quality 3D models from images using various AI pipelines, with support for mesh processing, rigging, texturing, and more.
 
-The application is developed as part of research at the **Università degli Studi di Urbino Carlo Bo**.
+The application is developed as part of research at the **Universita degli Studi di Urbino Carlo Bo**.
+
+**Current Version:** 1.1.0  
+**Year:** 2026
 
 ## Features
 
@@ -86,11 +90,11 @@ The application is developed as part of research at the **Università degli Stud
 
 ### Advanced Workflows
 
-- Full pipeline: Images → Dust3r → NeRF → Mesh
-- Dust3r → DeepMeshPrior workflow
-- Dust3r → NeRF → DeepMeshPrior workflow
+- Full pipeline: Images -> Dust3r -> NeRF -> Mesh
+- Dust3r -> DeepMeshPrior workflow
+- Dust3r -> NeRF -> DeepMeshPrior workflow
 - Point cloud merge & refine
-- SfM → AI refinement
+- SfM -> AI refinement
 
 ### Import/Export Formats
 
@@ -141,7 +145,7 @@ Download the latest release for your platform from the [Releases](https://github
    - Linux/macOS (Cross): Run `Deep3DStudio.Cross`
 
 2. **Load images**
-   - Use `File → Import Images` to load your source images
+   - Use `File -> Import Images` to load your source images
    - Supported formats: PNG, JPG, JPEG, BMP
 
   3. **Choose reconstruction method**
@@ -170,7 +174,7 @@ Download the latest release for your platform from the [Releases](https://github
    - Edit manually with the pen tool
 
 7. **Export**
-   - Use `File → Export` to save your 3D model
+   - Use `File -> Export` to save your 3D model
    - Choose from OBJ, FBX, PLY, or GLTF formats
 
 ### Keyboard Shortcuts
@@ -206,6 +210,85 @@ Deep3D Studio uses `.d3d` project files to save:
 - Scene hierarchy
 - Camera positions
 - Settings and preferences
+
+## CLI (Headless)
+
+The GTK project includes a full headless CLI runner. You can run it from source:
+
+```bash
+dotnet run --project src/Deep3DStudio/Deep3DStudio.csproj -- --cli --help
+```
+
+### Commands
+
+| Command | Purpose |
+|---------|---------|
+| `reconstruct pointcloud` | Reconstruct geometry from images and export point cloud/mesh outputs. |
+| `mesh from-pointcloud` | Build a mesh from an input point cloud (`.ply`/`.xyz`). |
+| `refine mesh` | Refine an existing mesh with one or more refiners. |
+| `export mesh` | Convert/export mesh into one or more mesh formats. |
+| `export pointcloud` | Export a mesh or point cloud as point cloud formats. |
+| `project export-all` | Export all mesh/point cloud objects from a `.d3d` project file. |
+| `pipeline run` | Run end-to-end reconstruction plus optional refiners. |
+
+### Common options
+
+- `--input <path>`: input file or directory (repeatable).
+- `--output <path>`: explicit single output file.
+- `--output-dir <dir>`: output directory.
+- `--pipeline mast3r|dust3r|must3r|sfm`: reconstruction backend.
+- `--fallback dust3r|none`: fallback backend if primary produces no geometry.
+- `--refiners triposf,gaussiansdf,deepmeshprior,nerf`: comma-separated refinement stages.
+- `--mesh-formats obj,gltf,glb,ply,fbx`: mesh export formats.
+- `--pointcloud-formats ply,xyz`: point cloud export formats.
+- `--include-colors true|false`: include RGB colors in point cloud export (default `true`).
+- `--include-hidden true|false`: include hidden project objects in `project export-all`.
+- `--overwrite true|false`: allow overwriting existing output files.
+
+### CLI examples
+
+```bash
+# 1) Reconstruct point cloud from images, with fallback
+Deep3DStudio.exe --cli reconstruct pointcloud \
+  --input ./images/chateau1.jpg \
+  --input ./images/chateau2.jpg \
+  --pipeline mast3r \
+  --fallback dust3r \
+  --output-dir ./out
+
+# 2) Point cloud to mesh plus refiners
+Deep3DStudio.exe --cli mesh from-pointcloud \
+  --input ./out/mast3r_reconstruction.ply \
+  --voxel-res 192 \
+  --iso-level 0.45 \
+  --refiners gaussiansdf,triposf \
+  --mesh-formats ply,obj \
+  --output-dir ./out
+
+# 3) Refine an existing mesh
+Deep3DStudio.exe --cli refine mesh \
+  --input ./assets/model.obj \
+  --refiners deepmeshprior \
+  --deepmeshprior-iterations 1500 \
+  --deepmeshprior-learning-rate 0.003 \
+  --deepmeshprior-laplacian-weight 0.1 \
+  --mesh-formats ply,gltf \
+  --output-dir ./out
+
+# 4) Export all objects from a project
+Deep3DStudio.exe --cli project export-all \
+  --project ./projects/sample.d3d \
+  --mesh-formats obj,ply \
+  --pointcloud-formats ply,xyz \
+  --include-hidden false \
+  --output-dir ./out
+```
+
+### Compatibility notes
+
+- New command style and legacy style (`--command ...`) are both supported.
+- If no input is provided, CLI may auto-discover images in `Croco_Examples`.
+- For full list of flags, run `--cli --help`.
 
 ## Building from Source
 
@@ -307,28 +390,28 @@ This will download:
 
 ## Project Structure
 
-```
+```text
 Deep3DStudio/
-├── src/
-│   ├── Deep3DStudio/              # GTK+ GUI (Linux/macOS native)
-│   │   ├── Configuration/         # Settings management
-│   │   ├── DeepMeshPrior/         # Deep learning mesh refinement
-│   │   ├── Icons/                 # Application icons
-│   │   ├── IO/                    # Import/export handlers
-│   │   ├── Meshing/               # Meshing algorithms
-│   │   ├── Model/                 # AI inference & geometry
-│   │   ├── Python/                # Python runtime integration
-│   │   ├── Scene/                 # Scene graph & objects
-│   │   ├── Texturing/             # Texture processing
-│   │   ├── UI/                    # Dialog windows & panels
-│   │   └── Viewport/              # OpenGL rendering
-│   └── Deep3DStudio.Cross/        # Cross-platform ImGui version
-├── scripts/
-│   ├── dist/                      # Deployment packages
-│   └── setup_deployment.py        # Setup automation
-├── .github/workflows/             # CI/CD automation
-├── requirements.txt               # Python dependencies
-└── Deep3DStudio.sln              # Visual Studio solution
+|-- src/
+|   |-- Deep3DStudio/              # GTK GUI (Linux/macOS native)
+|   |   |-- Configuration/         # Settings management
+|   |   |-- DeepMeshPrior/         # Deep learning mesh refinement
+|   |   |-- Icons/                 # Application icons
+|   |   |-- IO/                    # Import/export handlers
+|   |   |-- Meshing/               # Meshing algorithms
+|   |   |-- Model/                 # AI inference and geometry
+|   |   |-- Python/                # Python runtime integration
+|   |   |-- Scene/                 # Scene graph and objects
+|   |   |-- Texturing/             # Texture processing
+|   |   |-- UI/                    # Dialog windows and panels
+|   |   `-- Viewport/              # OpenGL rendering
+|   `-- Deep3DStudio.Cross/        # Cross-platform ImGui version
+|-- scripts/
+|   |-- dist/                      # Deployment packages
+|   `-- setup_deployment.py        # Setup automation
+|-- .github/workflows/             # CI/CD automation
+|-- requirements.txt               # Python dependencies
+`-- Deep3DStudio.sln               # Visual Studio solution
 ```
 
 ## Contributing
@@ -424,7 +507,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **Author:** Matteo Mangiagalli
 **Email:** m.mangiagalli@campus.uniurb.it
-**Institution:** Università degli Studi di Urbino Carlo Bo
+**Institution:** Universita degli Studi di Urbino Carlo Bo
 **Year:** 2026
 
 ### Acknowledgments
@@ -443,5 +526,5 @@ This project incorporates or builds upon the following open-source projects:
 ---
 
 <p align="center">
-  Made with dedication at Università degli Studi di Urbino Carlo Bo
+  Made with dedication at Universita degli Studi di Urbino Carlo Bo
 </p>

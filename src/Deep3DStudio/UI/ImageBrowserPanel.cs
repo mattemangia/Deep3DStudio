@@ -16,6 +16,7 @@ namespace Deep3DStudio.UI
     {
         public string FilePath { get; set; } = string.Empty;
         public string FileName { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
         public Pixbuf? Thumbnail { get; set; }
         public Pixbuf? ThumbnailDepth { get; set; }
         public int Width { get; set; }
@@ -137,12 +138,14 @@ namespace Deep3DStudio.UI
         /// <summary>
         /// Add an image to the browser.
         /// </summary>
-        public void AddImage(string filePath)
+        public void AddImage(string filePath, string? alias = null)
         {
+            string fileName = System.IO.Path.GetFileName(filePath);
             var entry = new ImageEntry
             {
                 FilePath = filePath,
-                FileName = System.IO.Path.GetFileName(filePath)
+                FileName = fileName,
+                DisplayName = string.IsNullOrWhiteSpace(alias) ? fileName : alias.Trim()
             };
 
             // Load and create thumbnail
@@ -228,14 +231,17 @@ namespace Deep3DStudio.UI
             }
 
             eventBox.Add(image);
-            eventBox.TooltipText = entry.FileName;
+            eventBox.TooltipText = entry.DisplayName == entry.FileName
+                ? entry.FileName
+                : $"{entry.DisplayName} ({entry.FileName})";
 
             box.PackStart(eventBox, false, false, 0);
 
             // Truncate filename if too long
-            string displayName = entry.FileName.Length > 12
-                ? entry.FileName.Substring(0, 9) + "..."
-                : entry.FileName;
+            string sourceName = string.IsNullOrWhiteSpace(entry.DisplayName) ? entry.FileName : entry.DisplayName;
+            string displayName = sourceName.Length > 16
+                ? sourceName.Substring(0, 13) + "..."
+                : sourceName;
 
             var label = new Label(displayName);
             label.SetSizeRequest(ThumbnailSize, -1);

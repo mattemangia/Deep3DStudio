@@ -542,7 +542,7 @@ namespace Deep3DStudio.CLI
         {
             if (string.IsNullOrWhiteSpace(_options.ProjectPath) || !File.Exists(_options.ProjectPath))
             {
-                Console.Error.WriteLine("Project file not found. Provide --project <project.json>.");
+                Console.Error.WriteLine("Project file not found. Provide --project <project.d3d>.");
                 return 1;
             }
 
@@ -2357,7 +2357,7 @@ namespace Deep3DStudio.CLI
             Console.WriteLine("  --cli refine mesh --input <file.obj|file.ply|file.stl> --refiners triposf,gaussiansdf,deepmeshprior,nerf");
             Console.WriteLine("  --cli export mesh --input <mesh> --mesh-formats obj,gltf,glb,ply,fbx");
             Console.WriteLine("  --cli export pointcloud --input <mesh|pointcloud> --pointcloud-formats ply,xyz");
-            Console.WriteLine("  --cli project export-all --project <project.json> [--mesh-formats ...] [--pointcloud-formats ...]");
+            Console.WriteLine("  --cli project export-all --project <project.d3d> [--mesh-formats ...] [--pointcloud-formats ...]");
             Console.WriteLine("  --cli pipeline run --input <img|dir> [--pipeline mast3r|dust3r|must3r|sfm] [--refiners ...]");
             Console.WriteLine();
             Console.WriteLine("Usage (legacy still supported):");
