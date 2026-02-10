@@ -3341,10 +3341,24 @@ namespace Deep3DStudio
         }
 
         private bool _showBakeDialog = false;
-        private int _bakeSize = 1024;
+        private int _bakeSize = 2048;
+        private int _bakeIslandMargin = 4;
+        private bool _bakeFromCameras = true;
+        private int _bakeUVMethod = 0; // 0 Smart, 1 Lightmap, 2 Box, 3 Cyl, 4 Sph
+        private int _bakeBlendMode = 2; // 0 Replace, 1 Average, 2 ViewAngle, 3 Distance
+        private float _bakeMinViewAngle = 0.1f;
+        private bool _bakeBlendSeams = true;
+        private int _bakeDilationPasses = 4;
+        private int _bakeExportFormat = 0; // 0 OBJ, 1 GLTF, 2 GLB, 3 FBX, 4 PLY
+        private int _bakeTextureFormat = 0; // 0 PNG, 1 JPEG, 2 BMP
+        private int _bakeJpegQuality = 90;
+        private bool _bakeExportNormals = true;
+        private bool _bakeSwapYZ = false;
+        private readonly HashSet<int> _bakeSelectedCameraIds = new HashSet<int>();
 
         private void OnBakeTextures()
         {
+            SyncBakeCameraSelection();
             _showBakeDialog = true;
             _popupToOpen = "Bake Textures";
         }
@@ -3354,23 +3368,89 @@ namespace Deep3DStudio
             if (!_showBakeDialog) return;
             if (ImGui.BeginPopupModal("Bake Textures", ref _showBakeDialog, ImGuiWindowFlags.AlwaysAutoResize))
             {
-                bool hasMesh = _sceneGraph.SelectedObjects.OfType<MeshObject>().Any();
-                bool hasCameras = _sceneGraph.GetObjectsOfType<CameraObject>().Any();
-                bool canBake = hasMesh && hasCameras;
+                var mesh = _sceneGraph.SelectedObjects.OfType<MeshObject>().FirstOrDefault();
+                var validCameras = GetBakeableCameras();
+                var selectedCameras = GetSelectedBakeCameras();
 
+                bool hasMesh = mesh != null;
+                bool hasAnyValidCamera = validCameras.Count > 0;
+                bool hasSelectedCamera = selectedCameras.Count > 0;
+                bool canBake = hasMesh && (!_bakeFromCameras || hasSelectedCamera);
+
+                ImGui.Text("Source");
+                if (ImGui.RadioButton("Project from camera images", _bakeFromCameras)) _bakeFromCameras = true;
+                if (ImGui.RadioButton("Bake vertex colors to texture", !_bakeFromCameras)) _bakeFromCameras = false;
+
+                ImGui.Spacing();
+                ImGui.Text("UV Settings");
+                string[] uvMethods = { "Smart UV Project", "Lightmap Pack", "Box Projection", "Cylindrical Projection", "Spherical Projection" };
+                ImGui.Combo("UV Method", ref _bakeUVMethod, uvMethods, uvMethods.Length);
                 ImGui.InputInt("Texture Size", ref _bakeSize);
+                ImGui.InputInt("Island Margin", ref _bakeIslandMargin);
+                _bakeSize = Math.Clamp(_bakeSize, 256, 8192);
+                _bakeIslandMargin = Math.Clamp(_bakeIslandMargin, 0, 64);
+
+                ImGui.Spacing();
+                ImGui.Text("Baking Settings");
+                string[] blendModes = { "Replace", "Average", "View Angle Weighted", "Distance Weighted" };
+                ImGui.Combo("Blend Mode", ref _bakeBlendMode, blendModes, blendModes.Length);
+                ImGui.SliderFloat("Min View Angle", ref _bakeMinViewAngle, 0.0f, 0.95f, "%.2f");
+                ImGui.Checkbox("Blend Seams", ref _bakeBlendSeams);
+                ImGui.InputInt("Dilation Passes", ref _bakeDilationPasses);
+                _bakeDilationPasses = Math.Clamp(_bakeDilationPasses, 0, 16);
+
+                ImGui.Spacing();
+                ImGui.Text("Export Settings");
+                string[] exportFormats = { "OBJ", "GLTF", "GLB", "FBX (ASCII)", "PLY" };
+                ImGui.Combo("Mesh Format", ref _bakeExportFormat, exportFormats, exportFormats.Length);
+
+                string[] textureFormats = { "PNG", "JPEG", "BMP" };
+                ImGui.Combo("Texture Format", ref _bakeTextureFormat, textureFormats, textureFormats.Length);
+                ImGui.BeginDisabled(_bakeTextureFormat != 1);
+                ImGui.SliderInt("JPEG Quality", ref _bakeJpegQuality, 50, 100);
+                ImGui.EndDisabled();
+                _bakeJpegQuality = Math.Clamp(_bakeJpegQuality, 50, 100);
+                ImGui.Checkbox("Export Normals", ref _bakeExportNormals);
+                ImGui.Checkbox("Swap Y/Z", ref _bakeSwapYZ);
+
+                if (_bakeFromCameras)
+                {
+                    ImGui.Spacing();
+                    ImGui.Text("Camera Selection");
+                    if (ImGui.Button("Select All")) SelectAllBakeCameras();
+                    ImGui.SameLine();
+                    if (ImGui.Button("Select None")) _bakeSelectedCameraIds.Clear();
+
+                    ImGui.BeginChild("BakeCameraList", new System.Numerics.Vector2(460, 140), ImGuiChildFlags.Borders);
+                    foreach (var cam in validCameras)
+                    {
+                        bool selected = _bakeSelectedCameraIds.Contains(cam.Id);
+                        if (ImGui.Checkbox($"##cam_{cam.Id}", ref selected))
+                        {
+                            if (selected) _bakeSelectedCameraIds.Add(cam.Id);
+                            else _bakeSelectedCameraIds.Remove(cam.Id);
+                        }
+                        ImGui.SameLine();
+                        string imageName = string.IsNullOrEmpty(cam.ImagePath) ? "(no image)" : Path.GetFileName(cam.ImagePath);
+                        ImGui.TextUnformatted($"{cam.Name} - {imageName}");
+                    }
+                    ImGui.EndChild();
+                }
+
                 ImGui.Separator();
 
                 if (!canBake)
                 {
                     if (!hasMesh)
                         ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1), "No mesh selected");
-                    if (!hasCameras)
-                        ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1), "No cameras in scene");
+                    if (_bakeFromCameras && !hasAnyValidCamera)
+                        ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1), "No cameras with pose+image in scene");
+                    if (_bakeFromCameras && hasAnyValidCamera && !hasSelectedCamera)
+                        ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1), "Select at least one camera");
                     ImGui.BeginDisabled();
                 }
 
-                if (ImGui.Button("Bake", new System.Numerics.Vector2(120, 0)))
+                if (ImGui.Button("Bake && Export", new System.Numerics.Vector2(140, 0)))
                 {
                     _showBakeDialog = false;
                     PerformBake();
@@ -3389,9 +3469,38 @@ namespace Deep3DStudio
 
         private void PerformBake()
         {
-            var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
-            var cameras = _sceneGraph.GetObjectsOfType<CameraObject>().ToList();
+            var meshObj = _sceneGraph.SelectedObjects.OfType<MeshObject>().FirstOrDefault();
+            if (meshObj == null)
+            {
+                _logBuffer += "No mesh selected for texture baking.\n";
+                return;
+            }
+
+            var selectedCameras = GetSelectedBakeCameras();
+            if (_bakeFromCameras && selectedCameras.Count == 0)
+            {
+                _logBuffer += "No valid cameras selected for texture baking.\n";
+                return;
+            }
+
+            var exportOptions = BuildBakeExportOptions();
+            string extension = GetBakeFileExtension(exportOptions.Format);
+            var saveFilter = new Dictionary<string, string> { { GetBakeFilterLabel(exportOptions.Format), extension.TrimStart('.') } };
+            var saveResult = Nfd.SaveDialog(out string exportPath, saveFilter);
+            if (saveResult != NfdStatus.Ok || string.IsNullOrEmpty(exportPath))
+                return;
+
+            if (string.IsNullOrEmpty(Path.GetExtension(exportPath)))
+                exportPath += extension;
+
             int size = _bakeSize;
+            int islandMargin = _bakeIslandMargin;
+            int uvMethodIndex = _bakeUVMethod;
+            int blendModeIndex = _bakeBlendMode;
+            float minViewAngle = _bakeMinViewAngle;
+            bool blendSeams = _bakeBlendSeams;
+            int dilationPasses = _bakeDilationPasses;
+            bool bakeFromCameras = _bakeFromCameras;
 
             ProgressDialog.Instance.Start("Baking Textures...", OperationType.Processing);
 
@@ -3401,25 +3510,40 @@ namespace Deep3DStudio
                 {
                     var baker = new Deep3DStudio.Texturing.TextureBaker();
                     baker.TextureSize = size;
-                    var mesh = meshes[0].MeshData;
+                    baker.IslandMargin = islandMargin;
+                    baker.BlendMode = MapBakeBlendMode(blendModeIndex);
+                    baker.MinViewAngleCosine = minViewAngle;
+                    baker.BlendSeams = blendSeams;
+                    baker.DilationPasses = dilationPasses;
 
-                    if (mesh.UVs.Count == 0)
+                    var mesh = meshObj.MeshData;
+                    ProgressDialog.Instance.Update(0.1f, "Generating UVs...");
+                    var uvData = baker.GenerateUVs(mesh, MapBakeUvMethod(uvMethodIndex));
+
+                    Deep3DStudio.Texturing.BakedTextureResult baked;
+                    if (bakeFromCameras)
                     {
-                        ProgressDialog.Instance.Update(0.1f, "Generating UVs...");
-                        var uvData = baker.GenerateUVs(mesh, Deep3DStudio.Texturing.UVUnwrapMethod.SmartProject);
-                        mesh.UVs = uvData.UVs;
+                        ProgressDialog.Instance.Update(0.3f, "Projecting images...");
+                        var progress = new Progress<float>(p => ProgressDialog.Instance.Update(0.3f + p * 0.5f, $"Baking... {(int)(p * 100)}%"));
+                        baked = baker.BakeTextures(mesh, uvData, selectedCameras, progress);
+                    }
+                    else
+                    {
+                        ProgressDialog.Instance.Update(0.3f, "Baking vertex colors...");
+                        var tex = baker.BakeVertexColorsToTexture(mesh, uvData);
+                        baked = new Deep3DStudio.Texturing.BakedTextureResult
+                        {
+                            DiffuseMap = tex,
+                            TextureSize = baker.TextureSize,
+                            WeightMap = new float[baker.TextureSize, baker.TextureSize]
+                        };
                     }
 
-                    ProgressDialog.Instance.Update(0.3f, "Projecting Images...");
-                    var uvDataForBake = new Deep3DStudio.Texturing.UVData { UVs = mesh.UVs };
+                    ProgressDialog.Instance.Update(0.85f, "Exporting textured mesh...");
+                    TexturedMeshExporter.Export(exportPath, mesh, uvData, baked, exportOptions);
+                    baked.Dispose();
 
-                    var progress = new Progress<float>(p => ProgressDialog.Instance.Update(0.3f + p * 0.7f, $"Baking... {(int)(p * 100)}%"));
-                    var result = baker.BakeTextures(mesh, uvDataForBake, cameras, progress);
-
-                    mesh.Texture = result.DiffuseMap;
-                    mesh.TextureId = -1;
-
-                    ProgressDialog.Instance.Log("Texture baking complete.");
+                    ProgressDialog.Instance.Log($"Textured mesh exported: {exportPath}");
                     ProgressDialog.Instance.Complete();
                 }
                 catch (Exception ex)
@@ -3427,6 +3551,110 @@ namespace Deep3DStudio
                     ProgressDialog.Instance.Fail(ex);
                 }
             });
+        }
+
+        private List<CameraObject> GetBakeableCameras()
+        {
+            return _sceneGraph.GetObjectsOfType<CameraObject>()
+                .Where(c => c.Pose != null && !string.IsNullOrEmpty(c.ImagePath))
+                .ToList();
+        }
+
+        private List<CameraObject> GetSelectedBakeCameras()
+        {
+            var cameras = GetBakeableCameras();
+            return cameras.Where(c => _bakeSelectedCameraIds.Contains(c.Id)).ToList();
+        }
+
+        private void SelectAllBakeCameras()
+        {
+            _bakeSelectedCameraIds.Clear();
+            foreach (var cam in GetBakeableCameras())
+                _bakeSelectedCameraIds.Add(cam.Id);
+        }
+
+        private void SyncBakeCameraSelection()
+        {
+            var validIds = GetBakeableCameras().Select(c => c.Id).ToHashSet();
+            _bakeSelectedCameraIds.RemoveWhere(id => !validIds.Contains(id));
+            if (_bakeSelectedCameraIds.Count == 0)
+            {
+                foreach (var id in validIds)
+                    _bakeSelectedCameraIds.Add(id);
+            }
+        }
+
+        private Deep3DStudio.Texturing.UVUnwrapMethod MapBakeUvMethod(int index)
+        {
+            return index switch
+            {
+                1 => Deep3DStudio.Texturing.UVUnwrapMethod.LightmapPack,
+                2 => Deep3DStudio.Texturing.UVUnwrapMethod.BoxProject,
+                3 => Deep3DStudio.Texturing.UVUnwrapMethod.CylindricalProject,
+                4 => Deep3DStudio.Texturing.UVUnwrapMethod.SphericalProject,
+                _ => Deep3DStudio.Texturing.UVUnwrapMethod.SmartProject
+            };
+        }
+
+        private Deep3DStudio.Texturing.TextureBlendMode MapBakeBlendMode(int index)
+        {
+            return index switch
+            {
+                0 => Deep3DStudio.Texturing.TextureBlendMode.Replace,
+                1 => Deep3DStudio.Texturing.TextureBlendMode.Average,
+                3 => Deep3DStudio.Texturing.TextureBlendMode.DistanceWeighted,
+                _ => Deep3DStudio.Texturing.TextureBlendMode.ViewAngleWeighted
+            };
+        }
+
+        private MeshExportOptions BuildBakeExportOptions()
+        {
+            return new MeshExportOptions
+            {
+                Format = _bakeExportFormat switch
+                {
+                    1 => TexturedMeshFormat.GLTF,
+                    2 => TexturedMeshFormat.GLB,
+                    3 => TexturedMeshFormat.FBX_ASCII,
+                    4 => TexturedMeshFormat.PLY,
+                    _ => TexturedMeshFormat.OBJ
+                },
+                TextureFormat = _bakeTextureFormat switch
+                {
+                    1 => TextureFormat.JPEG,
+                    2 => TextureFormat.BMP,
+                    _ => TextureFormat.PNG
+                },
+                JpegQuality = _bakeJpegQuality,
+                ExportNormals = _bakeExportNormals,
+                SwapYZ = _bakeSwapYZ,
+                ExportUVs = true,
+                ExportTextures = true
+            };
+        }
+
+        private string GetBakeFileExtension(TexturedMeshFormat format)
+        {
+            return format switch
+            {
+                TexturedMeshFormat.GLTF => ".gltf",
+                TexturedMeshFormat.GLB => ".glb",
+                TexturedMeshFormat.FBX_ASCII => ".fbx",
+                TexturedMeshFormat.PLY => ".ply",
+                _ => ".obj"
+            };
+        }
+
+        private string GetBakeFilterLabel(TexturedMeshFormat format)
+        {
+            return format switch
+            {
+                TexturedMeshFormat.GLTF => "GLTF Mesh",
+                TexturedMeshFormat.GLB => "GLB Mesh",
+                TexturedMeshFormat.FBX_ASCII => "FBX Mesh",
+                TexturedMeshFormat.PLY => "PLY Mesh",
+                _ => "OBJ Mesh"
+            };
         }
 
         #endregion
