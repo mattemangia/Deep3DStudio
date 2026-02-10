@@ -568,7 +568,7 @@ namespace Deep3DStudio.Viewport
             {
                 foreach(var cam in _sceneGraph.GetObjectsOfType<CameraObject>())
                 {
-                    if (cam.Visible) DrawCameraFrustum(cam);
+                    if (cam.Visible && cam.ShowFrustum) DrawCameraFrustum(cam);
                 }
             }
 
@@ -592,13 +592,13 @@ namespace Deep3DStudio.Viewport
                 var t = obj.GetWorldTransform();
                 GL.MultMatrix(ref t);
 
-                if (obj is PointCloudObject pc && s.ShowPointCloud)
+                if (obj is PointCloudObject pc)
                 {
-                    DrawPointCloud(pc.Points, pc.Colors, pc.PointSize);
-                    if (obj.Selected)
+                    if (s.ShowPointCloud)
                     {
-                        DrawBoundingBox(obj);
+                        DrawPointCloud(pc.Points, pc.Colors, pc.PointSize);
                     }
+                    DrawBoundingBox(obj, obj.Selected);
                 }
 
                 if (obj is MeshObject mesh)
@@ -664,10 +664,7 @@ namespace Deep3DStudio.Viewport
                     }
                     GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
 
-                    if (isSelected)
-                    {
-                        DrawBoundingBox(obj);
-                    }
+                    DrawBoundingBox(obj, isSelected);
                 }
 
                 GL.PopMatrix();
@@ -782,12 +779,20 @@ namespace Deep3DStudio.Viewport
             GL.PopMatrix();
         }
 
-        private void DrawBoundingBox(SceneObject obj)
+        private void DrawBoundingBox(SceneObject obj, bool highlighted)
         {
             var min = obj.BoundsMin;
             var max = obj.BoundsMax;
-            GL.Color3(1, 1, 0);
-            GL.LineWidth(2.0f);
+            if (highlighted)
+            {
+                GL.Color3(1f, 1f, 0f);
+                GL.LineWidth(2.5f);
+            }
+            else
+            {
+                GL.Color3(0.45f, 0.7f, 1f);
+                GL.LineWidth(1.0f);
+            }
             GL.Begin(PrimitiveType.Lines);
             // Bottom
             GL.Vertex3(min.X, min.Y, min.Z); GL.Vertex3(max.X, min.Y, min.Z);
@@ -810,47 +815,66 @@ namespace Deep3DStudio.Viewport
 
         private void DrawCameraFrustum(CameraObject cam)
         {
-            GL.PushMatrix();
-            if (cam.Pose != null)
-            {
-                var m = cam.Pose.CameraToWorld;
-                var mat = new Matrix4(
-                    m.M11, m.M12, m.M13, m.M14,
-                    m.M21, m.M22, m.M23, m.M24,
-                    m.M31, m.M32, m.M33, m.M34,
-                    m.M41, m.M42, m.M43, m.M44
-                );
-                GL.MultMatrix(ref mat);
-            }
-            else
-            {
-                var t = cam.GetWorldTransform();
-                GL.MultMatrix(ref t);
-            }
-
-            float scale = 0.3f;
-            var corners = cam.GetFrustumCorners(scale);
+            float scale = cam.FrustumScale > 0 ? cam.FrustumScale : Math.Max(0.001f, CameraFrustumScale);
+            var corners = GetFrustumCornersWorld(cam, scale);
+            var camPos = GetCameraPositionWorld(cam);
             var color = cam.Selected ? new Vector3(1f, 1f, 0f) : cam.FrustumColor;
 
             GL.Color3(color.X, color.Y, color.Z);
-            GL.LineWidth(2.0f);
+            GL.LineWidth(cam.Selected ? 2.5f : 1.5f);
 
             GL.Begin(PrimitiveType.Lines);
-            // 0 (Cam Center) to 4 corners
-            GL.Vertex3(0,0,0); GL.Vertex3(corners[0]);
-            GL.Vertex3(0,0,0); GL.Vertex3(corners[1]);
-            GL.Vertex3(0,0,0); GL.Vertex3(corners[2]);
-            GL.Vertex3(0,0,0); GL.Vertex3(corners[3]);
+            // Camera center to image plane corners
+            GL.Vertex3(camPos); GL.Vertex3(corners[0]);
+            GL.Vertex3(camPos); GL.Vertex3(corners[1]);
+            GL.Vertex3(camPos); GL.Vertex3(corners[2]);
+            GL.Vertex3(camPos); GL.Vertex3(corners[3]);
 
             // Image plane rect
             GL.Vertex3(corners[0]); GL.Vertex3(corners[1]);
             GL.Vertex3(corners[1]); GL.Vertex3(corners[2]);
             GL.Vertex3(corners[2]); GL.Vertex3(corners[3]);
             GL.Vertex3(corners[3]); GL.Vertex3(corners[0]);
+
+            // Plane cross to improve readability at distance
+            GL.Vertex3(corners[0]); GL.Vertex3(corners[2]);
+            GL.Vertex3(corners[1]); GL.Vertex3(corners[3]);
             GL.End();
 
             GL.LineWidth(1.0f);
-            GL.PopMatrix();
+        }
+
+        private static Vector3[] GetFrustumCornersWorld(CameraObject cam, float distance)
+        {
+            float halfFovRad = MathHelper.DegreesToRadians(cam.FieldOfView * 0.5f);
+            float halfHeight = distance * (float)Math.Tan(halfFovRad);
+            float halfWidth = halfHeight * cam.AspectRatio;
+
+            var corners = new[]
+            {
+                new Vector3(-halfWidth, -halfHeight, -distance),
+                new Vector3(halfWidth, -halfHeight, -distance),
+                new Vector3(halfWidth, halfHeight, -distance),
+                new Vector3(-halfWidth, halfHeight, -distance)
+            };
+
+            Matrix4 transform = cam.Pose?.CameraToWorld ?? cam.GetWorldTransform();
+            for (int i = 0; i < corners.Length; i++)
+            {
+                corners[i] = Vector3.TransformPosition(corners[i], transform);
+            }
+
+            return corners;
+        }
+
+        private static Vector3 GetCameraPositionWorld(CameraObject cam)
+        {
+            if (cam.Pose != null)
+            {
+                return cam.Pose.CameraToWorld.ExtractTranslation();
+            }
+
+            return Vector3.TransformPosition(Vector3.Zero, cam.GetWorldTransform());
         }
 
         // --- Interaction Logic ---

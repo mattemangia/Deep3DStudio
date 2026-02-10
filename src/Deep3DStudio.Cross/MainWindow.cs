@@ -1514,14 +1514,24 @@ namespace Deep3DStudio
             SceneObject? objectToDelete = null;
             SceneObject? objectToDuplicate = null;
 
-            // Take a snapshot of visible objects to avoid collection modification during iteration
-            var visibleObjects = _sceneGraph.GetVisibleObjects().ToList();
+            // Take a snapshot of all objects so hidden items can be re-shown from the tree
+            var allObjects = _sceneGraph.AllObjects.ToList();
 
-            foreach (var obj in visibleObjects)
+            foreach (var obj in allObjects)
             {
                 bool selected = obj.Selected;
                 string name = obj.Name ?? $"Object {obj.Id}";
-                string icon = obj is MeshObject ? "[M] " : obj is PointCloudObject ? "[P] " : "[O] ";
+                string icon = obj switch
+                {
+                    MeshObject => "[M] ",
+                    PointCloudObject => "[P] ",
+                    CameraObject => "[C] ",
+                    SkeletonObject => "[S] ",
+                    GroupObject => "[G] ",
+                    _ => "[O] "
+                };
+                string displayName = obj.Visible ? $"{icon}{name}" : $"{icon}{name} (hidden)";
+                float reservedWidth = obj is CameraObject ? 180f : 90f;
 
                 if (_renamingObject == obj)
                 {
@@ -1545,14 +1555,15 @@ namespace Deep3DStudio
                 }
                 else
                 {
-                    if (ImGui.Selectable($"{icon}{name}##{i}", selected))
+                    if (!obj.Visible) ImGui.PushStyleVar(ImGuiStyleVar.Alpha, 0.55f);
+                    if (ImGui.Selectable($"{displayName}##{i}", selected, ImGuiSelectableFlags.None, new System.Numerics.Vector2(-reservedWidth, 0)))
                     {
                         if (!ImGui.GetIO().KeyCtrl) _sceneGraph.ClearSelection();
                         _sceneGraph.Select(obj, !selected);
                     }
+                    if (!obj.Visible) ImGui.PopStyleVar();
 
-                    // Context menu
-                    if (ImGui.BeginPopupContextItem())
+                    if (ImGui.BeginPopupContextItem($"SceneGraphItemCtx##{i}"))
                     {
                         if (ImGui.MenuItem("Rename"))
                         {
@@ -1560,9 +1571,36 @@ namespace Deep3DStudio
                             _renameBuffer = obj.Name ?? "";
                         }
                         if (ImGui.MenuItem("Focus")) _viewport.FocusOnObject(obj);
+                        if (ImGui.MenuItem(obj.Visible ? "Hide" : "Show"))
+                        {
+                            obj.Visible = !obj.Visible;
+                            _isDirty = true;
+                        }
+                        if (obj is CameraObject contextCam && ImGui.MenuItem(contextCam.ShowFrustum ? "Hide Frustum" : "Show Frustum"))
+                        {
+                            contextCam.ShowFrustum = !contextCam.ShowFrustum;
+                            _isDirty = true;
+                        }
                         if (ImGui.MenuItem("Delete")) objectToDelete = obj;
                         if (ImGui.MenuItem("Duplicate")) objectToDuplicate = obj;
                         ImGui.EndPopup();
+                    }
+
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton($"{(obj.Visible ? "Hide" : "Show")}##vis{i}"))
+                    {
+                        obj.Visible = !obj.Visible;
+                        _isDirty = true;
+                    }
+
+                    if (obj is CameraObject cam)
+                    {
+                        ImGui.SameLine();
+                        if (ImGui.SmallButton($"{(cam.ShowFrustum ? "Fr Off" : "Fr On")}##fr{i}"))
+                        {
+                            cam.ShowFrustum = !cam.ShowFrustum;
+                            _isDirty = true;
+                        }
                     }
                 }
 
