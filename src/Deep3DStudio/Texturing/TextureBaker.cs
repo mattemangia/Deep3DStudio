@@ -84,16 +84,18 @@ namespace Deep3DStudio.Texturing
                 canvas.Clear(SKColors.Transparent);
             }
 
-            int totalCameras = cameras.Count;
+            var validCameras = cameras.Where(c => c.Pose != null && !string.IsNullOrEmpty(c.ImagePath)).ToList();
+            int totalCameras = validCameras.Count;
             int processedCameras = 0;
 
             // Project each camera
-            foreach (var camera in cameras.Where(c => c.Pose != null && !string.IsNullOrEmpty(c.ImagePath)))
+            foreach (var camera in validCameras)
             {
                 ProjectCameraOntoMesh(mesh, uvData, camera, result);
 
                 processedCameras++;
-                progress?.Report((float)processedCameras / totalCameras * 0.8f);
+                if (totalCameras > 0)
+                    progress?.Report((float)processedCameras / totalCameras * 0.8f);
             }
 
             // Post-processing
@@ -131,13 +133,19 @@ namespace Deep3DStudio.Texturing
                 int i1 = mesh.Indices[t * 3 + 1];
                 int i2 = mesh.Indices[t * 3 + 2];
 
-                var uv0 = uvData.UVs[i0];
-                var uv1 = uvData.UVs[i1];
-                var uv2 = uvData.UVs[i2];
+                if (i0 < 0 || i1 < 0 || i2 < 0 ||
+                    i0 >= mesh.Vertices.Count || i1 >= mesh.Vertices.Count || i2 >= mesh.Vertices.Count)
+                {
+                    continue;
+                }
 
-                var c0 = mesh.Colors[i0];
-                var c1 = mesh.Colors[i1];
-                var c2 = mesh.Colors[i2];
+                var uv0 = i0 < uvData.UVs.Count ? uvData.UVs[i0] : Vector2.Zero;
+                var uv1 = i1 < uvData.UVs.Count ? uvData.UVs[i1] : Vector2.Zero;
+                var uv2 = i2 < uvData.UVs.Count ? uvData.UVs[i2] : Vector2.Zero;
+
+                var c0 = i0 < mesh.Colors.Count ? mesh.Colors[i0] : new Vector3(0.8f);
+                var c1 = i1 < mesh.Colors.Count ? mesh.Colors[i1] : new Vector3(0.8f);
+                var c2 = i2 < mesh.Colors.Count ? mesh.Colors[i2] : new Vector3(0.8f);
 
                 RasterizeTriangle(texture, uv0, uv1, uv2, c0, c1, c2);
             }
@@ -252,6 +260,9 @@ namespace Deep3DStudio.Texturing
                 UVs = new List<Vector2>()
             };
 
+            if (mesh.Vertices.Count == 0)
+                return uvData;
+
             // Compute bounding box
             var min = new Vector3(float.MaxValue);
             var max = new Vector3(float.MinValue);
@@ -264,9 +275,7 @@ namespace Deep3DStudio.Texturing
 
             var size = max - min;
             float maxSize = Math.Max(size.X, Math.Max(size.Y, size.Z));
-
-            // Compute normals for each triangle and project based on dominant axis
-            var normals = ComputeFaceNormals(mesh);
+            if (maxSize <= 1e-8f) maxSize = 1.0f;
 
             foreach (var v in mesh.Vertices)
             {
@@ -287,6 +296,9 @@ namespace Deep3DStudio.Texturing
                 UVs = new List<Vector2>()
             };
 
+            if (mesh.Vertices.Count == 0)
+                return uvData;
+
             // Compute centroid
             var centroid = Vector3.Zero;
             foreach (var v in mesh.Vertices)
@@ -297,6 +309,7 @@ namespace Deep3DStudio.Texturing
             float minY = mesh.Vertices.Min(v => v.Y);
             float maxY = mesh.Vertices.Max(v => v.Y);
             float height = maxY - minY;
+            if (height <= 1e-8f) height = 1.0f;
 
             foreach (var v in mesh.Vertices)
             {
@@ -320,6 +333,9 @@ namespace Deep3DStudio.Texturing
                 UVs = new List<Vector2>()
             };
 
+            if (mesh.Vertices.Count == 0)
+                return uvData;
+
             // Compute centroid
             var centroid = Vector3.Zero;
             foreach (var v in mesh.Vertices)
@@ -328,7 +344,8 @@ namespace Deep3DStudio.Texturing
 
             foreach (var v in mesh.Vertices)
             {
-                var dir = (v - centroid).Normalized();
+                var local = v - centroid;
+                var dir = local.LengthSquared > 1e-8f ? local.Normalized() : Vector3.UnitY;
 
                 // Spherical projection
                 float u = 0.5f + MathF.Atan2(dir.Z, dir.X) / (2 * MathF.PI);
@@ -374,6 +391,12 @@ namespace Deep3DStudio.Texturing
                 int i1 = mesh.Indices[t * 3 + 1];
                 int i2 = mesh.Indices[t * 3 + 2];
 
+                if (i0 < 0 || i1 < 0 || i2 < 0 ||
+                    i0 >= mesh.Vertices.Count || i1 >= mesh.Vertices.Count || i2 >= mesh.Vertices.Count)
+                {
+                    continue;
+                }
+
                 var v0 = mesh.Vertices[i0];
                 var v1 = mesh.Vertices[i1];
                 var v2 = mesh.Vertices[i2];
@@ -394,9 +417,9 @@ namespace Deep3DStudio.Texturing
                 if (!uv0_cam.HasValue || !uv1_cam.HasValue || !uv2_cam.HasValue) continue;
 
                 // Get texture UVs
-                var uv0_tex = uvData.UVs[i0];
-                var uv1_tex = uvData.UVs[i1];
-                var uv2_tex = uvData.UVs[i2];
+                var uv0_tex = i0 < uvData.UVs.Count ? uvData.UVs[i0] : Vector2.Zero;
+                var uv1_tex = i1 < uvData.UVs.Count ? uvData.UVs[i1] : Vector2.Zero;
+                var uv2_tex = i2 < uvData.UVs.Count ? uvData.UVs[i2] : Vector2.Zero;
 
                 // Rasterize triangle
                 float weight = ComputeProjectionWeight(viewAngle, BlendMode);
@@ -728,9 +751,20 @@ namespace Deep3DStudio.Texturing
 
             for (int f = 0; f < mesh.Indices.Count / 3; f++)
             {
-                var v0 = mesh.Vertices[mesh.Indices[f * 3]];
-                var v1 = mesh.Vertices[mesh.Indices[f * 3 + 1]];
-                var v2 = mesh.Vertices[mesh.Indices[f * 3 + 2]];
+                int i0 = mesh.Indices[f * 3];
+                int i1 = mesh.Indices[f * 3 + 1];
+                int i2 = mesh.Indices[f * 3 + 2];
+
+                if (i0 < 0 || i1 < 0 || i2 < 0 ||
+                    i0 >= mesh.Vertices.Count || i1 >= mesh.Vertices.Count || i2 >= mesh.Vertices.Count)
+                {
+                    normals.Add(Vector3.UnitY);
+                    continue;
+                }
+
+                var v0 = mesh.Vertices[i0];
+                var v1 = mesh.Vertices[i1];
+                var v2 = mesh.Vertices[i2];
 
                 var normal = Vector3.Cross(v1 - v0, v2 - v0);
                 if (normal.LengthSquared > 0)
@@ -756,8 +790,12 @@ namespace Deep3DStudio.Texturing
 
         private Matrix4 CreatePerspectiveProjection(float fov, float aspect, float near, float far)
         {
+            float safeFov = Math.Clamp(fov, 1.0f, 179.0f);
+            float safeAspect = Math.Max(0.001f, aspect);
+            float safeNear = Math.Max(near, 0.0001f);
+            float safeFar = Math.Max(far, safeNear + 0.001f);
             return Matrix4.CreatePerspectiveFieldOfView(
-                MathHelper.DegreesToRadians(fov), aspect, near, far);
+                MathHelper.DegreesToRadians(safeFov), safeAspect, safeNear, safeFar);
         }
 
         private void RasterizeTriangle(SKBitmap texture, Vector2 uv0, Vector2 uv1, Vector2 uv2,

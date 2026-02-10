@@ -290,8 +290,8 @@ namespace Deep3DStudio.Model
             var allColors = new List<System.Numerics.Vector3>();
             var allNormals = new List<System.Numerics.Vector3>();
 
-            bool hasColors = clouds.All(c => c.Colors != null && c.Colors.Length > 0);
-            bool hasNormals = clouds.All(c => c.Normals != null && c.Normals.Length > 0);
+            bool hasColors = clouds.All(HasAlignedColors);
+            bool hasNormals = clouds.All(HasAlignedNormals);
 
             for (int i = 0; i < clouds.Count; i++)
             {
@@ -349,8 +349,8 @@ namespace Deep3DStudio.Model
             }
 
             var points = new List<System.Numerics.Vector3>();
-            var colors = cloud.Colors != null ? new List<System.Numerics.Vector3>() : null;
-            var normals = cloud.Normals != null ? new List<System.Numerics.Vector3>() : null;
+            var colors = HasAlignedColors(cloud) ? new List<System.Numerics.Vector3>() : null;
+            var normals = HasAlignedNormals(cloud) ? new List<System.Numerics.Vector3>() : null;
 
             foreach (var voxel in voxelMap.Values)
             {
@@ -421,8 +421,8 @@ namespace Deep3DStudio.Model
 
             // Filter points
             var points = new List<System.Numerics.Vector3>();
-            var colors = cloud.Colors != null ? new List<System.Numerics.Vector3>() : null;
-            var normals = cloud.Normals != null ? new List<System.Numerics.Vector3>() : null;
+            var colors = HasAlignedColors(cloud) ? new List<System.Numerics.Vector3>() : null;
+            var normals = HasAlignedNormals(cloud) ? new List<System.Numerics.Vector3>() : null;
 
             for (int i = 0; i < n; i++)
             {
@@ -440,6 +440,16 @@ namespace Deep3DStudio.Model
                 Colors = colors?.ToArray(),
                 Normals = normals?.ToArray()
             };
+        }
+
+        private static bool HasAlignedColors(PointCloudData cloud)
+        {
+            return cloud.Colors != null && cloud.Colors.Length == cloud.Points.Length;
+        }
+
+        private static bool HasAlignedNormals(PointCloudData cloud)
+        {
+            return cloud.Normals != null && cloud.Normals.Length == cloud.Points.Length;
         }
 
         /// <summary>

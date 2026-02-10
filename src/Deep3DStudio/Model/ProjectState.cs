@@ -66,6 +66,15 @@ namespace Deep3DStudio.Model
         public float FieldOfView { get; set; }
         public float NearPlane { get; set; }
         public float FarPlane { get; set; }
+        public float AspectRatio { get; set; } = 1.333f;
+        public float FrustumScale { get; set; } = 0.3f;
+        public bool ShowFrustum { get; set; } = true;
+        public bool ShowImagePlane { get; set; } = false;
+
+        [JsonConverter(typeof(Vector3Converter))]
+        public Vector3 FrustumColor { get; set; } = new Vector3(1f, 0.8f, 0f);
+
+        public CameraPoseDTO? Pose { get; set; }
     }
 
     public class GroupObjectDTO : SceneObjectDTO
@@ -75,8 +84,23 @@ namespace Deep3DStudio.Model
     public class MeshDataDTO
     {
         public List<float> Vertices { get; set; } = new List<float>(); // Flattened
+        public List<float> Normals { get; set; } = new List<float>();  // Flattened
         public List<float> Colors { get; set; } = new List<float>();
+        public List<float> UVs { get; set; } = new List<float>();      // Flattened [u,v, u,v...]
         public List<int> Indices { get; set; } = new List<int>();
+        public string? TexturePngBase64 { get; set; }
+        public List<float>? PoseMatrix { get; set; }                    // Flattened 4x4 row-major
+    }
+
+    public class CameraPoseDTO
+    {
+        public List<float> WorldToCamera { get; set; } = new List<float>(); // Flattened 4x4 row-major
+        public List<float> CameraToWorld { get; set; } = new List<float>(); // Flattened 4x4 row-major
+        public int ImageIndex { get; set; }
+        public string ImagePath { get; set; } = "";
+        public int Width { get; set; }
+        public int Height { get; set; }
+        public float FocalLength { get; set; }
     }
 
     public class Vector3Converter : JsonConverter<Vector3>

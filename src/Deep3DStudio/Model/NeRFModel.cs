@@ -59,7 +59,7 @@ namespace Deep3DStudio.Model
                 for (int i = 0; i < mesh.Vertices.Count; i++)
                 {
                     Vector3 p = mesh.Vertices[i];
-                    Vector3 c = mesh.Colors[i];
+                    Vector3 c = i < mesh.Colors.Count ? mesh.Colors[i] : new Vector3(0.8f);
 
                     Vector3 localPos = (p - _boundsMin);
                     int x = (int)(localPos.X / _voxelSize.X);

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Collections.Generic;
 using Deep3DStudio.Scene;
 using OpenTK.Mathematics;
+using SkiaSharp;
 
 namespace Deep3DStudio.Model
 {
@@ -67,7 +68,11 @@ namespace Deep3DStudio.Model
                     MeshData = new MeshDataDTO
                     {
                         Vertices = FlattenVector3(mesh.MeshData.Vertices),
+                        Normals = FlattenVector3(mesh.MeshData.Normals),
                         Colors = FlattenVector3(mesh.MeshData.Colors),
+                        UVs = FlattenVector2(mesh.MeshData.UVs),
+                        TexturePngBase64 = EncodeTexture(mesh.MeshData.Texture),
+                        PoseMatrix = mesh.MeshData.Pose.HasValue ? FlattenMatrix4(mesh.MeshData.Pose.Value) : null,
                         Indices = new List<int>(mesh.MeshData.Indices)
                     }
                 };
@@ -92,7 +97,13 @@ namespace Deep3DStudio.Model
                     ImageHeight = cam.ImageHeight,
                     FieldOfView = cam.FieldOfView,
                     NearPlane = cam.NearPlane,
-                    FarPlane = cam.FarPlane
+                    FarPlane = cam.FarPlane,
+                    AspectRatio = cam.AspectRatio,
+                    FrustumScale = cam.FrustumScale,
+                    FrustumColor = cam.FrustumColor,
+                    ShowFrustum = cam.ShowFrustum,
+                    ShowImagePlane = cam.ShowImagePlane,
+                    Pose = cam.Pose != null ? ToPoseDto(cam.Pose) : null
                 };
                 dto = cDto;
             }
@@ -143,9 +154,13 @@ namespace Deep3DStudio.Model
                 var meshData = new MeshData
                 {
                     Vertices = UnflattenVector3(mDto.MeshData.Vertices),
+                    Normals = UnflattenVector3(mDto.MeshData.Normals),
                     Colors = UnflattenVector3(mDto.MeshData.Colors),
+                    UVs = UnflattenVector2(mDto.MeshData.UVs),
                     Indices = mDto.MeshData.Indices
                 };
+                meshData.Texture = DecodeTexture(mDto.MeshData.TexturePngBase64);
+                meshData.Pose = UnflattenMatrix4Nullable(mDto.MeshData.PoseMatrix);
                 var mesh = new MeshObject(dto.Name, meshData)
                 {
                     ShowAsPointCloud = mDto.ShowAsPointCloud,
@@ -174,7 +189,13 @@ namespace Deep3DStudio.Model
                     ImageHeight = cDto.ImageHeight,
                     FieldOfView = cDto.FieldOfView,
                     NearPlane = cDto.NearPlane,
-                    FarPlane = cDto.FarPlane
+                    FarPlane = cDto.FarPlane,
+                    AspectRatio = cDto.AspectRatio > 0 ? cDto.AspectRatio : 1.333f,
+                    FrustumScale = cDto.FrustumScale,
+                    FrustumColor = cDto.FrustumColor,
+                    ShowFrustum = cDto.ShowFrustum,
+                    ShowImagePlane = cDto.ShowImagePlane,
+                    Pose = cDto.Pose != null ? FromPoseDto(cDto.Pose) : null
                 };
                 obj = cam;
             }
@@ -217,6 +238,17 @@ namespace Deep3DStudio.Model
             return list;
         }
 
+        private static List<float> FlattenVector2(List<Vector2> vectors)
+        {
+            var list = new List<float>(vectors.Count * 2);
+            foreach (var v in vectors)
+            {
+                list.Add(v.X);
+                list.Add(v.Y);
+            }
+            return list;
+        }
+
         private static List<Vector3> UnflattenVector3(List<float> floats)
         {
             var list = new List<Vector3>(floats.Count / 3);
@@ -228,6 +260,99 @@ namespace Deep3DStudio.Model
                 }
             }
             return list;
+        }
+
+        private static List<Vector2> UnflattenVector2(List<float> floats)
+        {
+            var list = new List<Vector2>(floats.Count / 2);
+            for (int i = 0; i < floats.Count; i += 2)
+            {
+                if (i + 1 < floats.Count)
+                {
+                    list.Add(new Vector2(floats[i], floats[i + 1]));
+                }
+            }
+            return list;
+        }
+
+        private static List<float> FlattenMatrix4(Matrix4 m)
+        {
+            return new List<float>(16)
+            {
+                m.M11, m.M12, m.M13, m.M14,
+                m.M21, m.M22, m.M23, m.M24,
+                m.M31, m.M32, m.M33, m.M34,
+                m.M41, m.M42, m.M43, m.M44
+            };
+        }
+
+        private static Matrix4 UnflattenMatrix4(List<float> data)
+        {
+            if (data.Count < 16) return Matrix4.Identity;
+            return new Matrix4(
+                data[0], data[1], data[2], data[3],
+                data[4], data[5], data[6], data[7],
+                data[8], data[9], data[10], data[11],
+                data[12], data[13], data[14], data[15]
+            );
+        }
+
+        private static Matrix4? UnflattenMatrix4Nullable(List<float>? data)
+        {
+            if (data == null || data.Count < 16) return null;
+            return UnflattenMatrix4(data);
+        }
+
+        private static CameraPoseDTO ToPoseDto(CameraPose pose)
+        {
+            return new CameraPoseDTO
+            {
+                WorldToCamera = FlattenMatrix4(pose.WorldToCamera),
+                CameraToWorld = FlattenMatrix4(pose.CameraToWorld),
+                ImageIndex = pose.ImageIndex,
+                ImagePath = pose.ImagePath,
+                Width = pose.Width,
+                Height = pose.Height,
+                FocalLength = pose.FocalLength
+            };
+        }
+
+        private static CameraPose FromPoseDto(CameraPoseDTO dto)
+        {
+            return new CameraPose
+            {
+                WorldToCamera = UnflattenMatrix4(dto.WorldToCamera),
+                CameraToWorld = UnflattenMatrix4(dto.CameraToWorld),
+                ImageIndex = dto.ImageIndex,
+                ImagePath = dto.ImagePath,
+                Width = dto.Width,
+                Height = dto.Height,
+                FocalLength = dto.FocalLength
+            };
+        }
+
+        private static string? EncodeTexture(SKBitmap? texture)
+        {
+            if (texture == null) return null;
+
+            using var image = SKImage.FromBitmap(texture);
+            using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+            if (data == null) return null;
+            return Convert.ToBase64String(data.ToArray());
+        }
+
+        private static SKBitmap? DecodeTexture(string? base64)
+        {
+            if (string.IsNullOrWhiteSpace(base64)) return null;
+            try
+            {
+                var bytes = Convert.FromBase64String(base64);
+                return SKBitmap.Decode(bytes);
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 }

@@ -353,7 +353,7 @@ namespace Deep3DStudio.Scene
             ImagePath = pose.ImagePath;
             ImageWidth = pose.Width;
             ImageHeight = pose.Height;
-            AspectRatio = (float)pose.Width / pose.Height;
+            AspectRatio = pose.Height > 0 ? (float)pose.Width / pose.Height : 1.333f;
 
             // Extract position from pose matrix
             var pos = pose.CameraToWorld.ExtractTranslation();
@@ -438,9 +438,24 @@ namespace Deep3DStudio.Scene
 
         public override SceneObject Clone()
         {
+            CameraPose? clonedPose = null;
+            if (Pose != null)
+            {
+                clonedPose = new CameraPose
+                {
+                    WorldToCamera = Pose.WorldToCamera,
+                    CameraToWorld = Pose.CameraToWorld,
+                    ImageIndex = Pose.ImageIndex,
+                    ImagePath = Pose.ImagePath,
+                    Width = Pose.Width,
+                    Height = Pose.Height,
+                    FocalLength = Pose.FocalLength
+                };
+            }
+
             return new CameraObject(Name + " (Copy)")
             {
-                Pose = Pose,
+                Pose = clonedPose,
                 Position = Position,
                 Rotation = Rotation,
                 Scale = Scale,
