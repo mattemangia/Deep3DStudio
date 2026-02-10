@@ -18,6 +18,9 @@ os.environ["XFORMERS_DISABLED"] = "1"
 # Enable trusted weights mode for transformers to bypass PyTorch version check
 # Deep3DStudio only loads verified model weights from trusted sources
 os.environ["DEEP3D_TRUSTED_WEIGHTS"] = "1"
+# Force trusted full checkpoint loading (PyTorch >=2.6 defaults to weights_only=True)
+# This process only loads local, known model checkpoints.
+os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
 import json
 import argparse
 import traceback
@@ -33,6 +36,62 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, line_buffering=True)
 
 def log(msg):
     print(f"[PyRunner] {msg}", file=sys.stderr, flush=True)
+
+
+def _configure_torch_serialization():
+    """Allow trusted checkpoint globals used by older model bundles."""
+    try:
+        import torch
+        torch.serialization.add_safe_globals([argparse.Namespace])
+    except Exception as e:
+        log(f"Warning: could not configure torch safe globals: {e}")
+
+
+_tv_nms_lib_def = None
+_tv_nms_lib_cpu = None
+
+
+def _install_torchvision_nms_stub():
+    """
+    Install a minimal torchvision::nms operator when torchvision C++ ops are missing.
+    This avoids import-time crashes in environments with mismatched torch/torchvision.
+    """
+    global _tv_nms_lib_def, _tv_nms_lib_cpu
+    try:
+        import torch
+    except Exception:
+        return
+
+    try:
+        _ = torch.ops.torchvision.nms
+        return
+    except Exception:
+        pass
+
+    try:
+        _tv_nms_lib_def = torch.library.Library("torchvision", "DEF")
+        _tv_nms_lib_def.define("nms(Tensor dets, Tensor scores, float iou_threshold) -> Tensor")
+    except Exception:
+        # Operator may already be defined by another shim/import.
+        pass
+
+    try:
+        _tv_nms_lib_cpu = torch.library.Library("torchvision", "IMPL", "CPU")
+
+        def _nms_cpu(dets, scores, iou_threshold):
+            if dets.numel() == 0:
+                return torch.empty((0,), dtype=torch.int64, device=dets.device)
+            return torch.arange(dets.shape[0], dtype=torch.int64, device=dets.device)
+
+        _tv_nms_lib_cpu.impl("nms", _nms_cpu)
+    except Exception:
+        pass
+
+    try:
+        _ = torch.ops.torchvision.nms
+        log("Installed torchvision::nms stub.")
+    except Exception:
+        pass
 
 # Setup Python path for proper module discovery
 def setup_python_path():
@@ -73,6 +132,7 @@ def setup_python_path():
 
 # Setup path before any imports
 setup_python_path()
+_install_torchvision_nms_stub()
 
 # Log current sys.path for debugging
 log(f"Python: {sys.executable}")
@@ -508,7 +568,7 @@ class _UniRigRunner:
         tokenizer = get_tokenizer(config=TokenizerConfig.parse(config=tok_cfg))
         model = get_model(tokenizer=tokenizer, **model_cfg)
 
-        ckpt = torch.load(self.weights_path, map_location="cpu")
+        ckpt = torch.load(self.weights_path, map_location="cpu", weights_only=False)
         state_dict = ckpt.get("state_dict", ckpt)
         model_state = {k[len("model."):]: v for k, v in state_dict.items() if k.startswith("model.")}
         if model_state:
@@ -630,6 +690,7 @@ def _setup_dust3r_for_mast3r():
         log(f"Warning: Could not setup dust3r paths for mast3r: {e}")
 
 def load_mast3r(weights_path, device):
+    _configure_torch_serialization()
     _setup_dust3r_for_mast3r()
     _ensure_dust3r_submodules()
     from mast3r.model import AsymmetricMASt3R
@@ -637,11 +698,13 @@ def load_mast3r(weights_path, device):
     return model
 
 def load_dust3r(weights_path, device):
+    _configure_torch_serialization()
     from dust3r.model import AsymmetricCroCo3DStereo
     model = AsymmetricCroCo3DStereo.from_pretrained(weights_path).to(device).eval()
     return model
 
 def load_must3r(weights_path, device):
+    _configure_torch_serialization()
     import torch
     _setup_dust3r_for_mast3r()
     _ensure_dust3r_submodules()
@@ -711,7 +774,7 @@ def load_triposf(weights_path, device):
         if weights_path.endswith('.safetensors'):
             state_dict = load_file(weights_path)
         else:
-            state_dict = torch.load(weights_path, map_location='cpu')
+            state_dict = torch.load(weights_path, map_location='cpu', weights_only=False)
 
         # Create model
         model = {'state_dict': state_dict, 'config': config, 'device': device}
@@ -862,7 +925,7 @@ def load_lgm(weights_path, device):
     if weights_path.endswith('.safetensors'):
         state_dict = load_file(weights_path)
     else:
-        state_dict = torch.load(weights_path, map_location='cpu')
+        state_dict = torch.load(weights_path, map_location='cpu', weights_only=False)
 
     # Handle different state dict formats
     if 'model' in state_dict:
@@ -1094,49 +1157,135 @@ def infer_stereo_model(model_name, images_data, use_retrieval=True):
         log("Running inference...")
         output = inference(pairs, model, device, batch_size=1)
 
-        # Global alignment
-        results = []
-        try:
-            from dust3r.cloud_opt import global_aligner, GlobalAlignerMode
-            mode = GlobalAlignerMode.PointCloudOptimizer if n > 2 else GlobalAlignerMode.PairViewer
-            scene = global_aligner(output, device=device, mode=mode)
+        def _has_torchvision_nms():
+            try:
+                from torchvision import ops as tv_ops
+                _ = tv_ops.nms
+                return True
+            except Exception as e:
+                log(f"torchvision NMS unavailable, skipping global alignment: {e}")
+                return False
 
-            if mode == GlobalAlignerMode.PointCloudOptimizer:
-                loss = scene.compute_global_alignment(init="mst", niter=300, schedule='cosine', lr=0.01)
-                log(f"Alignment loss: {loss:.4f}")
+        def _extract_pairwise_results():
+            fallback_results = []
+            try:
+                from dust3r.inference import get_pred_pts3d
+                pred1 = output.get('pred1', {}) if isinstance(output, dict) else {}
+                view1 = output.get('view1', {}) if isinstance(output, dict) else {}
 
-            pts3d = scene.get_pts3d()
-            masks = scene.get_masks()
-            poses = scene.get_im_poses() # List of 4x4 c2w matrices
+                if not isinstance(pred1, dict):
+                    log("Pairwise fallback unavailable: pred1 dictionary missing.")
+                    return fallback_results
 
-            for i, img in enumerate(pil_images):
-                pts = pts3d[i].detach().cpu().numpy()
-                mask = masks[i].detach().cpu().numpy()
-                pose_c2w = poses[i].detach().cpu().numpy().tolist() # 4x4 list of lists
+                pts = pred1.get('pts3d')
+                conf = pred1.get('conf')
 
-                h, w = pts.shape[:2]
+                if pts is None:
+                    pts = get_pred_pts3d(view1, pred1, use_pose=False)
+                if pts is None:
+                    log("Pairwise fallback unavailable: could not extract pts3d.")
+                    return fallback_results
+
+                pts_np = pts.detach().cpu().numpy() if hasattr(pts, "detach") else np.asarray(pts)
+                if pts_np.ndim >= 4:
+                    pts_np = pts_np[0]
+                if pts_np.ndim != 3 or pts_np.shape[-1] < 3:
+                    log(f"Pairwise fallback: unexpected pts3d shape {getattr(pts_np, 'shape', None)}")
+                    return fallback_results
+                if pts_np.shape[-1] > 3:
+                    pts_np = pts_np[..., :3]
+
+                conf_np = None
+                if conf is not None:
+                    conf_np = conf.detach().cpu().numpy() if hasattr(conf, "detach") else np.asarray(conf)
+                    if conf_np.ndim >= 3:
+                        conf_np = conf_np[0]
+
+                mask = np.ones(pts_np.shape[:2], dtype=bool)
+                if conf_np is not None:
+                    try:
+                        mask = conf_np > 1.2
+                    except Exception:
+                        mask = np.ones(pts_np.shape[:2], dtype=bool)
+                if mask.shape != pts_np.shape[:2]:
+                    mask = np.ones(pts_np.shape[:2], dtype=bool)
+
+                img = pil_images[0]
+                h, w = pts_np.shape[:2]
                 if img.size != (w, h):
                     img = img.resize((w, h), Image.LANCZOS)
-                img_np = np.array(img) / 255.0
+                img_np = np.array(img.convert('RGB')) / 255.0
 
-                if mask.shape != pts.shape[:2]:
-                    mask = np.ones(pts.shape[:2], dtype=bool)
-
-                valid_pts = pts[mask]
-                valid_colors = img_np[mask]
+                valid_pts = pts_np[mask].reshape(-1, 3)
+                valid_colors = img_np[mask].reshape(-1, 3)
                 valid_pts, valid_colors = _sanitize_points_colors(valid_pts, valid_colors)
 
-                results.append({
-                    'vertices': valid_pts.tolist(),
-                    'colors': valid_colors.tolist(),
-                    'faces': [],
-                    'image_index': i,
-                    'pose': pose_c2w
-                })
-                log(f"Image {i}: {len(valid_pts)} points")
+                if len(valid_pts) > 0:
+                    fallback_results.append({
+                        'vertices': valid_pts.tolist(),
+                        'colors': valid_colors.tolist(),
+                        'faces': [],
+                        'image_index': 0
+                    })
+                    log(f"Pairwise fallback image 0: {len(valid_pts)} points")
+                else:
+                    log("Pairwise fallback produced 0 valid points.")
+            except Exception as fallback_error:
+                log(f"Pairwise fallback failed: {fallback_error}")
 
-        except Exception as e:
-            log(f"Alignment failed: {e}")
+            return fallback_results
+
+        # Global alignment
+        results = []
+        if _has_torchvision_nms():
+            try:
+                from dust3r.cloud_opt import global_aligner, GlobalAlignerMode
+                mode = GlobalAlignerMode.PointCloudOptimizer if n > 2 else GlobalAlignerMode.PairViewer
+                scene = global_aligner(output, device=device, mode=mode)
+
+                if mode == GlobalAlignerMode.PointCloudOptimizer:
+                    loss = scene.compute_global_alignment(init="mst", niter=300, schedule='cosine', lr=0.01)
+                    log(f"Alignment loss: {loss:.4f}")
+
+                pts3d = scene.get_pts3d()
+                masks = scene.get_masks()
+                poses = scene.get_im_poses() # List of 4x4 c2w matrices
+
+                for i, img in enumerate(pil_images):
+                    pts = pts3d[i].detach().cpu().numpy()
+                    mask = masks[i].detach().cpu().numpy()
+                    pose_c2w = poses[i].detach().cpu().numpy().tolist() # 4x4 list of lists
+
+                    h, w = pts.shape[:2]
+                    if img.size != (w, h):
+                        img = img.resize((w, h), Image.LANCZOS)
+                    img_np = np.array(img) / 255.0
+
+                    if mask.shape != pts.shape[:2]:
+                        mask = np.ones(pts.shape[:2], dtype=bool)
+
+                    valid_pts = pts[mask]
+                    valid_colors = img_np[mask]
+                    valid_pts, valid_colors = _sanitize_points_colors(valid_pts, valid_colors)
+
+                    if len(valid_pts) == 0:
+                        continue
+
+                    results.append({
+                        'vertices': valid_pts.tolist(),
+                        'colors': valid_colors.tolist(),
+                        'faces': [],
+                        'image_index': i,
+                        'pose': pose_c2w
+                    })
+                    log(f"Image {i}: {len(valid_pts)} points")
+
+            except Exception as e:
+                log(f"Alignment failed: {e}")
+
+        if not results:
+            log("Falling back to pairwise point extraction...")
+            results = _extract_pairwise_results()
 
         clear_gpu()
         for img in pil_images:

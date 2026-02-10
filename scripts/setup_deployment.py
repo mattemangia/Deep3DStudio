@@ -143,6 +143,117 @@ def format_size(size_bytes):
         return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
 
 
+def requirement_name(requirement):
+    """Extract normalized package name from a requirement string."""
+    req = (requirement or "").strip()
+    if not req:
+        return ""
+
+    req = req.split(";", 1)[0].strip()
+    req = req.split("[", 1)[0].strip()
+    for op in ("==", ">=", "<=", "~=", "!=", ">", "<"):
+        if op in req:
+            req = req.split(op, 1)[0].strip()
+            break
+    return req.lower().replace("_", "-")
+
+
+def should_replace_requirement(existing_req, new_req):
+    """Prefer exact pins over unpinned specifiers when deduplicating requirements."""
+    existing_exact = "==" in existing_req
+    new_exact = "==" in new_req
+    return new_exact and not existing_exact
+
+
+def prepare_python_requirements(raw_requirements, target_platform):
+    """
+    Normalize and deduplicate requirements while keeping torch stack coherent.
+    Returns: (reqs_list, has_xformers, has_torchmcubes, install_torch_directml)
+    """
+    req_map = {}
+    has_xformers = False
+    has_torchmcubes = False
+    has_torch_directml = False
+
+    for req in raw_requirements:
+        name = requirement_name(req)
+        if not name:
+            continue
+        if name == "xformers":
+            has_xformers = True
+            continue
+        if name == "torchmcubes":
+            has_torchmcubes = True
+            continue
+        if name == "torch-directml":
+            has_torch_directml = True
+            continue
+
+        existing = req_map.get(name)
+        if existing is None or should_replace_requirement(existing, req):
+            req_map[name] = req
+
+    # Keep torch and torchvision strictly pinned as a compatible pair.
+    req_map["torch"] = "torch==2.4.1"
+    req_map["torchvision"] = "torchvision==0.19.1"
+
+    reqs_list = sorted(req_map.values(), key=requirement_name)
+    install_torch_directml = ("win" in target_platform) and has_torch_directml
+    return reqs_list, has_xformers, has_torchmcubes, install_torch_directml
+
+
+def verify_torch_stack(python_exe):
+    """Verify torch/torchvision import compatibility and torchvision.ops.nms availability."""
+    print("=" * 60)
+    print("STEP: Verifying torch/torchvision stack...")
+    print("=" * 60)
+
+    check_code = r"""
+import json
+import sys
+info = {}
+try:
+    import torch
+    info["torch"] = getattr(torch, "__version__", "unknown")
+except Exception as e:
+    print(json.dumps({"ok": False, "error": f"torch import failed: {e}"}))
+    sys.exit(1)
+
+try:
+    import torchvision
+    info["torchvision"] = getattr(torchvision, "__version__", "unknown")
+except Exception as e:
+    print(json.dumps({"ok": False, "error": f"torchvision import failed: {e}", **info}))
+    sys.exit(1)
+
+try:
+    from torchvision import ops
+    _ = ops.nms
+except Exception as e:
+    print(json.dumps({"ok": False, "error": f"torchvision.ops.nms unavailable: {e}", **info}))
+    sys.exit(1)
+
+print(json.dumps({"ok": True, **info}))
+"""
+
+    result = subprocess.run(
+        [python_exe, "-c", check_code],
+        capture_output=True,
+        text=True
+    )
+
+    if result.stdout.strip():
+        print(f"  Torch stack info: {result.stdout.strip()}")
+    if result.returncode != 0:
+        if result.stderr.strip():
+            print(f"  stderr: {result.stderr.strip()}")
+        print("  ERROR: torch/torchvision verification failed.")
+        return False
+
+    print("  torch/torchvision verification passed.")
+    return True
+
+
 def download_with_progress(url, target_path, description=None):
     """
     Download a file with a progress bar showing percentage and speed.
@@ -343,40 +454,38 @@ def setup_python_embed(target_dir, target_platform):
     elif "darwin" in host_os and "osx" in target_platform: is_compatible = True
 
     # Requirements list
-    # Pin torch/torchvision for torch-directml compatibility (Windows)
-    # torch-directml requires specific versions, usually lagging behind latest
+    # Keep torch stack pinned and coherent. Extra packages are deduplicated by name.
     base_reqs = [
-        "torch==2.4.1", 
-        "torchvision==0.19.1", 
-        "numpy", 
-        "Pillow", 
-        "opencv-python", 
-        "rembg", 
-        "onnxruntime", 
-        "scipy", 
-        "easydict"
+        "torch==2.4.1",
+        "torchvision==0.19.1",
+        "numpy",
+        "Pillow",
+        "opencv-python",
+        "rembg",
+        "onnxruntime",
+        "scipy",
+        "easydict",
     ]
 
-    # Add torch-directml for Windows platforms
+    # Keep torch-directml explicit for Windows, but install it in a separate no-deps step.
     if "win" in target_platform:
         base_reqs.append("torch-directml")
 
-    all_reqs = set(base_reqs)
+    raw_reqs = list(base_reqs)
     for m in MODELS.values():
         for r in m.get("requirements", []):
-            all_reqs.add(r)
-    reqs_list = sorted(list(all_reqs))
+            raw_reqs.append(r)
 
-    # Special packages that need git-based installation
+    reqs_list, has_xformers, has_torchmcubes, install_torch_directml = prepare_python_requirements(
+        raw_reqs, target_platform
+    )
+
+    # Special packages that need dedicated install steps
     git_packages = []
-    if "torchmcubes" in reqs_list:
-        reqs_list.remove("torchmcubes")
+    if has_torchmcubes:
         git_packages.append(("torchmcubes", "git+https://github.com/tatsy/torchmcubes.git"))
 
-    xformers_req = None
-    if "xformers" in reqs_list:
-        reqs_list.remove("xformers")
-        xformers_req = "xformers"
+    xformers_req = "xformers" if has_xformers else None
 
     if is_compatible:
         # Native installation
@@ -465,6 +574,24 @@ def setup_python_embed(target_dir, target_platform):
                 return False
             print("  Package installation completed!")
 
+            if install_torch_directml:
+                print("=" * 60)
+                print("STEP: Installing torch-directml with --no-deps...")
+                print("=" * 60)
+                dml_cmd = pip_cmd + ["--no-deps", "torch-directml"]
+                print(f"  Command: {' '.join(dml_cmd)}")
+                dml_proc = subprocess.Popen(dml_cmd, env=clean_env,
+                                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                            text=True, bufsize=1)
+                for line in dml_proc.stdout:
+                    print(f"  {line.rstrip()}")
+                dml_proc.wait()
+                print("-" * 60)
+                if dml_proc.returncode != 0:
+                    print(f"  torch-directml install failed with return code {dml_proc.returncode}")
+                    return False
+                print("  torch-directml installation completed!")
+
             if xformers_req:
                 print("=" * 60)
                 print("STEP: Installing xformers (requires torch available, disabling build isolation)...")
@@ -490,7 +617,7 @@ def setup_python_embed(target_dir, target_platform):
                 print("=" * 60)
                 for pkg_name, git_url in git_packages:
                     print(f"  Installing {pkg_name} from {git_url}...")
-                    git_cmd = pip_cmd + [git_url]
+                    git_cmd = pip_cmd + ["--no-deps", git_url]
                     pkg_env = clean_env
                     if pkg_name == "torchmcubes":
                         pkg_env = clean_env.copy()
@@ -528,6 +655,9 @@ def setup_python_embed(target_dir, target_platform):
             print(f"Lib install failed: {e}")
             import traceback
             traceback.print_exc()
+            return False
+
+        if not verify_torch_stack(python_exe):
             return False
 
         # Verify installation - check that critical packages exist
@@ -622,16 +752,21 @@ def setup_python_embed(target_dir, target_platform):
         print(f"Installing libraries via host pip to {site_packages} (Platform: {pip_platform})...")
         print(f"Installing: {', '.join(reqs_list)}")
 
-        cmd = [
+        cross_pip_cmd = [
             sys.executable, "-m", "pip", "install",
             "--target", site_packages,
             "--platform", pip_platform,
             "--python-version", PYTHON_VERSION[:4], # e.g. "3.10"
             "--only-binary=:all:"
-        ] + reqs_list
+        ]
+        cmd = cross_pip_cmd + reqs_list
 
         try:
             subprocess.check_call(cmd)
+
+            if install_torch_directml:
+                print("Installing torch-directml (cross-install, --no-deps)...")
+                subprocess.check_call(cross_pip_cmd + ["--no-deps", "torch-directml"])
 
             # Verify cross-install
             print(f"Verifying cross-installation in {site_packages}...")
@@ -1517,16 +1652,16 @@ if __name__ == "__main__":
              print("WARNING: You are running on Linux but targeting a non-Linux platform.")
              print("This will likely FAIL.")
 
-    if setup_python_embed(python_dir, target_platform):
-        setup_models(models_dir, python_dir, target_platform)
+        if setup_python_embed(python_dir, target_platform):
+            setup_models(models_dir, python_dir, target_platform)
 
             # Apply patches to model packages
             if "win" in target_platform:
                 site_packages = os.path.join(python_dir, "python", "Lib", "site-packages")
             else:
                 site_packages = os.path.join(python_dir, "python", "lib", "python3.10", "site-packages")
-        apply_patches(site_packages)
-        verify_embedded_triposf_patch()
+            apply_patches(site_packages)
+            verify_embedded_triposf_patch()
 
             obfuscate_and_clean(python_dir, target_platform)
 
