@@ -159,9 +159,9 @@ namespace Deep3DStudio
 
         // View State
         private bool _showTopToolbar = true;
-        private bool _showMeshEditorToolbar = true;
-        private bool _showPointCloudToolbar = true;
-        private bool _showGeoreferenceToolbar = true;
+        private bool _showMeshEditorToolbar = false;
+        private bool _showPointCloudToolbar = false;
+        private bool _showGeoreferenceToolbar = false;
         private bool _showLeftPanel = true;
         private bool _showRightPanel = true;
         private bool _showLogPanel = true;
@@ -394,7 +394,8 @@ namespace Deep3DStudio
             var colors = style.Colors;
             colors[(int)ImGuiCol.WindowBg] = new System.Numerics.Vector4(0.12f, 0.12f, 0.12f, 1.0f);
             colors[(int)ImGuiCol.ChildBg] = new System.Numerics.Vector4(0.14f, 0.14f, 0.14f, 1.0f);
-            colors[(int)ImGuiCol.PopupBg] = new System.Numerics.Vector4(0.10f, 0.10f, 0.10f, 0.95f);
+            colors[(int)ImGuiCol.PopupBg] = new System.Numerics.Vector4(0.08f, 0.08f, 0.08f, 0.98f);
+            colors[(int)ImGuiCol.ModalWindowDimBg] = new System.Numerics.Vector4(0.02f, 0.02f, 0.02f, 0.70f);
             colors[(int)ImGuiCol.Border] = new System.Numerics.Vector4(0.25f, 0.25f, 0.25f, 1.0f);
             colors[(int)ImGuiCol.FrameBg] = new System.Numerics.Vector4(0.18f, 0.18f, 0.18f, 1.0f);
             colors[(int)ImGuiCol.FrameBgHovered] = new System.Numerics.Vector4(0.25f, 0.25f, 0.25f, 1.0f);
@@ -883,11 +884,7 @@ namespace Deep3DStudio
             ProgressDialog.Instance.Draw();
 
             // Handle popup requests
-            if (_popupToOpen != null)
-            {
-                ImGui.OpenPopup(_popupToOpen);
-                _popupToOpen = null;
-            }
+            ProcessPendingPopupRequest();
 
             // Unsaved changes prompt
             if (_showUnsavedChangesPrompt)
@@ -993,6 +990,10 @@ namespace Deep3DStudio
             {
                 RenderInfoOverlay();
             }
+
+            // A second pass allows right-click popup requests raised during toolbar rendering
+            // to be opened in the same frame (avoids requiring an extra click).
+            ProcessPendingPopupRequest();
 
             // Dialogs
             if (_showSettings) DrawSettingsWindow();
@@ -1493,7 +1494,7 @@ namespace Deep3DStudio
                 onClick();
             }
 
-            if (onRightClick != null && ImGui.IsItemClicked(ImGuiMouseButton.Right))
+            if (onRightClick != null && IsLastItemRightClicked())
             {
                 onRightClick();
             }
@@ -1517,7 +1518,16 @@ namespace Deep3DStudio
             }
         }
 
-        private static bool IsLastItemRightClicked() => ImGui.IsItemClicked(ImGuiMouseButton.Right);
+        private static bool IsLastItemRightClicked() =>
+            ImGui.IsItemClicked(ImGuiMouseButton.Right) ||
+            (ImGui.IsItemHovered() && ImGui.IsMouseReleased(ImGuiMouseButton.Right));
+
+        private void ProcessPendingPopupRequest()
+        {
+            if (_popupToOpen == null) return;
+            ImGui.OpenPopup(_popupToOpen);
+            _popupToOpen = null;
+        }
 
         /// <summary>
         /// Helper to draw a button with an icon and text label

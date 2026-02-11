@@ -209,9 +209,9 @@ namespace Deep3DStudio.Configuration
         public bool ShowPointCloudBounds { get; set; } = true; // Show bounding box for point clouds
         public bool ShowTopToolbar { get; set; } = true;
         public bool ShowVerticalToolbar { get; set; } = true;
-        public bool ShowMeshEditorToolbar { get; set; } = true;
-        public bool ShowPointCloudToolbar { get; set; } = true;
-        public bool ShowGeoreferenceToolbar { get; set; } = true;
+        public bool ShowMeshEditorToolbar { get; set; } = false;
+        public bool ShowPointCloudToolbar { get; set; } = false;
+        public bool ShowGeoreferenceToolbar { get; set; } = false;
         public int LastWindowWidth { get; set; } = 1400;
         public int LastWindowHeight { get; set; } = 900;
         public int LastPanelWidth { get; set; } = 250;
@@ -774,9 +774,9 @@ namespace Deep3DStudio.Configuration
             ShowPointCloudBounds = true;
             ShowTopToolbar = true;
             ShowVerticalToolbar = true;
-            ShowMeshEditorToolbar = true;
-            ShowPointCloudToolbar = true;
-            ShowGeoreferenceToolbar = true;
+            ShowMeshEditorToolbar = false;
+            ShowPointCloudToolbar = false;
+            ShowGeoreferenceToolbar = false;
             NeRFIterations = 50;
             VoxelGridSize = 128;
             NeRFLearningRate = 0.1f;

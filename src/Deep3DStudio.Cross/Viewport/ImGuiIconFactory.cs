@@ -81,6 +81,7 @@ namespace Deep3DStudio.Viewport
     public class ImGuiIconFactory : IDisposable
     {
         private Dictionary<IconType, int> _icons = new Dictionary<IconType, int>();
+        private int _fallbackIcon;
 
         public ImGuiIconFactory()
         {
@@ -91,7 +92,7 @@ namespace Deep3DStudio.Viewport
         {
             if (_icons.TryGetValue(type, out int id))
                 return (IntPtr)id;
-            return IntPtr.Zero;
+            return _fallbackIcon != 0 ? (IntPtr)_fallbackIcon : IntPtr.Zero;
         }
 
         public void Dispose()
@@ -101,12 +102,23 @@ namespace Deep3DStudio.Viewport
                 GL.DeleteTexture(id);
             }
             _icons.Clear();
+            if (_fallbackIcon != 0)
+            {
+                GL.DeleteTexture(_fallbackIcon);
+                _fallbackIcon = 0;
+            }
         }
 
         private void LoadIcons()
         {
             // Generate procedural icons using SkiaSharp to ensure they exist without external assets
             // This guarantees we have icons even if files are missing, and solves the request for "Where are the icons?"
+            _fallbackIcon = CreateIcon(SKColors.DimGray, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 3, Style = SKPaintStyle.Stroke, IsAntialias = true };
+                canvas.DrawRect(w * 0.18f, h * 0.18f, w * 0.64f, h * 0.64f, p);
+                canvas.DrawLine(w * 0.32f, h * 0.5f, w * 0.68f, h * 0.5f, p);
+                canvas.DrawLine(w * 0.5f, h * 0.32f, w * 0.5f, h * 0.68f, p);
+            });
 
             _icons[IconType.Select] = CreateIcon(SKColors.White, (canvas, w, h) => {
                 // Cursor arrow
@@ -205,6 +217,38 @@ namespace Deep3DStudio.Viewport
                  canvas.DrawCircle(w*0.5f, h*0.5f, w*0.15f, p);
                  // Flash/Viewfinder
                  canvas.DrawRect(w*0.6f, h*0.2f, w*0.15f, h*0.1f, new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill });
+            });
+
+            _icons[IconType.Settings] = CreateIcon(SKColors.SlateGray, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2.5f, Style = SKPaintStyle.Stroke, IsAntialias = true };
+                canvas.DrawCircle(w * 0.5f, h * 0.5f, w * 0.2f, p);
+                for (int i = 0; i < 8; i++)
+                {
+                    float a = i * (float)Math.PI / 4.0f;
+                    float x1 = w * 0.5f + (float)Math.Cos(a) * w * 0.28f;
+                    float y1 = h * 0.5f + (float)Math.Sin(a) * h * 0.28f;
+                    float x2 = w * 0.5f + (float)Math.Cos(a) * w * 0.38f;
+                    float y2 = h * 0.5f + (float)Math.Sin(a) * h * 0.38f;
+                    canvas.DrawLine(x1, y1, x2, y2, p);
+                }
+            });
+
+            _icons[IconType.Save] = CreateIcon(SKColors.SeaGreen, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke, IsAntialias = true };
+                canvas.DrawRect(w * 0.18f, h * 0.18f, w * 0.64f, h * 0.64f, p);
+                canvas.DrawRect(w * 0.3f, h * 0.24f, w * 0.4f, h * 0.18f, p);
+                canvas.DrawRect(w * 0.3f, h * 0.52f, w * 0.4f, h * 0.2f, p);
+                canvas.DrawRect(w * 0.58f, h * 0.3f, w * 0.12f, h * 0.12f, new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill });
+            });
+
+            _icons[IconType.Open] = CreateIcon(SKColors.SteelBlue, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2.2f, Style = SKPaintStyle.Stroke, IsAntialias = true };
+                canvas.DrawRect(w * 0.14f, h * 0.34f, w * 0.72f, h * 0.42f, p);
+                canvas.DrawRect(w * 0.2f, h * 0.24f, w * 0.28f, h * 0.12f, p);
+                var pArrow = new SKPaint { Color = SKColors.Gold, StrokeWidth = 3, Style = SKPaintStyle.Stroke, IsAntialias = true };
+                canvas.DrawLine(w * 0.5f, h * 0.18f, w * 0.5f, h * 0.5f, pArrow);
+                canvas.DrawLine(w * 0.42f, h * 0.4f, w * 0.5f, h * 0.5f, pArrow);
+                canvas.DrawLine(w * 0.58f, h * 0.4f, w * 0.5f, h * 0.5f, pArrow);
             });
 
             _icons[IconType.Texture] = CreateIcon(SKColors.Pink, (canvas, w, h) => {
