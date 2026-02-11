@@ -348,6 +348,15 @@ namespace Deep3DStudio
             _showPointCloudToolbar = settings.ShowPointCloudToolbar;
             _showGeoreferenceToolbar = settings.ShowGeoreferenceToolbar;
 
+            // In ImGui mode, non-primary toolbars start disabled by default at app launch.
+            // This is enforced even when an older settings file had them enabled.
+            _showMeshEditorToolbar = false;
+            _showPointCloudToolbar = false;
+            _showGeoreferenceToolbar = false;
+            settings.ShowMeshEditorToolbar = false;
+            settings.ShowPointCloudToolbar = false;
+            settings.ShowGeoreferenceToolbar = false;
+
             // Load Logo - try embedded resource first, fallback to runtime-generated logo
             _logoTexture = TextureLoader.LoadTextureFromResource("logo.png");
             if (_logoTexture == -1)
