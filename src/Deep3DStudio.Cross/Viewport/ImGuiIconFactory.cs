@@ -172,11 +172,16 @@ namespace Deep3DStudio.Viewport
             });
 
             _icons[IconType.Bake] = CreateIcon(SKColors.Purple, (canvas, w, h) => {
-                // Texture / Grid
-                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
-                canvas.DrawRect(w*0.2f, h*0.2f, w*0.6f, h*0.6f, p);
-                canvas.DrawLine(w*0.5f, h*0.2f, w*0.5f, h*0.8f, p);
-                canvas.DrawLine(w*0.2f, h*0.5f, w*0.8f, h*0.5f, p);
+                // Bold tray + heat mark for readability at small toolbar size.
+                var fill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill, IsAntialias = true };
+                var stroke = new SKPaint { Color = SKColors.Black.WithAlpha(180), StrokeWidth = 2, Style = SKPaintStyle.Stroke, IsAntialias = true };
+                canvas.DrawRoundRect(new SKRect(w * 0.16f, h * 0.38f, w * 0.84f, h * 0.84f), 6, 6, fill);
+                canvas.DrawRoundRect(new SKRect(w * 0.16f, h * 0.38f, w * 0.84f, h * 0.84f), 6, 6, stroke);
+
+                var heat = new SKPaint { Color = SKColors.Gold, StrokeWidth = 4, Style = SKPaintStyle.Stroke, IsAntialias = true };
+                canvas.DrawLine(w * 0.30f, h * 0.20f, w * 0.30f, h * 0.34f, heat);
+                canvas.DrawLine(w * 0.50f, h * 0.16f, w * 0.50f, h * 0.34f, heat);
+                canvas.DrawLine(w * 0.70f, h * 0.20f, w * 0.70f, h * 0.34f, heat);
             });
 
             _icons[IconType.Delete] = CreateIcon(SKColors.Red, (canvas, w, h) => {
@@ -504,32 +509,22 @@ namespace Deep3DStudio.Viewport
             });
 
             _icons[IconType.Fullscreen] = CreateIcon(SKColors.DodgerBlue, (canvas, w, h) => {
-                // Fullscreen icon - four arrows pointing to corners
-                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2.5f, Style = SKPaintStyle.Stroke, IsAntialias = true };
-                var pFill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill, IsAntialias = true };
+                // Thick corner brackets + center block, visible even at 20px.
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 5, Style = SKPaintStyle.Stroke, IsAntialias = true, StrokeCap = SKStrokeCap.Round };
+                float m = w * 0.16f;
+                float s = w * 0.22f;
 
-                float margin = w * 0.15f;
-                float arrowSize = w * 0.18f;
+                canvas.DrawLine(m, m + s, m, m, p);
+                canvas.DrawLine(m, m, m + s, m, p);
+                canvas.DrawLine(w - m - s, m, w - m, m, p);
+                canvas.DrawLine(w - m, m, w - m, m + s, p);
+                canvas.DrawLine(m, h - m - s, m, h - m, p);
+                canvas.DrawLine(m, h - m, m + s, h - m, p);
+                canvas.DrawLine(w - m - s, h - m, w - m, h - m, p);
+                canvas.DrawLine(w - m, h - m - s, w - m, h - m, p);
 
-                // Top-left corner
-                canvas.DrawLine(margin, margin, margin + arrowSize, margin, p);
-                canvas.DrawLine(margin, margin, margin, margin + arrowSize, p);
-
-                // Top-right corner
-                canvas.DrawLine(w - margin, margin, w - margin - arrowSize, margin, p);
-                canvas.DrawLine(w - margin, margin, w - margin, margin + arrowSize, p);
-
-                // Bottom-left corner
-                canvas.DrawLine(margin, h - margin, margin + arrowSize, h - margin, p);
-                canvas.DrawLine(margin, h - margin, margin, h - margin - arrowSize, p);
-
-                // Bottom-right corner
-                canvas.DrawLine(w - margin, h - margin, w - margin - arrowSize, h - margin, p);
-                canvas.DrawLine(w - margin, h - margin, w - margin, h - margin - arrowSize, p);
-
-                // Center rectangle (representing the window)
-                float rectMargin = w * 0.3f;
-                canvas.DrawRect(rectMargin, rectMargin, w - 2 * rectMargin, h - 2 * rectMargin, p);
+                var center = new SKPaint { Color = SKColors.Gold, Style = SKPaintStyle.Fill, IsAntialias = true };
+                canvas.DrawRoundRect(new SKRect(w * 0.40f, h * 0.40f, w * 0.60f, h * 0.60f), 3, 3, center);
             });
 
             _icons[IconType.Link] = CreateIcon(SKColors.LimeGreen, (canvas, w, h) => {
@@ -541,15 +536,26 @@ namespace Deep3DStudio.Viewport
             });
 
             _icons[IconType.TripoSR] = CreateIcon(SKColors.DeepPink, (canvas, w, h) => {
-                // TripoSR icon - single image to 3D
-                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
-                var pFill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
-                // Image frame
-                canvas.DrawRect(w * 0.1f, h * 0.2f, w * 0.35f, h * 0.6f, p);
-                // Arrow
-                canvas.DrawLine(w * 0.5f, h * 0.5f, w * 0.7f, h * 0.5f, p);
-                // 3D cube
-                canvas.DrawRect(w * 0.7f, h * 0.3f, w * 0.2f, h * 0.4f, p);
+                // Single-view input card -> 3D output block.
+                var stroke = new SKPaint { Color = SKColors.White, StrokeWidth = 2.2f, Style = SKPaintStyle.Stroke, IsAntialias = true };
+                var fill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill, IsAntialias = true };
+                var accent = new SKPaint { Color = SKColors.Gold, Style = SKPaintStyle.Fill, IsAntialias = true };
+
+                canvas.DrawRoundRect(new SKRect(w * 0.10f, h * 0.22f, w * 0.42f, h * 0.78f), 4, 4, stroke);
+                canvas.DrawCircle(w * 0.22f, h * 0.38f, 3, fill);
+                canvas.DrawRect(w * 0.16f, h * 0.52f, w * 0.20f, h * 0.12f, fill);
+
+                var path = new SKPath();
+                path.MoveTo(w * 0.47f, h * 0.50f);
+                path.LineTo(w * 0.63f, h * 0.40f);
+                path.LineTo(w * 0.63f, h * 0.60f);
+                path.Close();
+                canvas.DrawPath(path, accent);
+
+                canvas.DrawRoundRect(new SKRect(w * 0.68f, h * 0.32f, w * 0.90f, h * 0.68f), 3, 3, stroke);
+                canvas.DrawLine(w * 0.68f, h * 0.32f, w * 0.78f, h * 0.22f, stroke);
+                canvas.DrawLine(w * 0.90f, h * 0.32f, w * 0.78f, h * 0.22f, stroke);
+                canvas.DrawLine(w * 0.78f, h * 0.22f, w * 0.78f, h * 0.56f, stroke);
             });
 
             _icons[IconType.LGM] = CreateIcon(SKColors.Purple, (canvas, w, h) => {
@@ -565,12 +571,21 @@ namespace Deep3DStudio.Viewport
             });
 
             _icons[IconType.Wonder3D] = CreateIcon(SKColors.Teal, (canvas, w, h) => {
-                // Wonder3D icon - multi-view
-                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
-                // Multiple image frames at angles
-                canvas.DrawRect(w * 0.2f, h * 0.3f, w * 0.25f, h * 0.4f, p);
-                canvas.DrawRect(w * 0.35f, h * 0.25f, w * 0.25f, h * 0.4f, p);
-                canvas.DrawRect(w * 0.5f, h * 0.3f, w * 0.25f, h * 0.4f, p);
+                // Multi-view stack with strong filled cards.
+                var card = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill, IsAntialias = true };
+                var border = new SKPaint { Color = SKColors.Black.WithAlpha(160), StrokeWidth = 1.8f, Style = SKPaintStyle.Stroke, IsAntialias = true };
+                var dot = new SKPaint { Color = SKColors.Gold, Style = SKPaintStyle.Fill, IsAntialias = true };
+
+                canvas.DrawRoundRect(new SKRect(w * 0.12f, h * 0.30f, w * 0.38f, h * 0.74f), 3, 3, card);
+                canvas.DrawRoundRect(new SKRect(w * 0.12f, h * 0.30f, w * 0.38f, h * 0.74f), 3, 3, border);
+                canvas.DrawRoundRect(new SKRect(w * 0.34f, h * 0.20f, w * 0.62f, h * 0.68f), 3, 3, card);
+                canvas.DrawRoundRect(new SKRect(w * 0.34f, h * 0.20f, w * 0.62f, h * 0.68f), 3, 3, border);
+                canvas.DrawRoundRect(new SKRect(w * 0.58f, h * 0.30f, w * 0.86f, h * 0.74f), 3, 3, card);
+                canvas.DrawRoundRect(new SKRect(w * 0.58f, h * 0.30f, w * 0.86f, h * 0.74f), 3, 3, border);
+
+                canvas.DrawCircle(w * 0.24f, h * 0.52f, 2.8f, dot);
+                canvas.DrawCircle(w * 0.48f, h * 0.44f, 2.8f, dot);
+                canvas.DrawCircle(w * 0.72f, h * 0.52f, 2.8f, dot);
             });
 
             _icons[IconType.NeRF] = CreateIcon(SKColors.OrangeRed, (canvas, w, h) => {
