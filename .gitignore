@@ -33,6 +33,7 @@ scripts/dist/models/
 # Temporary directories
 temp_unirig/
 dust3r_repo/
+_out/
 
 # CLion
 .idea/
