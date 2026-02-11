@@ -34,6 +34,8 @@ scripts/dist/models/
 temp_unirig/
 dust3r_repo/
 _out/
+_tmp_*/
+_tmp*/
 
 # CLion
 .idea/
