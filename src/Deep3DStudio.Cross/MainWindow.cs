@@ -3564,7 +3564,7 @@ namespace Deep3DStudio
         private void DrawTransformDialog()
         {
             if (!_showTransformDialog) return;
-            if (ImGui.BeginPopupModal("Transform Objects", ref _showTransformDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Transform Objects", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 var selected = _sceneGraph.SelectedObjects.ToList();
                 bool hasSelection = selected.Count > 0;
@@ -3704,7 +3704,7 @@ namespace Deep3DStudio
         private void DrawPrimitiveDialog()
         {
             if (!_showPrimitiveDialog) return;
-            if (ImGui.BeginPopupModal("Primitive Options", ref _showPrimitiveDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Primitive Options", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 ImGui.Text($"Primitive: {_primitiveDialogType}");
                 ImGui.Separator();
@@ -3791,7 +3791,7 @@ namespace Deep3DStudio
         private void DrawPenExtrudeDialog()
         {
             if (!_showPenExtrudeDialog) return;
-            if (ImGui.BeginPopupModal("Pen Extrude", ref _showPenExtrudeDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Pen Extrude", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 ImGui.InputFloat("Extrude Distance", ref _penExtrudeDistance, 0.01f, 0.1f, "%.4f");
                 ImGui.Separator();
@@ -3811,7 +3811,7 @@ namespace Deep3DStudio
         private void DrawPenMoveDialog()
         {
             if (!_showPenMoveDialog) return;
-            if (ImGui.BeginPopupModal("Pen Move", ref _showPenMoveDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Pen Move", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 ImGui.InputFloat3("Move Delta", ref _penMoveDelta);
                 ImGui.Separator();
@@ -3831,7 +3831,7 @@ namespace Deep3DStudio
         private void DrawPenInsetDialog()
         {
             if (!_showPenInsetDialog) return;
-            if (ImGui.BeginPopupModal("Pen Inset", ref _showPenInsetDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Pen Inset", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 ImGui.SliderFloat("Inset Amount", ref _penInsetAmount, 0.01f, 0.95f, "%.3f");
                 ImGui.Separator();
@@ -3911,7 +3911,7 @@ namespace Deep3DStudio
         private void DrawRunOptionsDialog()
         {
             if (!_showRunOptionsDialog) return;
-            if (ImGui.BeginPopupModal("Run Options", ref _showRunOptionsDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Run Options", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 var settings = IniSettings.Instance;
 
@@ -3948,7 +3948,7 @@ namespace Deep3DStudio
         private void DrawMeshingOptionsDialog()
         {
             if (!_showMeshingOptionsDialog) return;
-            if (ImGui.BeginPopupModal("Meshing Options", ref _showMeshingOptionsDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Meshing Options", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 var settings = IniSettings.Instance;
                 int algo = (int)settings.MeshingAlgo;
@@ -3975,7 +3975,7 @@ namespace Deep3DStudio
         private void DrawRefinementOptionsDialog()
         {
             if (!_showRefinementOptionsDialog) return;
-            if (ImGui.BeginPopupModal("Refinement Options", ref _showRefinementOptionsDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Refinement Options", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 var settings = IniSettings.Instance;
                 int method = (int)settings.MeshRefinement;
@@ -4002,7 +4002,7 @@ namespace Deep3DStudio
         private void DrawPointCloudVoxelDialog()
         {
             if (!_showPcVoxelDialog) return;
-            if (ImGui.BeginPopupModal("Point Cloud Voxel", ref _showPcVoxelDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Point Cloud Voxel", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 ImGui.InputFloat("Voxel Size", ref _pcVoxelSize, 0.001f, 0.01f, "%.4f");
                 if (ImGui.Button("Apply & Run", new System.Numerics.Vector2(120, 0)))
@@ -4020,7 +4020,7 @@ namespace Deep3DStudio
         private void DrawPointCloudOutliersDialog()
         {
             if (!_showPcOutliersDialog) return;
-            if (ImGui.BeginPopupModal("Point Cloud Outliers", ref _showPcOutliersDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Point Cloud Outliers", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 ImGui.InputInt("K Neighbors", ref _pcOutlierK);
                 ImGui.SliderFloat("Std Ratio", ref _pcOutlierStdRatio, 0.1f, 10f, "%.2f");
@@ -4040,7 +4040,7 @@ namespace Deep3DStudio
         private void DrawPointCloudDuplicatesDialog()
         {
             if (!_showPcDuplicatesDialog) return;
-            if (ImGui.BeginPopupModal("Point Cloud Duplicates", ref _showPcDuplicatesDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Point Cloud Duplicates", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 ImGui.InputFloat("Distance Threshold", ref _pcDuplicateThreshold, 0.0001f, 0.001f, "%.6f");
                 if (ImGui.Button("Apply & Run", new System.Numerics.Vector2(120, 0)))
@@ -4058,7 +4058,7 @@ namespace Deep3DStudio
         private void DrawPointCloudNormalsDialog()
         {
             if (!_showPcNormalsDialog) return;
-            if (ImGui.BeginPopupModal("Point Cloud Normals", ref _showPcNormalsDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Point Cloud Normals", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 ImGui.InputInt("K Neighbors", ref _pcNormalK);
                 _pcNormalK = Math.Clamp(_pcNormalK, 3, 200);
@@ -4077,7 +4077,7 @@ namespace Deep3DStudio
         private void DrawPointCloudPassDialog()
         {
             if (!_showPcPassDialog) return;
-            if (ImGui.BeginPopupModal("Point Cloud Pass", ref _showPcPassDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Point Cloud Pass", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 string[] axes = { "X", "Y", "Z" };
                 ImGui.Combo("Axis", ref _pcPassAxis, axes, axes.Length);
@@ -4098,7 +4098,7 @@ namespace Deep3DStudio
         private void DrawPointCloudRadiusDialog()
         {
             if (!_showPcRadiusDialog) return;
-            if (ImGui.BeginPopupModal("Point Cloud Radius", ref _showPcRadiusDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Point Cloud Radius", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 ImGui.InputFloat3("Center", ref _pcRadiusCenter);
                 ImGui.InputFloat("Radius", ref _pcRadius, 0.01f, 0.1f, "%.3f");
@@ -4118,7 +4118,7 @@ namespace Deep3DStudio
         private void DrawPointCloudDenseDialog()
         {
             if (!_showPcDenseDialog) return;
-            if (ImGui.BeginPopupModal("Point Cloud Dense", ref _showPcDenseDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Point Cloud Dense", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 ImGui.InputFloat("Neighbor Radius", ref _pcDenseRadius, 0.001f, 0.01f, "%.4f");
                 ImGui.InputInt("Points Per Seed", ref _pcDensePointsPerSeed);
@@ -4366,7 +4366,7 @@ namespace Deep3DStudio
         {
              if (!_showDecimateDialog) return;
 
-             if (ImGui.BeginPopupModal("Decimate Mesh", ref _showDecimateDialog, ImGuiWindowFlags.AlwaysAutoResize))
+             if (ImGui.BeginPopup("Decimate Mesh", ImGuiWindowFlags.AlwaysAutoResize))
              {
                  bool hasMesh = _sceneGraph.SelectedObjects.OfType<MeshObject>().Any();
 
@@ -4451,7 +4451,7 @@ namespace Deep3DStudio
         private void DrawSmoothDialog()
         {
             if (!_showSmoothDialog) return;
-            if (ImGui.BeginPopupModal("Smooth Mesh", ref _showSmoothDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Smooth Mesh", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 bool hasMesh = _sceneGraph.SelectedObjects.OfType<MeshObject>().Any();
 
@@ -4525,7 +4525,7 @@ namespace Deep3DStudio
         private void DrawOptimizeDialog()
         {
             if (!_showOptimizeDialog) return;
-            if (ImGui.BeginPopupModal("Optimize Mesh", ref _showOptimizeDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Optimize Mesh", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 bool hasMesh = _sceneGraph.SelectedObjects.OfType<MeshObject>().Any();
 
@@ -4643,7 +4643,7 @@ namespace Deep3DStudio
         private void DrawMergeDialog()
         {
             if (!_showMergeDialog) return;
-            if (ImGui.BeginPopupModal("Merge Objects", ref _showMergeDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Merge Objects", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 bool canMerge = _sceneGraph.SelectedObjects.Count >= 2;
 
@@ -4720,7 +4720,7 @@ namespace Deep3DStudio
         private void DrawAlignDialog()
         {
             if (!_showAlignDialog) return;
-            if (ImGui.BeginPopupModal("Align Objects", ref _showAlignDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Align Objects", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 bool canAlign = _sceneGraph.SelectedObjects.Count >= 2;
 
@@ -4809,7 +4809,7 @@ namespace Deep3DStudio
         private void DrawCleanupDialog()
         {
             if (!_showCleanupDialog) return;
-            if (ImGui.BeginPopupModal("Cleanup Mesh", ref _showCleanupDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Cleanup Mesh", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 bool hasMesh = _sceneGraph.SelectedObjects.OfType<MeshObject>().Any();
 
@@ -4898,7 +4898,7 @@ namespace Deep3DStudio
         private void DrawBakeDialog()
         {
             if (!_showBakeDialog) return;
-            if (ImGui.BeginPopupModal("Bake Textures", ref _showBakeDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            if (ImGui.BeginPopup("Bake Textures", ImGuiWindowFlags.AlwaysAutoResize))
             {
                 var mesh = _sceneGraph.SelectedObjects.OfType<MeshObject>().FirstOrDefault();
                 var validCameras = GetBakeableCameras();
