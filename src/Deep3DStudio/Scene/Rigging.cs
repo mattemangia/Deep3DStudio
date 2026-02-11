@@ -561,6 +561,7 @@ namespace Deep3DStudio.Scene
                 Rotation = Rotation,
                 Scale = Scale,
                 Visible = Visible,
+                RenderMode = RenderMode,
                 ShowJoints = ShowJoints,
                 ShowBones = ShowBones,
                 ShowLabels = ShowLabels,

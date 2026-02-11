@@ -74,7 +74,8 @@ namespace Deep3DStudio
 
                     Application.Invoke((s, e2) =>
                     {
-                        _sceneGraph.AddObject(skelObj);
+                        var riggingGroup = GetOrCreateRiggingGroup();
+                        _sceneGraph.AddObject(skelObj, riggingGroup);
                         _activeSkeletonObject = skelObj;
                         _riggingPanel?.SetSkeleton(skelObj);
                         _viewport.QueueDraw();
@@ -104,6 +105,12 @@ namespace Deep3DStudio
             {
                 _rightPanel.Visible = true;
                 _viewport.SetGizmoMode(GizmoMode.Rigging);
+
+                _activeSkeletonObject ??= _sceneGraph.SelectedObjects.OfType<SkeletonObject>().FirstOrDefault();
+                if (_activeSkeletonObject != null)
+                {
+                    _riggingPanel?.SetSkeleton(_activeSkeletonObject);
+                }
             }
         }
 
@@ -174,7 +181,8 @@ namespace Deep3DStudio
                 _activeSkeletonObject.TargetMesh = selectedMesh;
             }
 
-            _sceneGraph.AddObject(_activeSkeletonObject);
+            var riggingGroup = GetOrCreateRiggingGroup();
+            _sceneGraph.AddObject(_activeSkeletonObject, riggingGroup);
 
             // Show rigging panel
             OnShowRiggingPanel(null, EventArgs.Empty);
@@ -205,7 +213,8 @@ namespace Deep3DStudio
                 _activeSkeletonObject.TargetMesh = selectedMesh;
             }
 
-            _sceneGraph.AddObject(_activeSkeletonObject);
+            var riggingGroup = GetOrCreateRiggingGroup();
+            _sceneGraph.AddObject(_activeSkeletonObject, riggingGroup);
 
             OnShowRiggingPanel(null, EventArgs.Empty);
             _riggingPanel?.SetSkeleton(_activeSkeletonObject);
@@ -397,6 +406,18 @@ namespace Deep3DStudio
                 }
             }
             return null;
+        }
+
+        private GroupObject GetOrCreateRiggingGroup()
+        {
+            var existing = _sceneGraph.GetObjectsOfType<GroupObject>()
+                .FirstOrDefault(g => string.Equals(g.Name, "Rigging", StringComparison.OrdinalIgnoreCase));
+            if (existing != null)
+                return existing;
+
+            var group = new GroupObject("Rigging");
+            _sceneGraph.AddObject(group);
+            return group;
         }
     }
 }

@@ -34,6 +34,13 @@ namespace Deep3DStudio
             OpenProject
         }
 
+        private enum TransformDialogMode
+        {
+            Move,
+            Rotate,
+            Scale
+        }
+
         private ImGuiController _controller;
         private ThreeDView _viewport;
         private SceneGraph _sceneGraph;
@@ -144,9 +151,14 @@ namespace Deep3DStudio
         private float _rightPanelWidth = 280;
         private float _logPanelHeight = 150;
         private float _toolbarHeight = 42;
+        private float _auxToolbarHeight = 34;
         private float _verticalToolbarWidth = 42;
 
         // View State
+        private bool _showTopToolbar = true;
+        private bool _showMeshEditorToolbar = true;
+        private bool _showPointCloudToolbar = true;
+        private bool _showGeoreferenceToolbar = true;
         private bool _showLeftPanel = true;
         private bool _showRightPanel = true;
         private bool _showLogPanel = true;
@@ -166,6 +178,60 @@ namespace Deep3DStudio
 
         // Popup Management
         private string? _popupToOpen = null;
+        private bool _showTransformDialog = false;
+        private TransformDialogMode _transformDialogMode = TransformDialogMode.Move;
+        private System.Numerics.Vector3 _transformDialogValue = System.Numerics.Vector3.Zero;
+
+        // Pen editing parameters
+        private float _penExtrudeDistance = 0.05f;
+        private float _penInsetAmount = 0.2f;
+        private System.Numerics.Vector3 _penMoveDelta = System.Numerics.Vector3.Zero;
+
+        // Primitive creation presets
+        private float _primSize = 1.0f;
+        private float _primRadius = 0.5f;
+        private float _primHeight = 1.0f;
+        private int _primSegments = 24;
+        private int _primRings = 16;
+        private int _primMinorSegments = 16;
+        private int _primPolygonSides = 6;
+        private int _primGridCells = 12;
+        private float _primCellSize = 0.1f;
+        private bool _primCapEnds = true;
+        private bool _showPrimitiveDialog = false;
+        private MeshPrimitiveType _primitiveDialogType = MeshPrimitiveType.Cube;
+
+        // Point cloud editor parameters
+        private float _pcVoxelSize = 0.02f;
+        private int _pcOutlierK = 20;
+        private float _pcOutlierStdRatio = 2.0f;
+        private float _pcDuplicateThreshold = 0.001f;
+        private int _pcNormalK = 30;
+        private int _pcPassAxis = 2;
+        private float _pcPassMin = -0.5f;
+        private float _pcPassMax = 0.5f;
+        private System.Numerics.Vector3 _pcRadiusCenter = System.Numerics.Vector3.Zero;
+        private float _pcRadius = 1.0f;
+        private float _pcDenseRadius = 0.03f;
+        private int _pcDensePointsPerSeed = 2;
+
+        // Rigging state
+        private SkeletonObject? _activeSkeletonObject = null;
+
+        // Toolbar option popups
+        private bool _showRunOptionsDialog = false;
+        private bool _showMeshingOptionsDialog = false;
+        private bool _showRefinementOptionsDialog = false;
+        private bool _showPcVoxelDialog = false;
+        private bool _showPcOutliersDialog = false;
+        private bool _showPcDuplicatesDialog = false;
+        private bool _showPcNormalsDialog = false;
+        private bool _showPcPassDialog = false;
+        private bool _showPcRadiusDialog = false;
+        private bool _showPcDenseDialog = false;
+        private bool _showPenMoveDialog = false;
+        private bool _showPenExtrudeDialog = false;
+        private bool _showPenInsetDialog = false;
 
         // Threading
         private readonly System.Collections.Concurrent.ConcurrentQueue<Action> _pendingActions = new System.Collections.Concurrent.ConcurrentQueue<Action>();
@@ -270,6 +336,14 @@ namespace Deep3DStudio
 
             // Init Icons
             _iconFactory = new ImGuiIconFactory();
+
+            // Restore toolbar visibility preferences
+            var settings = IniSettings.Instance;
+            _showTopToolbar = settings.ShowTopToolbar;
+            _showVerticalToolbar = settings.ShowVerticalToolbar;
+            _showMeshEditorToolbar = settings.ShowMeshEditorToolbar;
+            _showPointCloudToolbar = settings.ShowPointCloudToolbar;
+            _showGeoreferenceToolbar = settings.ShowGeoreferenceToolbar;
 
             // Load Logo - try embedded resource first, fallback to runtime-generated logo
             _logoTexture = TextureLoader.LoadTextureFromResource("logo.png");
@@ -620,7 +694,7 @@ namespace Deep3DStudio
 
                 // Render Viewport
                 float vpX = _showVerticalToolbar ? _verticalToolbarWidth : 0;
-                float vpY = _toolbarHeight + 20; // +20 for menu bar
+                float vpY = GetTopUiHeight();
                 float vpW = ClientSize.X - vpX - (_showRightPanel ? _rightPanelWidth : 0);
                 float vpH = ClientSize.Y - vpY - (_showLogPanel ? _logPanelHeight : 0);
 
@@ -645,6 +719,20 @@ namespace Deep3DStudio
             while (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError) { }
 
             SwapBuffers();
+        }
+
+        private float GetTopUiHeight()
+        {
+            float height = 20.0f; // Main menu bar
+            if (_showTopToolbar)
+                height += _toolbarHeight;
+            if (_showMeshEditorToolbar)
+                height += _auxToolbarHeight;
+            if (_showPointCloudToolbar)
+                height += _auxToolbarHeight;
+            if (_showGeoreferenceToolbar)
+                height += _auxToolbarHeight;
+            return height;
         }
 
         // Error tracking to avoid spamming console
@@ -677,6 +765,21 @@ namespace Deep3DStudio
         {
             base.OnUnload();
 
+            try
+            {
+                var settings = IniSettings.Instance;
+                settings.ShowTopToolbar = _showTopToolbar;
+                settings.ShowVerticalToolbar = _showVerticalToolbar;
+                settings.ShowMeshEditorToolbar = _showMeshEditorToolbar;
+                settings.ShowPointCloudToolbar = _showPointCloudToolbar;
+                settings.ShowGeoreferenceToolbar = _showGeoreferenceToolbar;
+                settings.Save();
+            }
+            catch
+            {
+                // Ignore settings write errors during shutdown.
+            }
+
             // Clean up thumbnails
             foreach (var thumb in _imageThumbnails.Values)
             {
@@ -686,6 +789,8 @@ namespace Deep3DStudio
 
             if (_previewTexture > 0)
                 TextureLoader.DeleteTexture(_previewTexture);
+            if (_geoPreviewTexture > 0)
+                TextureLoader.DeleteTexture(_geoPreviewTexture);
 
             _iconFactory?.Dispose();
         }
@@ -839,8 +944,30 @@ namespace Deep3DStudio
             // Main Menu
             RenderMainMenu();
 
-            // Top Toolbar
-            RenderTopToolbar();
+            float toolbarY = 20.0f;
+            if (_showTopToolbar)
+            {
+                RenderTopToolbar(toolbarY);
+                toolbarY += _toolbarHeight;
+            }
+
+            if (_showMeshEditorToolbar)
+            {
+                RenderMeshEditorToolbar(toolbarY);
+                toolbarY += _auxToolbarHeight;
+            }
+
+            if (_showPointCloudToolbar)
+            {
+                RenderPointCloudToolbar(toolbarY);
+                toolbarY += _auxToolbarHeight;
+            }
+
+            if (_showGeoreferenceToolbar)
+            {
+                RenderGeoreferenceToolbar(toolbarY);
+                toolbarY += _auxToolbarHeight;
+            }
 
             // Vertical Toolbar
             if (_showVerticalToolbar)
@@ -868,6 +995,7 @@ namespace Deep3DStudio
             if (_showSettings) DrawSettingsWindow();
             if (_showAbout) DrawAboutWindow();
             if (_showImagePreview) DrawImagePreviewWindow();
+            if (_showGeoreferenceWindow) DrawGeoreferenceWindow();
             if (_showDecimateDialog) DrawDecimateDialog();
             if (_showSmoothDialog) DrawSmoothDialog();
             if (_showOptimizeDialog) DrawOptimizeDialog();
@@ -875,6 +1003,21 @@ namespace Deep3DStudio
             if (_showAlignDialog) DrawAlignDialog();
             if (_showCleanupDialog) DrawCleanupDialog();
             if (_showBakeDialog) DrawBakeDialog();
+            if (_showTransformDialog) DrawTransformDialog();
+            if (_showPrimitiveDialog) DrawPrimitiveDialog();
+            if (_showRunOptionsDialog) DrawRunOptionsDialog();
+            if (_showMeshingOptionsDialog) DrawMeshingOptionsDialog();
+            if (_showRefinementOptionsDialog) DrawRefinementOptionsDialog();
+            if (_showPcVoxelDialog) DrawPointCloudVoxelDialog();
+            if (_showPcOutliersDialog) DrawPointCloudOutliersDialog();
+            if (_showPcDuplicatesDialog) DrawPointCloudDuplicatesDialog();
+            if (_showPcNormalsDialog) DrawPointCloudNormalsDialog();
+            if (_showPcPassDialog) DrawPointCloudPassDialog();
+            if (_showPcRadiusDialog) DrawPointCloudRadiusDialog();
+            if (_showPcDenseDialog) DrawPointCloudDenseDialog();
+            if (_showPenMoveDialog) DrawPenMoveDialog();
+            if (_showPenExtrudeDialog) DrawPenExtrudeDialog();
+            if (_showPenInsetDialog) DrawPenInsetDialog();
             _diagnosticsWindow.Draw();
         }
 
@@ -896,6 +1039,7 @@ namespace Deep3DStudio
                     ImGui.Separator();
                     if (ImGui.MenuItem("Export Mesh...")) OnExportMesh();
                     if (ImGui.MenuItem("Export Point Cloud...")) OnExportPointCloud();
+                    if (ImGui.MenuItem("Export DEM...")) OnExportDemImGui();
                     ImGui.Separator();
                     if (ImGui.MenuItem("Settings...")) _showSettings = true;
                     ImGui.Separator();
@@ -939,6 +1083,58 @@ namespace Deep3DStudio
                         ImGui.Separator();
                         if (ImGui.MenuItem("Cleanup Mesh...")) OnCleanup();
                         if (ImGui.MenuItem("Bake Textures...")) OnBakeTextures();
+                        ImGui.EndMenu();
+                    }
+
+                    if (ImGui.BeginMenu("Create Primitive"))
+                    {
+                        if (ImGui.MenuItem("Plane")) OnCreatePrimitive(MeshPrimitiveType.Plane);
+                        if (ImGui.MenuItem("Cube")) OnCreatePrimitive(MeshPrimitiveType.Cube);
+                        if (ImGui.MenuItem("UV Sphere")) OnCreatePrimitive(MeshPrimitiveType.UVSphere);
+                        if (ImGui.MenuItem("Cylinder")) OnCreatePrimitive(MeshPrimitiveType.Cylinder);
+                        if (ImGui.MenuItem("Cone")) OnCreatePrimitive(MeshPrimitiveType.Cone);
+                        if (ImGui.MenuItem("Torus")) OnCreatePrimitive(MeshPrimitiveType.Torus);
+                        if (ImGui.MenuItem("Circle")) OnCreatePrimitive(MeshPrimitiveType.Circle);
+                        if (ImGui.MenuItem("Polygon")) OnCreatePrimitive(MeshPrimitiveType.Polygon);
+                        if (ImGui.MenuItem("Grid")) OnCreatePrimitive(MeshPrimitiveType.Grid);
+                        ImGui.EndMenu();
+                    }
+
+                    if (ImGui.BeginMenu("Triangle Editing (Pen)"))
+                    {
+                        bool hasSelection = _viewport.MeshEditingTool.SelectedTriangles.Count > 0;
+                        bool canBridge = _viewport.MeshEditingTool.SelectedTriangles.Count == 2;
+
+                        if (ImGui.MenuItem("Move Vertices", "", false, hasSelection))
+                            ApplyPenMoveVertices();
+                        if (ImGui.MenuItem("Extrude", "", false, hasSelection))
+                            ApplyPenExtrude();
+                        if (ImGui.MenuItem("Inset", "", false, hasSelection))
+                            ApplyPenInset();
+                        if (ImGui.MenuItem("Bridge 2 Triangles", "", false, canBridge))
+                            ApplyPenBridge();
+                        ImGui.EndMenu();
+                    }
+
+                    if (ImGui.BeginMenu("Point Cloud Filters"))
+                    {
+                        bool hasPc = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().Any();
+                        if (ImGui.MenuItem("Voxel Downsample", "", false, hasPc)) ApplyPointCloudVoxel();
+                        if (ImGui.MenuItem("Remove Outliers", "", false, hasPc)) ApplyPointCloudOutliers();
+                        if (ImGui.MenuItem("Remove Duplicates", "", false, hasPc)) ApplyPointCloudDuplicates();
+                        if (ImGui.MenuItem("Estimate Normals", "", false, hasPc)) ApplyPointCloudNormals();
+                        if (ImGui.MenuItem("Pass-through Axis", "", false, hasPc)) ApplyPointCloudPassThrough();
+                        if (ImGui.MenuItem("Radius Crop", "", false, hasPc)) ApplyPointCloudRadiusCrop();
+                        if (ImGui.MenuItem("Point Cloud -> Dense Cloud", "", false, hasPc)) ApplyPointCloudDenseCloud();
+                        ImGui.EndMenu();
+                    }
+
+                    if (ImGui.BeginMenu("Georeferencing"))
+                    {
+                        if (ImGui.MenuItem("GCP Editor")) _showGeoreferenceWindow = true;
+                        if (ImGui.MenuItem("Solve from GCP")) SolveGeoFromRuntime();
+                        if (ImGui.MenuItem("Export Georeferenced Selection")) OnExportGeoreferencedSelectionImGui();
+                        if (ImGui.MenuItem("Generate DEM...")) OnExportDemImGui();
                         ImGui.EndMenu();
                     }
 
@@ -988,6 +1184,11 @@ namespace Deep3DStudio
                         ImGui.EndMenu();
                     }
 
+                    if (ImGui.MenuItem("Point Cloud -> Dense Cloud"))
+                    {
+                        ApplyPointCloudDenseCloud();
+                    }
+
                     ImGui.Separator();
                     if (ImGui.MenuItem("AI Model Settings...")) _showSettings = true;
                     ImGui.EndMenu();
@@ -996,6 +1197,10 @@ namespace Deep3DStudio
                 // Window Menu
                 if (ImGui.BeginMenu("Window"))
                 {
+                    if (ImGui.MenuItem("Top Toolbar", "", _showTopToolbar)) _showTopToolbar = !_showTopToolbar;
+                    if (ImGui.MenuItem("Mesh Editor Toolbar", "", _showMeshEditorToolbar)) _showMeshEditorToolbar = !_showMeshEditorToolbar;
+                    if (ImGui.MenuItem("Point Cloud Toolbar", "", _showPointCloudToolbar)) _showPointCloudToolbar = !_showPointCloudToolbar;
+                    if (ImGui.MenuItem("Georeference Toolbar", "", _showGeoreferenceToolbar)) _showGeoreferenceToolbar = !_showGeoreferenceToolbar;
                     if (ImGui.MenuItem("Left Panel", "", _showLeftPanel)) _showLeftPanel = !_showLeftPanel;
                     if (ImGui.MenuItem("Right Panel", "", _showRightPanel)) _showRightPanel = !_showRightPanel;
                     if (ImGui.MenuItem("Log Panel", "", _showLogPanel)) _showLogPanel = !_showLogPanel;
@@ -1003,6 +1208,10 @@ namespace Deep3DStudio
                     ImGui.Separator();
                     if (ImGui.MenuItem("Full Viewport Mode"))
                     {
+                        _showTopToolbar = false;
+                        _showMeshEditorToolbar = false;
+                        _showPointCloudToolbar = false;
+                        _showGeoreferenceToolbar = false;
                         _showLeftPanel = false;
                         _showRightPanel = false;
                         _showLogPanel = false;
@@ -1010,6 +1219,10 @@ namespace Deep3DStudio
                     }
                     if (ImGui.MenuItem("Restore All Panels"))
                     {
+                        _showTopToolbar = true;
+                        _showMeshEditorToolbar = true;
+                        _showPointCloudToolbar = true;
+                        _showGeoreferenceToolbar = true;
                         _showLeftPanel = true;
                         _showRightPanel = true;
                         _showLogPanel = true;
@@ -1031,10 +1244,9 @@ namespace Deep3DStudio
             }
         }
 
-        private void RenderTopToolbar()
+        private void RenderTopToolbar(float yPos)
         {
-            float menuBarHeight = 20;
-            ImGui.SetNextWindowPos(new System.Numerics.Vector2(0, menuBarHeight));
+            ImGui.SetNextWindowPos(new System.Numerics.Vector2(0, yPos));
             ImGui.SetNextWindowSize(new System.Numerics.Vector2(ClientSize.X, _toolbarHeight));
 
             ImGui.Begin("##Toolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
@@ -1123,11 +1335,14 @@ namespace Deep3DStudio
                         RunReconstruction(); // Run full workflow
                     else
                         RunSingleStep(GetReconstructionStep()); // Run the selected engine's reconstruction step
-                }, _autoWorkflowEnabled ? "Run Full Workflow" : "Run Selected Step", size);
+                }, _autoWorkflowEnabled ? "Run Full Workflow" : "Run Selected Step", size,
+                    OpenRunOptionsDialog);
                 ImGui.SameLine();
-                DrawToolbarButton("##Points", IconType.Cloud, false, () => RunSingleStep(GetReconstructionStep()), $"Generate Point Cloud ({GetCurrentEngineName()})", size);
+                DrawToolbarButton("##Points", IconType.Cloud, false, () => RunSingleStep(GetReconstructionStep()), $"Generate Point Cloud ({GetCurrentEngineName()})", size,
+                    OpenRunOptionsDialog);
                 ImGui.SameLine();
-                DrawToolbarButton("##Mesh", IconType.Mesh, false, RunMeshFromSelectedPointClouds, "Generate Mesh from Points", size);
+                DrawToolbarButton("##Mesh", IconType.Mesh, false, RunMeshFromSelectedPointClouds, "Generate Mesh from Points", size,
+                    OpenMeshingOptionsDialog);
 
                 ImGui.SameLine();
                 ImGui.Text("|");
@@ -1159,7 +1374,119 @@ namespace Deep3DStudio
             ImGui.End();
         }
 
-        private void DrawToolbarButton(string id, IconType icon, bool active, Action onClick, string tooltip, System.Numerics.Vector2 size)
+        private void RenderMeshEditorToolbar(float yPos)
+        {
+            ImGui.SetNextWindowPos(new System.Numerics.Vector2(0, yPos));
+            ImGui.SetNextWindowSize(new System.Numerics.Vector2(ClientSize.X, _auxToolbarHeight));
+
+            ImGui.Begin("##MeshEditorToolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
+                       ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings);
+            {
+                var size = new System.Numerics.Vector2(20, 20);
+
+                ImGui.TextDisabled("Create:");
+                ImGui.SameLine();
+                DrawToolbarButton("##PrimPlane", IconType.Plane, false, () => OnCreatePrimitive(MeshPrimitiveType.Plane), "Create Plane", size,
+                    () => OpenPrimitiveOptionsDialog(MeshPrimitiveType.Plane));
+                ImGui.SameLine();
+                DrawToolbarButton("##PrimCube", IconType.Cube, false, () => OnCreatePrimitive(MeshPrimitiveType.Cube), "Create Cube", size,
+                    () => OpenPrimitiveOptionsDialog(MeshPrimitiveType.Cube));
+                ImGui.SameLine();
+                DrawToolbarButton("##PrimSphere", IconType.Sphere, false, () => OnCreatePrimitive(MeshPrimitiveType.UVSphere), "Create UV Sphere", size,
+                    () => OpenPrimitiveOptionsDialog(MeshPrimitiveType.UVSphere));
+                ImGui.SameLine();
+                DrawToolbarButton("##PrimCyl", IconType.Cylinder, false, () => OnCreatePrimitive(MeshPrimitiveType.Cylinder), "Create Cylinder", size,
+                    () => OpenPrimitiveOptionsDialog(MeshPrimitiveType.Cylinder));
+                ImGui.SameLine();
+                DrawToolbarButton("##PrimCone", IconType.Cone, false, () => OnCreatePrimitive(MeshPrimitiveType.Cone), "Create Cone", size,
+                    () => OpenPrimitiveOptionsDialog(MeshPrimitiveType.Cone));
+                ImGui.SameLine();
+                DrawToolbarButton("##PrimTorus", IconType.Torus, false, () => OnCreatePrimitive(MeshPrimitiveType.Torus), "Create Torus", size,
+                    () => OpenPrimitiveOptionsDialog(MeshPrimitiveType.Torus));
+                ImGui.SameLine();
+                DrawToolbarButton("##PrimCircle", IconType.Circle, false, () => OnCreatePrimitive(MeshPrimitiveType.Circle), "Create Circle", size,
+                    () => OpenPrimitiveOptionsDialog(MeshPrimitiveType.Circle));
+                ImGui.SameLine();
+                DrawToolbarButton("##PrimPoly", IconType.Polygon, false, () => OnCreatePrimitive(MeshPrimitiveType.Polygon), "Create Polygon", size,
+                    () => OpenPrimitiveOptionsDialog(MeshPrimitiveType.Polygon));
+                ImGui.SameLine();
+                DrawToolbarButton("##PrimGrid", IconType.GridMesh, false, () => OnCreatePrimitive(MeshPrimitiveType.Grid), "Create Grid", size,
+                    () => OpenPrimitiveOptionsDialog(MeshPrimitiveType.Grid));
+
+                ImGui.SameLine();
+                ImGui.Text("|");
+                ImGui.SameLine();
+
+                ImGui.TextDisabled("Edit:");
+                ImGui.SameLine();
+                DrawToolbarButton("##MeshDec", IconType.Decimate, false, ApplyDecimatePreset, "Decimate", size,
+                    OnDecimate);
+                ImGui.SameLine();
+                DrawToolbarButton("##MeshSm", IconType.Smooth, false, ApplySmoothPreset, "Smooth", size,
+                    OnSmooth);
+                ImGui.SameLine();
+                DrawToolbarButton("##MeshOpt", IconType.Optimize, false, ApplyOptimizePreset, "Optimize", size,
+                    OnOptimize);
+                ImGui.SameLine();
+                DrawToolbarButton("##PenMove", IconType.VertexMove, false, ApplyPenMoveVertices, "Move selected vertices", size,
+                    OpenPenMoveOptionsDialog);
+                ImGui.SameLine();
+                DrawToolbarButton("##PenExtrude", IconType.Extrude, false, ApplyPenExtrude, "Extrude selected triangles", size,
+                    OpenPenExtrudeOptionsDialog);
+                ImGui.SameLine();
+                DrawToolbarButton("##PenInset", IconType.Inset, false, ApplyPenInset, "Inset selected triangles", size,
+                    OpenPenInsetOptionsDialog);
+                ImGui.SameLine();
+                DrawToolbarButton("##PenBridge", IconType.Bridge, false, ApplyPenBridge, "Bridge two selected triangles", size);
+            }
+            ImGui.End();
+        }
+
+        private void RenderPointCloudToolbar(float yPos)
+        {
+            ImGui.SetNextWindowPos(new System.Numerics.Vector2(0, yPos));
+            ImGui.SetNextWindowSize(new System.Numerics.Vector2(ClientSize.X, _auxToolbarHeight));
+
+            ImGui.Begin("##PointCloudToolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
+                       ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings);
+            {
+                var size = new System.Numerics.Vector2(20, 20);
+                ImGui.TextDisabled("Point Cloud:");
+                ImGui.SameLine();
+
+                DrawToolbarButton("##PcVoxel", IconType.VoxelFilter, false, () => ApplyPointCloudVoxel(), "Voxel Downsample", size,
+                    OpenPointCloudVoxelOptionsDialog);
+                ImGui.SameLine();
+                DrawToolbarButton("##PcOutliers", IconType.OutlierFilter, false, () => ApplyPointCloudOutliers(), "Remove Outliers", size,
+                    OpenPointCloudOutlierOptionsDialog);
+                ImGui.SameLine();
+                DrawToolbarButton("##PcDup", IconType.DuplicateFilter, false, () => ApplyPointCloudDuplicates(), "Remove Duplicates", size,
+                    OpenPointCloudDuplicateOptionsDialog);
+                ImGui.SameLine();
+                DrawToolbarButton("##PcNormals", IconType.Normals, false, () => ApplyPointCloudNormals(), "Estimate Normals", size,
+                    OpenPointCloudNormalOptionsDialog);
+                ImGui.SameLine();
+                DrawToolbarButton("##PcAxis", IconType.AxisFilter, false, () => ApplyPointCloudPassThrough(), "Pass-through Axis", size,
+                    OpenPointCloudPassOptionsDialog);
+                ImGui.SameLine();
+                DrawToolbarButton("##PcRadius", IconType.RadiusCrop, false, () => ApplyPointCloudRadiusCrop(), "Radius Crop", size,
+                    OpenPointCloudRadiusOptionsDialog);
+                ImGui.SameLine();
+                DrawToolbarButton("##PcDense", IconType.DenseCloud, false, () => ApplyPointCloudDenseCloud(), "Point Cloud to Dense Cloud", size,
+                    OpenPointCloudDenseOptionsDialog);
+            }
+            ImGui.End();
+        }
+
+        private void DrawToolbarButton(
+            string id,
+            IconType icon,
+            bool active,
+            Action onClick,
+            string tooltip,
+            System.Numerics.Vector2 size,
+            Action? onRightClick = null,
+            string? rightClickHint = null)
         {
             if (active)
             {
@@ -1172,6 +1499,11 @@ namespace Deep3DStudio
                 onClick();
             }
 
+            if (onRightClick != null && ImGui.IsItemClicked(ImGuiMouseButton.Right))
+            {
+                onRightClick();
+            }
+
             if (active)
             {
                 ImGui.PopStyleColor(2);
@@ -1179,9 +1511,19 @@ namespace Deep3DStudio
 
             if (ImGui.IsItemHovered())
             {
-                ImGui.SetTooltip(tooltip);
+                if (onRightClick == null)
+                {
+                    ImGui.SetTooltip(tooltip);
+                }
+                else
+                {
+                    var suffix = string.IsNullOrWhiteSpace(rightClickHint) ? "Right click for options" : rightClickHint;
+                    ImGui.SetTooltip($"{tooltip}\n{suffix}");
+                }
             }
         }
+
+        private static bool IsLastItemRightClicked() => ImGui.IsItemClicked(ImGuiMouseButton.Right);
 
         /// <summary>
         /// Helper to draw a button with an icon and text label
@@ -1211,8 +1553,7 @@ namespace Deep3DStudio
 
         private void RenderVerticalToolbar()
         {
-            float menuBarHeight = 20;
-            float startY = menuBarHeight + _toolbarHeight;
+            float startY = GetTopUiHeight();
             float height = ClientSize.Y - startY - (_showLogPanel ? _logPanelHeight : 0);
 
             ImGui.SetNextWindowPos(new System.Numerics.Vector2(0, startY));
@@ -1240,19 +1581,23 @@ namespace Deep3DStudio
                 if (ImGui.ImageButton("##PointCloud", _iconFactory.GetIcon(IconType.PointCloudGen), size))
                     RunSingleStep(GetReconstructionStep());
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{GetCurrentEngineName()} Point Cloud");
+                if (IsLastItemRightClicked()) OpenRunOptionsDialog();
 
                 // Single-image 3D generation models
                 if (ImGui.ImageButton("##TripoSR", _iconFactory.GetIcon(IconType.TripoSR), size))
                     RunSingleStep(WorkflowStep.TripoSRGeneration);
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("TripoSR (Single Image)");
+                if (IsLastItemRightClicked()) OpenRunOptionsDialog();
 
                 if (ImGui.ImageButton("##LGM", _iconFactory.GetIcon(IconType.LGM), size))
                     RunSingleStep(WorkflowStep.LGMGeneration);
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("LGM Gaussian (Single Image)");
+                if (IsLastItemRightClicked()) OpenRunOptionsDialog();
 
                 if (ImGui.ImageButton("##Wonder3D", _iconFactory.GetIcon(IconType.Wonder3D), size))
                     RunSingleStep(WorkflowStep.Wonder3DGeneration);
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Wonder3D (Single-Image Multi-View)");
+                if (IsLastItemRightClicked()) OpenRunOptionsDialog();
 
                 ImGui.Spacing();
 
@@ -1263,14 +1608,17 @@ namespace Deep3DStudio
                 if (ImGui.ImageButton("##NeRF", _iconFactory.GetIcon(IconType.NeRF), size))
                     RunNeRFRefinementFromSelection();
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("NeRF Refinement");
+                if (IsLastItemRightClicked()) OpenRefinementOptionsDialog();
 
                 if (ImGui.ImageButton("##DeepMeshPrior", _iconFactory.GetIcon(IconType.Refine), size))
                     RunDeepMeshPriorRefinement();
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("DeepMeshPrior Refinement");
+                if (IsLastItemRightClicked()) OpenRefinementOptionsDialog();
 
                 if (ImGui.ImageButton("##TripoSF", _iconFactory.GetIcon(IconType.Optimize), size))
                     RunTripoSFRefinement();
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("TripoSF Refinement");
+                if (IsLastItemRightClicked()) OpenRefinementOptionsDialog();
 
                 ImGui.Spacing();
 
@@ -1281,10 +1629,12 @@ namespace Deep3DStudio
                 if (ImGui.ImageButton("##Poisson", _iconFactory.GetIcon(IconType.MeshGen), size))
                     RunMeshFromSelectedPointClouds();
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Poisson Mesh Reconstruction");
+                if (IsLastItemRightClicked()) OpenMeshingOptionsDialog();
 
                 if (ImGui.ImageButton("##AutoRig", _iconFactory.GetIcon(IconType.Rig), size))
                     RunSingleStep(WorkflowStep.UniRigAutoRig);
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("UniRig Auto-Rig");
+                if (IsLastItemRightClicked()) OpenRefinementOptionsDialog();
 
                 ImGui.Spacing();
                 ImGui.Separator();
@@ -1295,20 +1645,24 @@ namespace Deep3DStudio
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Mesh Operations");
 
                 if (ImGui.ImageButton("##Decimate", _iconFactory.GetIcon(IconType.Decimate), size))
-                    OnDecimate();
+                    ApplyDecimatePreset();
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Decimate Mesh (50%)");
+                if (IsLastItemRightClicked()) OnDecimate();
 
                 if (ImGui.ImageButton("##Optimize", _iconFactory.GetIcon(IconType.Optimize), size))
-                    OnOptimize();
+                    ApplyOptimizePreset();
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Optimize Mesh");
+                if (IsLastItemRightClicked()) OnOptimize();
 
                 if (ImGui.ImageButton("##Clean", _iconFactory.GetIcon(IconType.Clean), size))
                     OnCleanup();
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Cleanup Mesh");
+                if (IsLastItemRightClicked()) OnCleanup();
 
                 if (ImGui.ImageButton("##Bake", _iconFactory.GetIcon(IconType.Bake), size))
                     OnBakeTextures();
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Bake Textures");
+                if (IsLastItemRightClicked()) OnBakeTextures();
 
                 ImGui.Spacing();
                 ImGui.Separator();
@@ -1334,9 +1688,8 @@ namespace Deep3DStudio
 
         private void RenderLeftPanel()
         {
-            float menuBarHeight = 20;
             float startX = _showVerticalToolbar ? _verticalToolbarWidth : 0;
-            float startY = menuBarHeight + _toolbarHeight;
+            float startY = GetTopUiHeight();
             float height = ClientSize.Y - startY - (_showLogPanel ? _logPanelHeight : 0);
 
             ImGui.SetNextWindowPos(new System.Numerics.Vector2(startX, startY));
@@ -1567,6 +1920,8 @@ namespace Deep3DStudio
             {
                 bool selected = obj.Selected;
                 string name = obj.Name ?? $"Object {obj.Id}";
+                int depth = GetSceneObjectDepth(obj);
+                string indent = depth > 0 ? new string(' ', depth * 2) : string.Empty;
                 string icon = obj switch
                 {
                     MeshObject => "[M] ",
@@ -1576,7 +1931,7 @@ namespace Deep3DStudio
                     GroupObject => "[G] ",
                     _ => "[O] "
                 };
-                string displayName = obj.Visible ? $"{icon}{name}" : $"{icon}{name} (hidden)";
+                string displayName = obj.Visible ? $"{indent}{icon}{name}" : $"{indent}{icon}{name} (hidden)";
                 float reservedWidth = obj is CameraObject ? 180f : 90f;
 
                 if (_renamingObject == obj)
@@ -1611,6 +1966,12 @@ namespace Deep3DStudio
 
                     if (ImGui.BeginPopupContextItem($"SceneGraphItemCtx##{i}"))
                     {
+                        if (!obj.Selected)
+                        {
+                            _sceneGraph.ClearSelection();
+                            _sceneGraph.Select(obj, false);
+                        }
+
                         if (ImGui.MenuItem("Rename"))
                         {
                             _renamingObject = obj;
@@ -1622,6 +1983,35 @@ namespace Deep3DStudio
                             obj.Visible = !obj.Visible;
                             _isDirty = true;
                         }
+                        if (ImGui.BeginMenu("Render Mode"))
+                        {
+                            _isDirty |= DrawRenderModeMenuItem(obj, "Inherit (Global)", ObjectRenderMode.InheritGlobal);
+                            _isDirty |= DrawRenderModeMenuItem(obj, "Shading", ObjectRenderMode.Shaded);
+                            _isDirty |= DrawRenderModeMenuItem(obj, "Wireframe", ObjectRenderMode.Wireframe);
+                            _isDirty |= DrawRenderModeMenuItem(obj, "No Textures", ObjectRenderMode.NoTexture);
+                            _isDirty |= DrawRenderModeMenuItem(obj, "Textures", ObjectRenderMode.Texture);
+                            _isDirty |= DrawRenderModeMenuItem(obj, "Bounding Box Only", ObjectRenderMode.BoundingBoxOnly);
+                            ImGui.EndMenu();
+                        }
+                        ImGui.Separator();
+                        if (ImGui.MenuItem("Move..."))
+                        {
+                            OpenTransformDialog(TransformDialogMode.Move);
+                        }
+                        if (ImGui.MenuItem("Rotate..."))
+                        {
+                            OpenTransformDialog(TransformDialogMode.Rotate);
+                        }
+                        if (ImGui.MenuItem("Scale..."))
+                        {
+                            OpenTransformDialog(TransformDialogMode.Scale);
+                        }
+                        if (ImGui.MenuItem("Reset Transform"))
+                        {
+                            OnResetTransform();
+                            _isDirty = true;
+                        }
+                        ImGui.Separator();
                         if (obj is CameraObject contextCam && ImGui.MenuItem(contextCam.ShowFrustum ? "Hide Frustum" : "Show Frustum"))
                         {
                             contextCam.ShowFrustum = !contextCam.ShowFrustum;
@@ -1670,10 +2060,31 @@ namespace Deep3DStudio
             }
         }
 
+        private static bool DrawRenderModeMenuItem(SceneObject obj, string label, ObjectRenderMode mode)
+        {
+            bool selected = obj.RenderMode == mode;
+            if (!ImGui.MenuItem(label, "", selected))
+                return false;
+
+            obj.RenderMode = mode;
+            return true;
+        }
+
+        private static int GetSceneObjectDepth(SceneObject obj)
+        {
+            int depth = 0;
+            var parent = obj.Parent;
+            while (parent != null && parent.Parent != null)
+            {
+                depth++;
+                parent = parent.Parent;
+            }
+            return depth;
+        }
+
         private void RenderRightPanel()
         {
-            float menuBarHeight = 20;
-            float startY = menuBarHeight + _toolbarHeight;
+            float startY = GetTopUiHeight();
             float height = ClientSize.Y - startY - (_showLogPanel ? _logPanelHeight : 0);
 
             ImGui.SetNextWindowPos(new System.Numerics.Vector2(ClientSize.X - _rightPanelWidth, startY));
@@ -1715,7 +2126,7 @@ namespace Deep3DStudio
             // Edit Mode
             ImGui.Text("Edit Mode:");
             int mode = (int)tool.Mode;
-            string[] modes = { "Select", "Delete", "Paint", "Weld", "Extrude" };
+            string[] modes = { "Select", "Delete", "Paint", "Weld", "Extrude", "Inset", "MoveVertices", "Bridge" };
             if (ImGui.Combo("##EditMode", ref mode, modes, modes.Length))
             {
                 tool.Mode = (MeshEditMode)mode;
@@ -1737,6 +2148,29 @@ namespace Deep3DStudio
             ImGui.Text("Actions:");
 
             var iconSize = new System.Numerics.Vector2(20, 20);
+
+            ImGui.InputFloat3("Move Delta", ref _penMoveDelta);
+            if (DrawIconTextButton("##PenMove", IconType.VertexMove, "Move Vertices", iconSize))
+            {
+                ApplyPenMoveVertices();
+            }
+
+            ImGui.SliderFloat("Extrude Dist", ref _penExtrudeDistance, -1.0f, 1.0f, "%.3f");
+            if (DrawIconTextButton("##PenExtr", IconType.Extrude, "Extrude", iconSize))
+            {
+                ApplyPenExtrude();
+            }
+
+            ImGui.SliderFloat("Inset Amount", ref _penInsetAmount, 0.01f, 0.95f, "%.2f");
+            if (DrawIconTextButton("##PenInset", IconType.Inset, "Inset", iconSize))
+            {
+                ApplyPenInset();
+            }
+
+            if (DrawIconTextButton("##PenBridge", IconType.Bridge, "Bridge 2 Triangles", iconSize))
+            {
+                ApplyPenBridge();
+            }
 
             // Delete Selected button with icon
             if (DrawIconTextButton("##PenDel", IconType.Delete, "Delete Selected", iconSize))
@@ -1832,10 +2266,29 @@ namespace Deep3DStudio
             ImGui.Text("Skeleton Operations:");
 
             var iconSize = new System.Numerics.Vector2(20, 20);
+            var selectedSkeleton = _sceneGraph.SelectedObjects.OfType<SkeletonObject>().FirstOrDefault();
+            if (selectedSkeleton != null)
+            {
+                _activeSkeletonObject = selectedSkeleton;
+            }
+            else if (_activeSkeletonObject != null && !_sceneGraph.GetAllObjects().Contains(_activeSkeletonObject))
+            {
+                _activeSkeletonObject = null;
+            }
 
             if (DrawIconTextButton("##RigAuto", IconType.Rig, "Auto Rig (UniRig)", iconSize))
             {
                 OnAutoRig();
+            }
+
+            if (DrawIconTextButton("##RigNew", IconType.Skeleton, "Create Skeleton", iconSize))
+            {
+                OnCreateNewSkeletonImGui();
+            }
+
+            if (DrawIconTextButton("##RigHum", IconType.Skeleton, "Create Humanoid Skeleton", iconSize))
+            {
+                OnCreateHumanoidSkeletonImGui();
             }
 
             if (DrawIconTextButton("##RigSkel", IconType.Skeleton, "View Skeleton", iconSize))
@@ -1850,16 +2303,108 @@ namespace Deep3DStudio
             }
 
             ImGui.Separator();
-            ImGui.TextDisabled("Select a mesh and click");
-            ImGui.TextDisabled("'Auto Rig' to generate skeleton");
+            ImGui.TextDisabled("Select mesh + Auto Rig, or create skeleton manually.");
 
-            // Show selected skeleton info if any
-            var selectedSkeletons = _sceneGraph.SelectedObjects.OfType<SkeletonObject>().ToList();
-            if (selectedSkeletons.Count > 0)
+            if (_activeSkeletonObject == null)
             {
-                ImGui.Separator();
-                ImGui.Text($"Selected: {selectedSkeletons[0].Name}");
-                ImGui.Text($"Joints: {selectedSkeletons[0].Skeleton?.Joints.Count ?? 0}");
+                ImGui.TextDisabled("No active skeleton selected.");
+                return;
+            }
+
+            var skeleton = _activeSkeletonObject.Skeleton;
+
+            ImGui.Separator();
+            ImGui.Text($"Active: {_activeSkeletonObject.Name}");
+            ImGui.Text($"Joints: {skeleton.Joints.Count}");
+            ImGui.Text($"Bones: {skeleton.Bones.Count}");
+
+            if (DrawIconTextButton("##RigAddJoint", IconType.VertexMove, "Add Joint", iconSize))
+            {
+                OnAddJointImGui();
+            }
+
+            if (DrawIconTextButton("##RigAddBone", IconType.Link, "Add Bone", iconSize))
+            {
+                OnAddBoneImGui();
+            }
+
+            if (DrawIconTextButton("##RigDelJoint", IconType.Delete, "Delete Selected Joint(s)", iconSize))
+            {
+                OnDeleteSelectedJointsImGui();
+            }
+
+            ImGui.Separator();
+            ImGui.Text("Joint List");
+
+            ImGui.BeginChild("##RigJointList", new System.Numerics.Vector2(0, 170), ImGuiChildFlags.Borders);
+            foreach (var joint in skeleton.GetJointsHierarchical())
+            {
+                int depth = GetJointDepth(joint);
+                if (depth > 0) ImGui.Indent(depth * 12.0f);
+
+                bool isSelected = joint.IsSelected;
+                if (ImGui.Selectable($"{joint.Name}##rigJoint{joint.Id}", isSelected))
+                {
+                    skeleton.SelectJoint(joint, ImGui.GetIO().KeyCtrl);
+                    _sceneGraph.ClearSelection();
+                    _sceneGraph.Select(_activeSkeletonObject, false);
+                    _isDirty = true;
+                }
+
+                if (ImGui.BeginPopupContextItem($"RigJointCtx##{joint.Id}"))
+                {
+                    if (ImGui.MenuItem("Select"))
+                    {
+                        skeleton.SelectJoint(joint, false);
+                        _isDirty = true;
+                    }
+                    if (ImGui.MenuItem("Select Additive"))
+                    {
+                        skeleton.SelectJoint(joint, true);
+                        _isDirty = true;
+                    }
+                    if (ImGui.MenuItem("Toggle Visibility"))
+                    {
+                        joint.IsVisible = !joint.IsVisible;
+                        _isDirty = true;
+                    }
+                    ImGui.EndPopup();
+                }
+
+                if (depth > 0) ImGui.Unindent(depth * 12.0f);
+            }
+            ImGui.EndChild();
+
+            var selectedJoints = skeleton.GetSelectedJoints().ToList();
+            if (selectedJoints.Count == 0)
+            {
+                ImGui.TextDisabled("Select a joint to edit properties.");
+                return;
+            }
+
+            var activeJoint = selectedJoints[0];
+            ImGui.Separator();
+            ImGui.Text($"Editing Joint: {activeJoint.Name}");
+
+            string jointName = activeJoint.Name;
+            if (ImGui.InputText("Joint Name", ref jointName, 96))
+            {
+                activeJoint.Name = jointName;
+                _isDirty = true;
+            }
+
+            var jointPos = new System.Numerics.Vector3(activeJoint.Position.X, activeJoint.Position.Y, activeJoint.Position.Z);
+            if (ImGui.DragFloat3("Joint Position", ref jointPos, 0.01f))
+            {
+                activeJoint.Position = new Vector3(jointPos.X, jointPos.Y, jointPos.Z);
+                _isDirty = true;
+            }
+
+            bool jointVisible = activeJoint.IsVisible;
+            if (ImGui.Checkbox("Joint Visible", ref jointVisible))
+            {
+                activeJoint.IsVisible = jointVisible;
+                _isDirty = true;
             }
         }
 
@@ -1893,7 +2438,7 @@ namespace Deep3DStudio
 
                 var scale = new System.Numerics.Vector3(obj.Scale.X, obj.Scale.Y, obj.Scale.Z);
                 if (ImGui.DragFloat3("Scale", ref scale, 0.1f))
-                    obj.Scale = new Vector3(scale.X, scale.Y, scale.Z);
+                    obj.Scale = ClampScale(new Vector3(scale.X, scale.Y, scale.Z));
 
                 if (ImGui.Button("Reset Transform"))
                 {
@@ -1912,6 +2457,44 @@ namespace Deep3DStudio
                     float ps = pc.PointSize;
                     if (ImGui.SliderFloat("Point Size", ref ps, 1.0f, 20.0f)) pc.PointSize = ps;
                     ImGui.Text($"Points: {pc.PointCount:N0}");
+                    ImGui.Text($"Normals: {(pc.Normals.Count == pc.PointCount ? "Estimated" : "None")}");
+
+                    ImGui.Separator();
+                    ImGui.Text("Filters");
+
+                    ImGui.InputFloat("Voxel Size", ref _pcVoxelSize, 0.001f, 0.01f, "%.4f");
+                    if (ImGui.Button("Apply Voxel Downsample"))
+                        ApplyPointCloudVoxel();
+
+                    ImGui.InputInt("Outlier K", ref _pcOutlierK);
+                    ImGui.SliderFloat("Outlier Std", ref _pcOutlierStdRatio, 0.1f, 5.0f, "%.2f");
+                    if (ImGui.Button("Apply Outlier Filter"))
+                        ApplyPointCloudOutliers();
+
+                    ImGui.InputFloat("Duplicate Threshold", ref _pcDuplicateThreshold, 0.0001f, 0.001f, "%.6f");
+                    if (ImGui.Button("Remove Duplicates"))
+                        ApplyPointCloudDuplicates();
+
+                    ImGui.InputInt("Normal K", ref _pcNormalK);
+                    if (ImGui.Button("Estimate Normals"))
+                        ApplyPointCloudNormals();
+
+                    string[] axes = { "X", "Y", "Z" };
+                    ImGui.Combo("Pass Axis", ref _pcPassAxis, axes, axes.Length);
+                    ImGui.InputFloat("Pass Min", ref _pcPassMin);
+                    ImGui.InputFloat("Pass Max", ref _pcPassMax);
+                    if (ImGui.Button("Apply Pass-through"))
+                        ApplyPointCloudPassThrough();
+
+                    ImGui.InputFloat3("Radius Center", ref _pcRadiusCenter);
+                    ImGui.InputFloat("Radius", ref _pcRadius, 0.01f, 0.1f, "%.3f");
+                    if (ImGui.Button("Apply Radius Crop"))
+                        ApplyPointCloudRadiusCrop();
+
+                    ImGui.InputFloat("Dense Radius", ref _pcDenseRadius, 0.001f, 0.01f, "%.4f");
+                    ImGui.InputInt("Dense Points/Seed", ref _pcDensePointsPerSeed);
+                    if (ImGui.Button("Point Cloud -> Dense Cloud"))
+                        ApplyPointCloudDenseCloud();
                 }
             }
             else if (obj is MeshObject mo)
@@ -2021,7 +2604,7 @@ namespace Deep3DStudio
             float padding = 10.0f;
             // Move overlay to the right side of the screen, accounting for the right panel if visible
             float xPos = ClientSize.X - (_showRightPanel ? _rightPanelWidth : 0) - 200 - padding;
-            var windowPos = new System.Numerics.Vector2(xPos, _toolbarHeight + 30);
+            var windowPos = new System.Numerics.Vector2(xPos, GetTopUiHeight() + 10);
 
             ImGui.SetNextWindowPos(windowPos, ImGuiCond.Always);
             ImGui.SetNextWindowBgAlpha(0.35f); // Transparent background
@@ -2548,6 +3131,7 @@ namespace Deep3DStudio
         {
             _sceneGraph.Clear();
             ClearImages();
+            GeoReferenceRuntime.Clear();
             _logBuffer = "";
             _currentProjectPath = "";
             _isDirty = false;
@@ -2584,6 +3168,7 @@ namespace Deep3DStudio
                         {
                             ClearImages();
                             CrossProjectManager.RestoreSceneFromState(state, _sceneGraph);
+                            GeoReferenceRuntime.LoadFromState(state);
 
                             // Restore images
                             if (state.Images != null && state.Images.Count > 0)
@@ -2833,11 +3418,17 @@ namespace Deep3DStudio
 
             if (result == NfdStatus.Ok && !string.IsNullOrEmpty(path))
             {
+                bool applyGeo = GeoReferenceRuntime.HasActiveGeoreference;
                 ProgressDialog.Instance.Start("Exporting Mesh...", OperationType.ImportExport);
                 Task.Run(() => {
                     try
                     {
-                        MeshExporter.Save(path, meshes[0].MeshData);
+                        var mesh = applyGeo
+                            ? GeoExportService.PrepareMeshForExport(meshes[0])
+                            : meshes[0].MeshData;
+                        MeshExporter.Save(path, mesh);
+                        if (applyGeo)
+                            GeoExportService.TryWriteGeoSidecar(path, mesh.Vertices);
                         ProgressDialog.Instance.Log($"Mesh exported: {path}");
                         ProgressDialog.Instance.Complete();
                     }
@@ -2866,11 +3457,17 @@ namespace Deep3DStudio
 
             if (result == NfdStatus.Ok && !string.IsNullOrEmpty(path))
             {
+                bool applyGeo = GeoReferenceRuntime.HasActiveGeoreference;
                 ProgressDialog.Instance.Start("Exporting Point Cloud...", OperationType.ImportExport);
                 Task.Run(() => {
                     try
                     {
-                        PointCloudExporter.Save(path, pcs[0]);
+                        var pc = applyGeo
+                            ? GeoExportService.PreparePointCloudForExport(pcs[0])
+                            : pcs[0];
+                        PointCloudExporter.Save(path, pc);
+                        if (applyGeo)
+                            GeoExportService.TryWriteGeoSidecar(path, pc.Points);
                         ProgressDialog.Instance.Log($"Point cloud exported: {path}");
                         ProgressDialog.Instance.Complete();
                     }
@@ -2924,9 +3521,805 @@ namespace Deep3DStudio
             }
         }
 
+        private void OpenTransformDialog(TransformDialogMode mode)
+        {
+            _transformDialogMode = mode;
+            _transformDialogValue = mode == TransformDialogMode.Scale
+                ? new System.Numerics.Vector3(1f, 1f, 1f)
+                : System.Numerics.Vector3.Zero;
+            _showTransformDialog = true;
+            _popupToOpen = "Transform Objects";
+        }
+
+        private void DrawTransformDialog()
+        {
+            if (!_showTransformDialog) return;
+            if (ImGui.BeginPopupModal("Transform Objects", ref _showTransformDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                var selected = _sceneGraph.SelectedObjects.ToList();
+                bool hasSelection = selected.Count > 0;
+
+                string modeLabel = _transformDialogMode switch
+                {
+                    TransformDialogMode.Move => "Move (delta world units)",
+                    TransformDialogMode.Rotate => "Rotate (delta degrees)",
+                    TransformDialogMode.Scale => "Scale (multiplicative factors)",
+                    _ => "Transform"
+                };
+
+                ImGui.Text(modeLabel);
+                ImGui.InputFloat3("X / Y / Z", ref _transformDialogValue);
+                ImGui.Separator();
+
+                if (!hasSelection)
+                {
+                    ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1), "No object selected");
+                    ImGui.BeginDisabled();
+                }
+
+                if (ImGui.Button("Apply", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showTransformDialog = false;
+                    ApplyTransformDialogValue(selected, _transformDialogValue);
+                }
+
+                if (!hasSelection)
+                {
+                    ImGui.EndDisabled();
+                }
+
+                ImGui.SameLine();
+                if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showTransformDialog = false;
+                }
+
+                ImGui.EndPopup();
+            }
+        }
+
+        private void ApplyTransformDialogValue(List<SceneObject> selected, System.Numerics.Vector3 value)
+        {
+            if (selected.Count == 0)
+                return;
+
+            var delta = new Vector3(value.X, value.Y, value.Z);
+            switch (_transformDialogMode)
+            {
+                case TransformDialogMode.Move:
+                    foreach (var obj in selected)
+                        obj.Position += delta;
+                    _logBuffer += $"Moved {selected.Count} object(s): ({delta.X:F3}, {delta.Y:F3}, {delta.Z:F3}).\n";
+                    break;
+
+                case TransformDialogMode.Rotate:
+                    foreach (var obj in selected)
+                        obj.Rotation += delta;
+                    _logBuffer += $"Rotated {selected.Count} object(s): ({delta.X:F2}, {delta.Y:F2}, {delta.Z:F2}) deg.\n";
+                    break;
+
+                case TransformDialogMode.Scale:
+                    var factor = ClampScale(delta);
+                    foreach (var obj in selected)
+                    {
+                        obj.Scale = ClampScale(new Vector3(
+                            obj.Scale.X * factor.X,
+                            obj.Scale.Y * factor.Y,
+                            obj.Scale.Z * factor.Z));
+                    }
+                    _logBuffer += $"Scaled {selected.Count} object(s): ({factor.X:F3}, {factor.Y:F3}, {factor.Z:F3}).\n";
+                    break;
+            }
+
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private static Vector3 ClampScale(Vector3 scale)
+        {
+            const float minScale = 0.001f;
+            return new Vector3(
+                Math.Max(minScale, scale.X),
+                Math.Max(minScale, scale.Y),
+                Math.Max(minScale, scale.Z));
+        }
+
         #endregion
 
         #region Mesh Operations
+
+        private void OnCreatePrimitive(MeshPrimitiveType type)
+        {
+            var mesh = CreatePrimitiveFromPreset(type);
+            string name = type switch
+            {
+                MeshPrimitiveType.UVSphere => "UV Sphere",
+                _ => type.ToString()
+            };
+
+            var obj = new MeshObject(name, mesh);
+            _sceneGraph.AddObject(obj);
+            _sceneGraph.ClearSelection();
+            _sceneGraph.Select(obj);
+            _viewport.FocusOnSelection();
+            _isDirty = true;
+            UpdateTitle();
+            _logBuffer += $"Created primitive: {name}\n";
+        }
+
+        private MeshData CreatePrimitiveFromPreset(MeshPrimitiveType type)
+        {
+            return type switch
+            {
+                MeshPrimitiveType.Plane => MeshPrimitiveFactory.CreatePlane(_primSize, _primSize),
+                MeshPrimitiveType.Cube => MeshPrimitiveFactory.CreateCube(_primSize),
+                MeshPrimitiveType.UVSphere => MeshPrimitiveFactory.CreateUVSphere(_primRadius, _primSegments, _primRings),
+                MeshPrimitiveType.Cylinder => MeshPrimitiveFactory.CreateCylinder(_primRadius, _primHeight, _primSegments, _primCapEnds),
+                MeshPrimitiveType.Cone => MeshPrimitiveFactory.CreateCone(_primRadius, _primHeight, _primSegments, _primCapEnds),
+                MeshPrimitiveType.Torus => MeshPrimitiveFactory.CreateTorus(Math.Max(_primRadius, 0.05f), Math.Max(_primRadius * 0.35f, 0.02f), _primSegments, _primMinorSegments),
+                MeshPrimitiveType.Circle => MeshPrimitiveFactory.CreateCircle(Math.Max(_primRadius, 0.01f), _primSegments),
+                MeshPrimitiveType.Polygon => MeshPrimitiveFactory.CreatePolygon(_primPolygonSides, Math.Max(_primRadius, 0.01f)),
+                MeshPrimitiveType.Grid => MeshPrimitiveFactory.CreateGrid(_primGridCells, Math.Max(_primCellSize, 0.001f)),
+                _ => MeshPrimitiveFactory.CreatePrimitive(type)
+            };
+        }
+
+        private void OpenPrimitiveOptionsDialog(MeshPrimitiveType type)
+        {
+            _primitiveDialogType = type;
+            _showPrimitiveDialog = true;
+            _popupToOpen = "Primitive Options";
+        }
+
+        private void DrawPrimitiveDialog()
+        {
+            if (!_showPrimitiveDialog) return;
+            if (ImGui.BeginPopupModal("Primitive Options", ref _showPrimitiveDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                ImGui.Text($"Primitive: {_primitiveDialogType}");
+                ImGui.Separator();
+
+                switch (_primitiveDialogType)
+                {
+                    case MeshPrimitiveType.Plane:
+                    case MeshPrimitiveType.Cube:
+                        ImGui.InputFloat("Size", ref _primSize, 0.01f, 0.1f, "%.3f");
+                        break;
+                    case MeshPrimitiveType.UVSphere:
+                        ImGui.InputFloat("Radius", ref _primRadius, 0.01f, 0.1f, "%.3f");
+                        ImGui.InputInt("Segments", ref _primSegments);
+                        ImGui.InputInt("Rings", ref _primRings);
+                        break;
+                    case MeshPrimitiveType.Cylinder:
+                    case MeshPrimitiveType.Cone:
+                        ImGui.InputFloat("Radius", ref _primRadius, 0.01f, 0.1f, "%.3f");
+                        ImGui.InputFloat("Height", ref _primHeight, 0.01f, 0.1f, "%.3f");
+                        ImGui.InputInt("Segments", ref _primSegments);
+                        ImGui.Checkbox("Cap Ends", ref _primCapEnds);
+                        break;
+                    case MeshPrimitiveType.Torus:
+                        ImGui.InputFloat("Major Radius", ref _primRadius, 0.01f, 0.1f, "%.3f");
+                        ImGui.InputInt("Major Segments", ref _primSegments);
+                        ImGui.InputInt("Minor Segments", ref _primMinorSegments);
+                        break;
+                    case MeshPrimitiveType.Circle:
+                        ImGui.InputFloat("Radius", ref _primRadius, 0.01f, 0.1f, "%.3f");
+                        ImGui.InputInt("Segments", ref _primSegments);
+                        break;
+                    case MeshPrimitiveType.Polygon:
+                        ImGui.InputFloat("Radius", ref _primRadius, 0.01f, 0.1f, "%.3f");
+                        ImGui.InputInt("Sides", ref _primPolygonSides);
+                        break;
+                    case MeshPrimitiveType.Grid:
+                        ImGui.InputInt("Cells Per Side", ref _primGridCells);
+                        ImGui.InputFloat("Cell Size", ref _primCellSize, 0.01f, 0.1f, "%.3f");
+                        break;
+                }
+
+                _primSegments = Math.Clamp(_primSegments, 3, 256);
+                _primRings = Math.Clamp(_primRings, 3, 256);
+                _primMinorSegments = Math.Clamp(_primMinorSegments, 3, 256);
+                _primPolygonSides = Math.Clamp(_primPolygonSides, 3, 64);
+                _primGridCells = Math.Clamp(_primGridCells, 1, 512);
+                _primSize = Math.Max(_primSize, 0.001f);
+                _primRadius = Math.Max(_primRadius, 0.001f);
+                _primHeight = Math.Max(_primHeight, 0.001f);
+                _primCellSize = Math.Max(_primCellSize, 0.001f);
+
+                ImGui.Separator();
+                if (ImGui.Button("Create", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showPrimitiveDialog = false;
+                    OnCreatePrimitive(_primitiveDialogType);
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Close", new System.Numerics.Vector2(120, 0)))
+                    _showPrimitiveDialog = false;
+
+                ImGui.EndPopup();
+            }
+        }
+
+        private void OpenPenMoveOptionsDialog()
+        {
+            _showPenMoveDialog = true;
+            _popupToOpen = "Pen Move";
+        }
+
+        private void OpenPenExtrudeOptionsDialog()
+        {
+            _showPenExtrudeDialog = true;
+            _popupToOpen = "Pen Extrude";
+        }
+
+        private void OpenPenInsetOptionsDialog()
+        {
+            _showPenInsetDialog = true;
+            _popupToOpen = "Pen Inset";
+        }
+
+        private void DrawPenExtrudeDialog()
+        {
+            if (!_showPenExtrudeDialog) return;
+            if (ImGui.BeginPopupModal("Pen Extrude", ref _showPenExtrudeDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                ImGui.InputFloat("Extrude Distance", ref _penExtrudeDistance, 0.01f, 0.1f, "%.4f");
+                ImGui.Separator();
+                if (ImGui.Button("Apply", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showPenExtrudeDialog = false;
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Close", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showPenExtrudeDialog = false;
+                }
+                ImGui.EndPopup();
+            }
+        }
+
+        private void DrawPenMoveDialog()
+        {
+            if (!_showPenMoveDialog) return;
+            if (ImGui.BeginPopupModal("Pen Move", ref _showPenMoveDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                ImGui.InputFloat3("Move Delta", ref _penMoveDelta);
+                ImGui.Separator();
+                if (ImGui.Button("Apply", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showPenMoveDialog = false;
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Close", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showPenMoveDialog = false;
+                }
+                ImGui.EndPopup();
+            }
+        }
+
+        private void DrawPenInsetDialog()
+        {
+            if (!_showPenInsetDialog) return;
+            if (ImGui.BeginPopupModal("Pen Inset", ref _showPenInsetDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                ImGui.SliderFloat("Inset Amount", ref _penInsetAmount, 0.01f, 0.95f, "%.3f");
+                ImGui.Separator();
+                if (ImGui.Button("Apply", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showPenInsetDialog = false;
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Close", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showPenInsetDialog = false;
+                }
+                ImGui.EndPopup();
+            }
+        }
+
+        private void OpenRunOptionsDialog()
+        {
+            _showRunOptionsDialog = true;
+            _popupToOpen = "Run Options";
+        }
+
+        private void OpenMeshingOptionsDialog()
+        {
+            _showMeshingOptionsDialog = true;
+            _popupToOpen = "Meshing Options";
+        }
+
+        private void OpenRefinementOptionsDialog()
+        {
+            _showRefinementOptionsDialog = true;
+            _popupToOpen = "Refinement Options";
+        }
+
+        private void OpenPointCloudVoxelOptionsDialog()
+        {
+            _showPcVoxelDialog = true;
+            _popupToOpen = "Point Cloud Voxel";
+        }
+
+        private void OpenPointCloudOutlierOptionsDialog()
+        {
+            _showPcOutliersDialog = true;
+            _popupToOpen = "Point Cloud Outliers";
+        }
+
+        private void OpenPointCloudDuplicateOptionsDialog()
+        {
+            _showPcDuplicatesDialog = true;
+            _popupToOpen = "Point Cloud Duplicates";
+        }
+
+        private void OpenPointCloudNormalOptionsDialog()
+        {
+            _showPcNormalsDialog = true;
+            _popupToOpen = "Point Cloud Normals";
+        }
+
+        private void OpenPointCloudPassOptionsDialog()
+        {
+            _showPcPassDialog = true;
+            _popupToOpen = "Point Cloud Pass";
+        }
+
+        private void OpenPointCloudRadiusOptionsDialog()
+        {
+            _showPcRadiusDialog = true;
+            _popupToOpen = "Point Cloud Radius";
+        }
+
+        private void OpenPointCloudDenseOptionsDialog()
+        {
+            _showPcDenseDialog = true;
+            _popupToOpen = "Point Cloud Dense";
+        }
+
+        private void DrawRunOptionsDialog()
+        {
+            if (!_showRunOptionsDialog) return;
+            if (ImGui.BeginPopupModal("Run Options", ref _showRunOptionsDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                var settings = IniSettings.Instance;
+
+                bool auto = _autoWorkflowEnabled;
+                if (ImGui.Checkbox("Auto Workflow", ref auto))
+                {
+                    _autoWorkflowEnabled = auto;
+                }
+
+                int rec = (int)settings.ReconstructionMethod;
+                string[] methods = Enum.GetNames(typeof(ReconstructionMethod));
+                if (ImGui.Combo("Reconstruction Method", ref rec, methods, methods.Length))
+                {
+                    settings.ReconstructionMethod = (ReconstructionMethod)rec;
+                }
+
+                var workflowNames = GetWorkflowNames();
+                ImGui.Combo("Workflow Preset", ref _selectedWorkflow, workflowNames, workflowNames.Length);
+
+                ImGui.Separator();
+                if (ImGui.Button("Apply", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showRunOptionsDialog = false;
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Close", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showRunOptionsDialog = false;
+                }
+                ImGui.EndPopup();
+            }
+        }
+
+        private void DrawMeshingOptionsDialog()
+        {
+            if (!_showMeshingOptionsDialog) return;
+            if (ImGui.BeginPopupModal("Meshing Options", ref _showMeshingOptionsDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                var settings = IniSettings.Instance;
+                int algo = (int)settings.MeshingAlgo;
+                string[] algos = Enum.GetNames(typeof(MeshingAlgorithm));
+                if (ImGui.Combo("Meshing Algorithm", ref algo, algos, algos.Length))
+                {
+                    settings.MeshingAlgo = (MeshingAlgorithm)algo;
+                }
+
+                ImGui.Separator();
+                if (ImGui.Button("Apply", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showMeshingOptionsDialog = false;
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Close", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showMeshingOptionsDialog = false;
+                }
+                ImGui.EndPopup();
+            }
+        }
+
+        private void DrawRefinementOptionsDialog()
+        {
+            if (!_showRefinementOptionsDialog) return;
+            if (ImGui.BeginPopupModal("Refinement Options", ref _showRefinementOptionsDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                var settings = IniSettings.Instance;
+                int method = (int)settings.MeshRefinement;
+                string[] methods = Enum.GetNames(typeof(MeshRefinementMethod));
+                if (ImGui.Combo("Refinement Method", ref method, methods, methods.Length))
+                {
+                    settings.MeshRefinement = (MeshRefinementMethod)method;
+                }
+
+                ImGui.Separator();
+                if (ImGui.Button("Apply", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showRefinementOptionsDialog = false;
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Close", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showRefinementOptionsDialog = false;
+                }
+                ImGui.EndPopup();
+            }
+        }
+
+        private void DrawPointCloudVoxelDialog()
+        {
+            if (!_showPcVoxelDialog) return;
+            if (ImGui.BeginPopupModal("Point Cloud Voxel", ref _showPcVoxelDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                ImGui.InputFloat("Voxel Size", ref _pcVoxelSize, 0.001f, 0.01f, "%.4f");
+                if (ImGui.Button("Apply & Run", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showPcVoxelDialog = false;
+                    ApplyPointCloudVoxel();
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Close", new System.Numerics.Vector2(120, 0)))
+                    _showPcVoxelDialog = false;
+                ImGui.EndPopup();
+            }
+        }
+
+        private void DrawPointCloudOutliersDialog()
+        {
+            if (!_showPcOutliersDialog) return;
+            if (ImGui.BeginPopupModal("Point Cloud Outliers", ref _showPcOutliersDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                ImGui.InputInt("K Neighbors", ref _pcOutlierK);
+                ImGui.SliderFloat("Std Ratio", ref _pcOutlierStdRatio, 0.1f, 10f, "%.2f");
+                _pcOutlierK = Math.Clamp(_pcOutlierK, 2, 200);
+                if (ImGui.Button("Apply & Run", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showPcOutliersDialog = false;
+                    ApplyPointCloudOutliers();
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Close", new System.Numerics.Vector2(120, 0)))
+                    _showPcOutliersDialog = false;
+                ImGui.EndPopup();
+            }
+        }
+
+        private void DrawPointCloudDuplicatesDialog()
+        {
+            if (!_showPcDuplicatesDialog) return;
+            if (ImGui.BeginPopupModal("Point Cloud Duplicates", ref _showPcDuplicatesDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                ImGui.InputFloat("Distance Threshold", ref _pcDuplicateThreshold, 0.0001f, 0.001f, "%.6f");
+                if (ImGui.Button("Apply & Run", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showPcDuplicatesDialog = false;
+                    ApplyPointCloudDuplicates();
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Close", new System.Numerics.Vector2(120, 0)))
+                    _showPcDuplicatesDialog = false;
+                ImGui.EndPopup();
+            }
+        }
+
+        private void DrawPointCloudNormalsDialog()
+        {
+            if (!_showPcNormalsDialog) return;
+            if (ImGui.BeginPopupModal("Point Cloud Normals", ref _showPcNormalsDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                ImGui.InputInt("K Neighbors", ref _pcNormalK);
+                _pcNormalK = Math.Clamp(_pcNormalK, 3, 200);
+                if (ImGui.Button("Apply & Run", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showPcNormalsDialog = false;
+                    ApplyPointCloudNormals();
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Close", new System.Numerics.Vector2(120, 0)))
+                    _showPcNormalsDialog = false;
+                ImGui.EndPopup();
+            }
+        }
+
+        private void DrawPointCloudPassDialog()
+        {
+            if (!_showPcPassDialog) return;
+            if (ImGui.BeginPopupModal("Point Cloud Pass", ref _showPcPassDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                string[] axes = { "X", "Y", "Z" };
+                ImGui.Combo("Axis", ref _pcPassAxis, axes, axes.Length);
+                ImGui.InputFloat("Min", ref _pcPassMin, 0.01f, 0.1f, "%.3f");
+                ImGui.InputFloat("Max", ref _pcPassMax, 0.01f, 0.1f, "%.3f");
+                if (ImGui.Button("Apply & Run", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showPcPassDialog = false;
+                    ApplyPointCloudPassThrough();
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Close", new System.Numerics.Vector2(120, 0)))
+                    _showPcPassDialog = false;
+                ImGui.EndPopup();
+            }
+        }
+
+        private void DrawPointCloudRadiusDialog()
+        {
+            if (!_showPcRadiusDialog) return;
+            if (ImGui.BeginPopupModal("Point Cloud Radius", ref _showPcRadiusDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                ImGui.InputFloat3("Center", ref _pcRadiusCenter);
+                ImGui.InputFloat("Radius", ref _pcRadius, 0.01f, 0.1f, "%.3f");
+                _pcRadius = Math.Max(_pcRadius, 0.0001f);
+                if (ImGui.Button("Apply & Run", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showPcRadiusDialog = false;
+                    ApplyPointCloudRadiusCrop();
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Close", new System.Numerics.Vector2(120, 0)))
+                    _showPcRadiusDialog = false;
+                ImGui.EndPopup();
+            }
+        }
+
+        private void DrawPointCloudDenseDialog()
+        {
+            if (!_showPcDenseDialog) return;
+            if (ImGui.BeginPopupModal("Point Cloud Dense", ref _showPcDenseDialog, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                ImGui.InputFloat("Neighbor Radius", ref _pcDenseRadius, 0.001f, 0.01f, "%.4f");
+                ImGui.InputInt("Points Per Seed", ref _pcDensePointsPerSeed);
+                _pcDenseRadius = Math.Max(_pcDenseRadius, 0.0001f);
+                _pcDensePointsPerSeed = Math.Clamp(_pcDensePointsPerSeed, 1, 8);
+                if (ImGui.Button("Apply & Run", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showPcDenseDialog = false;
+                    ApplyPointCloudDenseCloud();
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Close", new System.Numerics.Vector2(120, 0)))
+                    _showPcDenseDialog = false;
+                ImGui.EndPopup();
+            }
+        }
+
+        private void ApplyPenMoveVertices()
+        {
+            var tool = _viewport.MeshEditingTool;
+            if (tool.SelectedTriangles.Count == 0)
+                return;
+
+            int moved = tool.MoveSelectedVertices(new Vector3(_penMoveDelta.X, _penMoveDelta.Y, _penMoveDelta.Z));
+            _logBuffer += $"Moved {moved} selected vertices.\n";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ApplyPenExtrude()
+        {
+            var tool = _viewport.MeshEditingTool;
+            if (tool.SelectedTriangles.Count == 0)
+                return;
+
+            tool.ExtrudeSelectedTriangles(_penExtrudeDistance);
+            _logBuffer += $"Extruded selected triangles by {_penExtrudeDistance:F3}.\n";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ApplyPenInset()
+        {
+            var tool = _viewport.MeshEditingTool;
+            if (tool.SelectedTriangles.Count == 0)
+                return;
+
+            tool.InsetSelectedTriangles(_penInsetAmount);
+            _logBuffer += $"Inset selected triangles by {_penInsetAmount:F3}.\n";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ApplyPenBridge()
+        {
+            var tool = _viewport.MeshEditingTool;
+            if (tool.BridgeSelectedTrianglesSimple())
+            {
+                _logBuffer += "Bridge created between selected triangles.\n";
+                _isDirty = true;
+                UpdateTitle();
+            }
+            else
+            {
+                _logBuffer += "Bridge failed. Select exactly 2 triangles on the same mesh.\n";
+            }
+        }
+
+        private List<PointCloudObject> GetSelectedPointCloudObjects()
+        {
+            return _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
+        }
+
+        private void ApplyPointCloudVoxel()
+        {
+            var selected = GetSelectedPointCloudObjects();
+            if (selected.Count == 0)
+            {
+                _logBuffer += "No point cloud selected.\n";
+                return;
+            }
+
+            int removed = 0;
+            foreach (var pc in selected)
+                removed += PointCloudOperations.VoxelDownsample(pc, _pcVoxelSize);
+
+            _logBuffer += $"Voxel downsample removed {removed:N0} points.\n";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ApplyPointCloudOutliers()
+        {
+            var selected = GetSelectedPointCloudObjects();
+            if (selected.Count == 0)
+            {
+                _logBuffer += "No point cloud selected.\n";
+                return;
+            }
+
+            int removed = 0;
+            foreach (var pc in selected)
+                removed += PointCloudOperations.RemoveStatisticalOutliers(pc, _pcOutlierK, _pcOutlierStdRatio);
+
+            _logBuffer += $"Outlier filter removed {removed:N0} points.\n";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ApplyPointCloudDuplicates()
+        {
+            var selected = GetSelectedPointCloudObjects();
+            if (selected.Count == 0)
+            {
+                _logBuffer += "No point cloud selected.\n";
+                return;
+            }
+
+            int removed = 0;
+            foreach (var pc in selected)
+                removed += PointCloudOperations.RemoveDuplicates(pc, _pcDuplicateThreshold);
+
+            _logBuffer += $"Duplicate removal removed {removed:N0} points.\n";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ApplyPointCloudNormals()
+        {
+            var selected = GetSelectedPointCloudObjects();
+            if (selected.Count == 0)
+            {
+                _logBuffer += "No point cloud selected.\n";
+                return;
+            }
+
+            foreach (var pc in selected)
+                PointCloudOperations.EstimateNormals(pc, _pcNormalK);
+
+            _logBuffer += $"Estimated normals for {selected.Count} point cloud(s).\n";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ApplyPointCloudPassThrough()
+        {
+            var selected = GetSelectedPointCloudObjects();
+            if (selected.Count == 0)
+            {
+                _logBuffer += "No point cloud selected.\n";
+                return;
+            }
+
+            int removed = 0;
+            foreach (var pc in selected)
+                removed += PointCloudOperations.PassThroughAxis(pc, _pcPassAxis, _pcPassMin, _pcPassMax);
+
+            _logBuffer += $"Pass-through removed {removed:N0} points.\n";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ApplyPointCloudRadiusCrop()
+        {
+            var selected = GetSelectedPointCloudObjects();
+            if (selected.Count == 0)
+            {
+                _logBuffer += "No point cloud selected.\n";
+                return;
+            }
+
+            var center = new Vector3(_pcRadiusCenter.X, _pcRadiusCenter.Y, _pcRadiusCenter.Z);
+            int removed = 0;
+            foreach (var pc in selected)
+                removed += PointCloudOperations.RadiusCrop(pc, center, _pcRadius);
+
+            _logBuffer += $"Radius crop removed {removed:N0} points.\n";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ApplyPointCloudDenseCloud()
+        {
+            var selected = GetSelectedPointCloudObjects();
+            if (selected.Count == 0)
+            {
+                _logBuffer += "No point cloud selected.\n";
+                return;
+            }
+
+            int added = 0;
+            foreach (var pc in selected)
+                added += PointCloudOperations.Densify(pc, _pcDenseRadius, _pcDensePointsPerSeed);
+
+            _logBuffer += $"Dense cloud added {added:N0} points.\n";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ApplyDecimatePreset()
+        {
+            if (!_sceneGraph.SelectedObjects.OfType<MeshObject>().Any())
+            {
+                _logBuffer += "No mesh selected.\n";
+                return;
+            }
+
+            PerformDecimation();
+        }
+
+        private void ApplySmoothPreset()
+        {
+            if (!_sceneGraph.SelectedObjects.OfType<MeshObject>().Any())
+            {
+                _logBuffer += "No mesh selected.\n";
+                return;
+            }
+
+            PerformSmooth();
+        }
+
+        private void ApplyOptimizePreset()
+        {
+            if (!_sceneGraph.SelectedObjects.OfType<MeshObject>().Any())
+            {
+                _logBuffer += "No mesh selected.\n";
+                return;
+            }
+
+            PerformOptimize();
+        }
 
         private bool _showDecimateDialog = false;
         private float _decimateRatio = 0.5f;
@@ -4682,6 +6075,157 @@ namespace Deep3DStudio
             }
         }
 
+        private MeshObject? GetSelectedMeshObjectImGui()
+        {
+            return _sceneGraph.SelectedObjects.OfType<MeshObject>().FirstOrDefault();
+        }
+
+        private GroupObject FindOrCreateRiggingGroup()
+        {
+            var existing = _sceneGraph.GetObjectsOfType<GroupObject>()
+                .FirstOrDefault(g => string.Equals(g.Name, "Rigging", StringComparison.OrdinalIgnoreCase));
+            if (existing != null)
+            {
+                return existing;
+            }
+
+            var group = new GroupObject("Rigging");
+            _sceneGraph.AddObject(group);
+            return group;
+        }
+
+        private void SelectSkeletonObject(SkeletonObject skelObj)
+        {
+            _activeSkeletonObject = skelObj;
+            _sceneGraph.ClearSelection();
+            _sceneGraph.Select(skelObj, false);
+            _isDirty = true;
+        }
+
+        private void OnCreateNewSkeletonImGui()
+        {
+            var selectedMesh = GetSelectedMeshObjectImGui();
+            var position = selectedMesh?.GetCentroid() ?? Vector3.Zero;
+
+            var skeleton = new SkeletonData { Name = "New Skeleton" };
+            skeleton.AddJoint("Root", position);
+
+            var skelObj = new SkeletonObject("Skeleton", skeleton);
+            if (selectedMesh != null)
+            {
+                skelObj.TargetMesh = selectedMesh;
+            }
+
+            var riggingGroup = FindOrCreateRiggingGroup();
+            _sceneGraph.AddObject(skelObj, riggingGroup);
+            SelectSkeletonObject(skelObj);
+            _logBuffer += "Created new manual skeleton.\n";
+        }
+
+        private void OnCreateHumanoidSkeletonImGui()
+        {
+            var selectedMesh = GetSelectedMeshObjectImGui();
+            var position = selectedMesh?.GetCentroid() ?? Vector3.Zero;
+
+            float scale = 1.0f;
+            if (selectedMesh != null)
+            {
+                var (min, max) = selectedMesh.GetWorldBounds();
+                float height = max.Y - min.Y;
+                scale = height > 0.1f ? height : 1.0f;
+            }
+
+            var skeleton = SkeletonData.CreateHumanoidTemplate(position, scale);
+            var skelObj = new SkeletonObject("Humanoid Skeleton", skeleton);
+            if (selectedMesh != null)
+            {
+                skelObj.TargetMesh = selectedMesh;
+            }
+
+            var riggingGroup = FindOrCreateRiggingGroup();
+            _sceneGraph.AddObject(skelObj, riggingGroup);
+            SelectSkeletonObject(skelObj);
+            _logBuffer += $"Created humanoid skeleton ({skeleton.Joints.Count} joints).\n";
+        }
+
+        private void OnAddJointImGui()
+        {
+            if (_activeSkeletonObject?.Skeleton == null)
+            {
+                _logBuffer += "No active skeleton. Create or select a skeleton first.\n";
+                return;
+            }
+
+            var skeleton = _activeSkeletonObject.Skeleton;
+            var selectedJoints = skeleton.GetSelectedJoints().ToList();
+
+            Joint? parent = selectedJoints.FirstOrDefault() ?? skeleton.RootJoint;
+            Vector3 position = parent != null
+                ? parent.Position + new Vector3(0, 0.1f, 0)
+                : _activeSkeletonObject.Position;
+
+            string name = $"Joint_{skeleton.Joints.Count}";
+            var newJoint = skeleton.AddJoint(name, position, parent);
+            skeleton.SelectJoint(newJoint, false);
+            _isDirty = true;
+            _logBuffer += $"Added joint '{name}'.\n";
+        }
+
+        private void OnAddBoneImGui()
+        {
+            if (_activeSkeletonObject?.Skeleton == null)
+                return;
+
+            var skeleton = _activeSkeletonObject.Skeleton;
+            var selectedJoints = skeleton.GetSelectedJoints().ToList();
+            if (selectedJoints.Count < 2)
+            {
+                _logBuffer += "Select at least 2 joints to create a bone.\n";
+                return;
+            }
+
+            int created = 0;
+            for (int i = 0; i < selectedJoints.Count - 1; i++)
+            {
+                skeleton.AddBone(selectedJoints[i], selectedJoints[i + 1]);
+                created++;
+            }
+
+            _isDirty = true;
+            _logBuffer += $"Created {created} bone(s).\n";
+        }
+
+        private void OnDeleteSelectedJointsImGui()
+        {
+            if (_activeSkeletonObject?.Skeleton == null)
+                return;
+
+            var skeleton = _activeSkeletonObject.Skeleton;
+            var selectedJoints = skeleton.GetSelectedJoints().ToList();
+            if (selectedJoints.Count == 0)
+                return;
+
+            foreach (var joint in selectedJoints)
+            {
+                skeleton.RemoveJoint(joint);
+            }
+
+            _isDirty = true;
+            _logBuffer += $"Deleted {selectedJoints.Count} joint(s).\n";
+        }
+
+        private static int GetJointDepth(Joint joint)
+        {
+            int depth = 0;
+            var parent = joint.Parent;
+            while (parent != null)
+            {
+                depth++;
+                parent = parent.Parent;
+            }
+            return depth;
+        }
+
         private void OnAutoRig()
         {
             var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
@@ -4734,10 +6278,9 @@ namespace Deep3DStudio
 
                         EnqueueAction(() =>
                         {
-                            lock (_sceneGraph)
-                            {
-                                _sceneGraph.AddObject(skelObj);
-                            }
+                            var riggingGroup = FindOrCreateRiggingGroup();
+                            _sceneGraph.AddObject(skelObj, riggingGroup);
+                            SelectSkeletonObject(skelObj);
                             ProgressDialog.Instance.Log($"Created skeleton for '{mesh.Name}' with {skeleton.Joints.Count} joints.");
                         });
                     }

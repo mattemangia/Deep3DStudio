@@ -54,9 +54,23 @@ namespace Deep3DStudio.Viewport
         private GizmoMode _gizmoMode = GizmoMode.Select; // Default to Select
         private int _activeGizmoAxis = -1; // -1=none, 0=X, 1=Y, 2=Z
         private bool _isDraggingGizmo = false;
-        private Vector3 _gizmoStartPos;
         private Vector3 _gizmoDragStart;
         private float _gizmoSize = 1.0f;
+        private readonly Dictionary<int, GizmoStartState> _gizmoStartStates = new Dictionary<int, GizmoStartState>();
+
+        private readonly struct GizmoStartState
+        {
+            public readonly Vector3 Position;
+            public readonly Vector3 Rotation;
+            public readonly Vector3 Scale;
+
+            public GizmoStartState(Vector3 position, Vector3 rotation, Vector3 scale)
+            {
+                Position = position;
+                Rotation = rotation;
+                Scale = scale;
+            }
+        }
 
         // Viewport Info
         private Stopwatch _frameTimer = new Stopwatch();
@@ -843,8 +857,9 @@ namespace Deep3DStudio.Viewport
                     }
 
                     bool isSelected = obj.Selected;
+                    bool bboxOnly = meshObj.RenderMode == ObjectRenderMode.BoundingBoxOnly;
 
-                    if (settings.ShowWireframe || meshObj.ShowWireframe)
+                    if (ResolveWireframe(meshObj, settings))
                     {
                         GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Line);
                     }
@@ -853,18 +868,18 @@ namespace Deep3DStudio.Viewport
                         GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
                     }
 
-                    if (settings.ShowMesh)
+                    if (!bboxOnly && ShouldDrawMeshSurface(meshObj, settings))
                     {
-                        DrawMesh(meshObj.MeshData, isSelected);
+                        DrawMesh(meshObj.MeshData, isSelected, ResolveTexture(meshObj, settings));
                     }
 
-                    if (settings.ShowPointCloud || meshObj.ShowAsPointCloud)
+                    if (!bboxOnly && ShouldDrawMeshAsPointCloud(meshObj, settings))
                     {
                         DrawPointCloud(meshObj.MeshData, isSelected);
                     }
 
                     // Draw selection outline
-                    if (isSelected)
+                    if (isSelected || bboxOnly)
                     {
                         DrawSelectionOutline(obj);
                     }
@@ -873,7 +888,11 @@ namespace Deep3DStudio.Viewport
                 }
                 else if (obj is PointCloudObject pcObj)
                 {
-                    if (settings.ShowPointCloud)
+                    if (pcObj.RenderMode == ObjectRenderMode.BoundingBoxOnly)
+                    {
+                        DrawPointCloudBoundingBox(pcObj);
+                    }
+                    else if (settings.ShowPointCloud)
                     {
                         DrawPointCloudObject(pcObj);
 
@@ -886,7 +905,14 @@ namespace Deep3DStudio.Viewport
                 }
                 else if (obj is SkeletonObject skelObj)
                 {
-                    DrawSkeletonObject(skelObj);
+                    if (skelObj.RenderMode == ObjectRenderMode.BoundingBoxOnly)
+                    {
+                        DrawSelectionOutline(skelObj);
+                    }
+                    else
+                    {
+                        DrawSkeletonObject(skelObj);
+                    }
                 }
 
                 GL.PopMatrix();
@@ -912,7 +938,7 @@ namespace Deep3DStudio.Viewport
             {
                 if (settings.ShowMesh)
                 {
-                    DrawMesh(mesh, false);
+                    DrawMesh(mesh, false, settings.ShowTexture);
                 }
 
                 if (settings.ShowPointCloud)
@@ -1263,13 +1289,60 @@ namespace Deep3DStudio.Viewport
             return new Vector3(r, g, b);
         }
 
-        private void DrawMesh(MeshData mesh, bool isSelected)
+        private static bool ShouldDrawMeshSurface(MeshObject meshObj, IniSettings settings)
+        {
+            return meshObj.RenderMode switch
+            {
+                ObjectRenderMode.Shaded => true,
+                ObjectRenderMode.Wireframe => true,
+                ObjectRenderMode.NoTexture => true,
+                ObjectRenderMode.Texture => true,
+                ObjectRenderMode.BoundingBoxOnly => false,
+                _ => settings.ShowMesh
+            };
+        }
+
+        private static bool ShouldDrawMeshAsPointCloud(MeshObject meshObj, IniSettings settings)
+        {
+            if (meshObj.RenderMode != ObjectRenderMode.InheritGlobal)
+                return false;
+
+            return settings.ShowPointCloud || meshObj.ShowAsPointCloud;
+        }
+
+        private static bool ResolveWireframe(MeshObject meshObj, IniSettings settings)
+        {
+            return meshObj.RenderMode switch
+            {
+                ObjectRenderMode.Wireframe => true,
+                ObjectRenderMode.Shaded => false,
+                ObjectRenderMode.NoTexture => false,
+                ObjectRenderMode.Texture => false,
+                ObjectRenderMode.BoundingBoxOnly => false,
+                _ => settings.ShowWireframe || meshObj.ShowWireframe
+            };
+        }
+
+        private static bool ResolveTexture(MeshObject meshObj, IniSettings settings)
+        {
+            return meshObj.RenderMode switch
+            {
+                ObjectRenderMode.Texture => true,
+                ObjectRenderMode.NoTexture => false,
+                ObjectRenderMode.Wireframe => false,
+                ObjectRenderMode.Shaded => false,
+                ObjectRenderMode.BoundingBoxOnly => false,
+                _ => settings.ShowTexture
+            };
+        }
+
+        private void DrawMesh(MeshData mesh, bool isSelected, bool allowTexture)
         {
             if (!EnsureLegacySupport("mesh")) return;
 
             if (mesh.Vertices.Count == 0 || mesh.Indices.Count == 0) return;
 
-            bool useTexture = IniSettings.Instance.ShowTexture && mesh.Texture != null;
+            bool useTexture = allowTexture && mesh.Texture != null;
 
             if (useTexture)
             {
@@ -2339,9 +2412,11 @@ namespace Deep3DStudio.Viewport
                     _activeGizmoAxis = gizmoAxis;
                     _isDraggingGizmo = true;
                     _gizmoDragStart = new Vector3((float)args.Event.X, (float)args.Event.Y, 0);
-
+                    _gizmoStartStates.Clear();
                     foreach (var obj in _sceneGraph.SelectedObjects)
-                        _gizmoStartPos = obj.Position;
+                    {
+                        _gizmoStartStates[obj.Id] = new GizmoStartState(obj.Position, obj.Rotation, obj.Scale);
+                    }
 
                     this.QueueRender();
                     return;
@@ -2404,6 +2479,7 @@ namespace Deep3DStudio.Viewport
                 _isDragging = false;
                 _isPanning = false;
                 _isDraggingGizmo = false;
+                _gizmoStartStates.Clear();
                 _activeGizmoAxis = -1;
                 this.QueueRender();
             }
@@ -2446,16 +2522,19 @@ namespace Deep3DStudio.Viewport
 
                 foreach (var obj in _sceneGraph.SelectedObjects)
                 {
+                    if (!_gizmoStartStates.TryGetValue(obj.Id, out var start))
+                        continue;
+
                     switch (_gizmoMode)
                     {
                         case GizmoMode.Translate:
-                            obj.Position = _gizmoStartPos + delta;
+                            obj.Position = start.Position + delta;
                             break;
                         case GizmoMode.Rotate:
-                            obj.Rotation += delta * 50;
+                            obj.Rotation = start.Rotation + delta * 50.0f;
                             break;
                         case GizmoMode.Scale:
-                            obj.Scale = Vector3.One + delta;
+                            obj.Scale = ClampScale(start.Scale + delta);
                             break;
                     }
                 }
@@ -2580,6 +2659,15 @@ namespace Deep3DStudio.Viewport
                     break;
             }
             this.QueueRender();
+        }
+
+        private static Vector3 ClampScale(Vector3 scale)
+        {
+            const float minScale = 0.001f;
+            return new Vector3(
+                Math.Max(minScale, scale.X),
+                Math.Max(minScale, scale.Y),
+                Math.Max(minScale, scale.Z));
         }
 
         /// <summary>

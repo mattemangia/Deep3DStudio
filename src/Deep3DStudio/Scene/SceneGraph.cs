@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using OpenTK.Mathematics;
 using Deep3DStudio.Model;
+using Numerics = System.Numerics;
 
 namespace Deep3DStudio.Scene
 {
@@ -22,6 +23,19 @@ namespace Deep3DStudio.Scene
     }
 
     /// <summary>
+    /// Per-object render override mode.
+    /// </summary>
+    public enum ObjectRenderMode
+    {
+        InheritGlobal = 0,
+        Shaded = 1,
+        Wireframe = 2,
+        NoTexture = 3,
+        Texture = 4,
+        BoundingBoxOnly = 5
+    }
+
+    /// <summary>
     /// Base class for all objects in the scene graph
     /// </summary>
     public abstract class SceneObject
@@ -34,6 +48,7 @@ namespace Deep3DStudio.Scene
         public bool Visible { get; set; } = true;
         public bool Selected { get; set; } = false;
         public bool Locked { get; set; } = false;
+        public ObjectRenderMode RenderMode { get; set; } = ObjectRenderMode.InheritGlobal;
 
         // Transform properties
         public Vector3 Position { get; set; } = Vector3.Zero;
@@ -156,15 +171,78 @@ namespace Deep3DStudio.Scene
         {
             var currentTransform = GetLocalTransform();
             var newTransform = currentTransform * transform;
+            var systemMatrix = ToSystemMatrix(newTransform);
 
-            // Extract translation
+            if (Numerics.Matrix4x4.Decompose(systemMatrix, out var scale, out var rotation, out var translation))
+            {
+                Position = new Vector3(translation.X, translation.Y, translation.Z);
+                Scale = ClampScalePositive(new Vector3(scale.X, scale.Y, scale.Z));
+                Rotation = QuaternionToEulerDegrees(rotation);
+                return;
+            }
+
+            // Fallback path: keep transform usable even if decomposition fails.
             Position = newTransform.ExtractTranslation();
+            var scaleX = new Vector3(newTransform.M11, newTransform.M12, newTransform.M13).Length;
+            var scaleY = new Vector3(newTransform.M21, newTransform.M22, newTransform.M23).Length;
+            var scaleZ = new Vector3(newTransform.M31, newTransform.M32, newTransform.M33).Length;
+            Scale = ClampScalePositive(new Vector3(scaleX, scaleY, scaleZ));
 
-            // Extract scale (approximate)
-            var scaleX = new Vector3(newTransform.M11, newTransform.M21, newTransform.M31).Length;
-            var scaleY = new Vector3(newTransform.M12, newTransform.M22, newTransform.M32).Length;
-            var scaleZ = new Vector3(newTransform.M13, newTransform.M23, newTransform.M33).Length;
-            Scale = new Vector3(scaleX, scaleY, scaleZ);
+            var fallbackRotation = newTransform.ExtractRotation();
+            Rotation = QuaternionToEulerDegrees(new Numerics.Quaternion(
+                fallbackRotation.X, fallbackRotation.Y, fallbackRotation.Z, fallbackRotation.W));
+        }
+
+        private static Vector3 ClampScalePositive(Vector3 scale)
+        {
+            const float minScale = 0.001f;
+            return new Vector3(
+                Math.Max(minScale, MathF.Abs(scale.X)),
+                Math.Max(minScale, MathF.Abs(scale.Y)),
+                Math.Max(minScale, MathF.Abs(scale.Z)));
+        }
+
+        private static Numerics.Matrix4x4 ToSystemMatrix(Matrix4 matrix)
+        {
+            return new Numerics.Matrix4x4(
+                matrix.M11, matrix.M12, matrix.M13, matrix.M14,
+                matrix.M21, matrix.M22, matrix.M23, matrix.M24,
+                matrix.M31, matrix.M32, matrix.M33, matrix.M34,
+                matrix.M41, matrix.M42, matrix.M43, matrix.M44);
+        }
+
+        private static Vector3 QuaternionToEulerDegrees(Numerics.Quaternion quaternion)
+        {
+            if (quaternion.LengthSquared() < 1e-10f)
+                return Vector3.Zero;
+
+            var normalized = Numerics.Quaternion.Normalize(quaternion);
+            var rotationMatrix = Numerics.Matrix4x4.CreateFromQuaternion(normalized);
+
+            // Rotation order matches GetLocalTransform(): Rx * Ry * Rz (row-vector convention).
+            float sinY = Math.Clamp(-rotationMatrix.M13, -1.0f, 1.0f);
+            float y = MathF.Asin(sinY);
+            float cy = MathF.Cos(y);
+
+            float x;
+            float z;
+
+            if (MathF.Abs(cy) > 1e-5f)
+            {
+                x = MathF.Atan2(rotationMatrix.M23, rotationMatrix.M33);
+                z = MathF.Atan2(rotationMatrix.M12, rotationMatrix.M11);
+            }
+            else
+            {
+                // Gimbal lock: keep a stable solution by freezing Z.
+                x = MathF.Atan2(-rotationMatrix.M32, rotationMatrix.M22);
+                z = 0.0f;
+            }
+
+            return new Vector3(
+                MathHelper.RadiansToDegrees(x),
+                MathHelper.RadiansToDegrees(y),
+                MathHelper.RadiansToDegrees(z));
         }
 
         /// <summary>
@@ -252,6 +330,7 @@ namespace Deep3DStudio.Scene
                 Rotation = Rotation,
                 Scale = Scale,
                 Visible = Visible,
+                RenderMode = RenderMode,
                 ShowAsPointCloud = ShowAsPointCloud,
                 PointSize = PointSize,
                 ShowWireframe = ShowWireframe
@@ -266,6 +345,7 @@ namespace Deep3DStudio.Scene
     {
         public List<Vector3> Points { get; set; } = new List<Vector3>();
         public List<Vector3> Colors { get; set; } = new List<Vector3>();
+        public List<Vector3> Normals { get; set; } = new List<Vector3>();
         public float PointSize { get; set; } = 8.0f;
 
         public int PointCount => Points.Count;
@@ -280,6 +360,7 @@ namespace Deep3DStudio.Scene
             ObjectType = SceneObjectType.PointCloud;
             Points = new List<Vector3>(mesh.Vertices);
             Colors = new List<Vector3>(mesh.Colors);
+            Normals = new List<Vector3>(mesh.Normals);
             UpdateBounds();
             Console.WriteLine($"PointCloudObject '{name}' created: {Points.Count} points, bounds: ({BoundsMin.X:F2},{BoundsMin.Y:F2},{BoundsMin.Z:F2}) to ({BoundsMax.X:F2},{BoundsMax.Y:F2},{BoundsMax.Z:F2})");
         }
@@ -308,11 +389,13 @@ namespace Deep3DStudio.Scene
             {
                 Points = new List<Vector3>(Points),
                 Colors = new List<Vector3>(Colors),
+                Normals = new List<Vector3>(Normals),
                 PointSize = PointSize,
                 Position = Position,
                 Rotation = Rotation,
                 Scale = Scale,
-                Visible = Visible
+                Visible = Visible,
+                RenderMode = RenderMode
             };
         }
     }
@@ -460,6 +543,7 @@ namespace Deep3DStudio.Scene
                 Rotation = Rotation,
                 Scale = Scale,
                 Visible = Visible,
+                RenderMode = RenderMode,
                 NearPlane = NearPlane,
                 FarPlane = FarPlane,
                 FieldOfView = FieldOfView,
@@ -511,7 +595,8 @@ namespace Deep3DStudio.Scene
                 Position = Position,
                 Rotation = Rotation,
                 Scale = Scale,
-                Visible = Visible
+                Visible = Visible,
+                RenderMode = RenderMode
             };
 
             foreach (var child in _children)

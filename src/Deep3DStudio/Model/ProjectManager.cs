@@ -48,6 +48,8 @@ namespace Deep3DStudio.Model
             }
 
             state.Scene = ConvertSceneToDTO(sceneGraph.Root);
+            ApplyGcpFlagsToImages(state.Images);
+            GeoReferenceRuntime.ApplyToState(state);
             state.LastModified = DateTime.Now;
 
             string json = JsonSerializer.Serialize(state, _jsonOptions);
@@ -61,7 +63,9 @@ namespace Deep3DStudio.Model
 
             string json = File.ReadAllText(filePath);
             var state = JsonSerializer.Deserialize<ProjectState>(json, _jsonOptions);
-            return state ?? throw new Exception("Failed to deserialize project state");
+            var result = state ?? throw new Exception("Failed to deserialize project state");
+            GeoReferenceRuntime.LoadFromState(result);
+            return result;
         }
 
         private static SceneGraphDTO ConvertSceneToDTO(GroupObject root)
@@ -106,7 +110,8 @@ namespace Deep3DStudio.Model
                 {
                     PointSize = pc.PointSize,
                     Points = FlattenVector3(pc.Points),
-                    Colors = FlattenVector3(pc.Colors)
+                    Colors = FlattenVector3(pc.Colors),
+                    Normals = FlattenVector3(pc.Normals)
                 };
                 dto = pcDto;
             }
@@ -138,6 +143,7 @@ namespace Deep3DStudio.Model
             {
                 dto.Name = obj.Name;
                 dto.Visible = obj.Visible;
+                dto.RenderMode = obj.RenderMode;
                 dto.Position = obj.Position;
                 dto.Rotation = obj.Rotation;
                 dto.Scale = obj.Scale;
@@ -197,6 +203,7 @@ namespace Deep3DStudio.Model
                 {
                     Points = UnflattenVector3(pcDto.Points),
                     Colors = UnflattenVector3(pcDto.Colors),
+                    Normals = UnflattenVector3(pcDto.Normals),
                     PointSize = pcDto.PointSize
                 };
                 pc.UpdateBounds();
@@ -229,6 +236,7 @@ namespace Deep3DStudio.Model
             if (obj != null)
             {
                 obj.Visible = dto.Visible;
+                obj.RenderMode = dto.RenderMode;
                 obj.Position = dto.Position;
                 obj.Rotation = dto.Rotation;
                 obj.Scale = dto.Scale;
@@ -375,6 +383,30 @@ namespace Deep3DStudio.Model
             catch
             {
                 return null;
+            }
+        }
+
+        private static void ApplyGcpFlagsToImages(List<ProjectImage> images)
+        {
+            var gcps = GeoReferenceRuntime.Gcps;
+            foreach (var img in images)
+            {
+                int count = gcps.Count(g =>
+                    string.Equals(NormalizePath(g.ImagePath), NormalizePath(img.FilePath), StringComparison.OrdinalIgnoreCase));
+                img.GcpCount = count;
+                img.HasGcps = count > 0;
+            }
+        }
+
+        private static string NormalizePath(string path)
+        {
+            try
+            {
+                return Path.GetFullPath(path).Replace('\\', '/').ToLowerInvariant();
+            }
+            catch
+            {
+                return path.Replace('\\', '/').ToLowerInvariant();
             }
         }
     }

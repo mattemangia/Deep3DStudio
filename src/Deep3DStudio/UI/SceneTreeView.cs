@@ -518,6 +518,26 @@ namespace Deep3DStudio.UI
                 downsampleItem.Activated += (s, e) => ObjectActionRequested?.Invoke(this, (pointCloudObjects.First(), "downsample"));
                 pcMenu.Append(downsampleItem);
 
+                var outlierItem = new MenuItem("Remove Outliers...");
+                outlierItem.Activated += (s, e) => ObjectActionRequested?.Invoke(this, (pointCloudObjects.First(), "remove_outliers"));
+                pcMenu.Append(outlierItem);
+
+                var duplicatesItem = new MenuItem("Remove Duplicates...");
+                duplicatesItem.Activated += (s, e) => ObjectActionRequested?.Invoke(this, (pointCloudObjects.First(), "remove_duplicates"));
+                pcMenu.Append(duplicatesItem);
+
+                var normalsItem = new MenuItem("Estimate Normals...");
+                normalsItem.Activated += (s, e) => ObjectActionRequested?.Invoke(this, (pointCloudObjects.First(), "estimate_normals"));
+                pcMenu.Append(normalsItem);
+
+                var passThroughItem = new MenuItem("Pass-Through Axis...");
+                passThroughItem.Activated += (s, e) => ObjectActionRequested?.Invoke(this, (pointCloudObjects.First(), "pass_through"));
+                pcMenu.Append(passThroughItem);
+
+                var radiusCropItem = new MenuItem("Radius Crop...");
+                radiusCropItem.Activated += (s, e) => ObjectActionRequested?.Invoke(this, (pointCloudObjects.First(), "radius_crop"));
+                pcMenu.Append(radiusCropItem);
+
                 if (pointCloudObjects.Count >= 2)
                 {
                     pcMenu.Append(new SeparatorMenuItem());
@@ -561,6 +581,46 @@ namespace Deep3DStudio.UI
                 camMenu.Append(toggleFrustumItem);
 
                 menu.Append(camItem);
+            }
+
+            if (selectedObjects.Count > 0)
+            {
+                var renderMenu = new Menu();
+                var renderItem = new MenuItem("Render Mode");
+                renderItem.Submenu = renderMenu;
+
+                var modes = new (string label, ObjectRenderMode mode)[]
+                {
+                    ("Inherit (Global)", ObjectRenderMode.InheritGlobal),
+                    ("Shading", ObjectRenderMode.Shaded),
+                    ("Wireframe", ObjectRenderMode.Wireframe),
+                    ("No Textures", ObjectRenderMode.NoTexture),
+                    ("Textures", ObjectRenderMode.Texture),
+                    ("Bounding Box Only", ObjectRenderMode.BoundingBoxOnly)
+                };
+
+                RadioMenuItem? group = null;
+                foreach (var (label, mode) in modes)
+                {
+                    var item = group == null ? new RadioMenuItem(label) : new RadioMenuItem(group, label);
+                    group ??= item;
+
+                    item.Active = selectedObjects.All(o => o.RenderMode == mode);
+                    item.Activated += (s, e) =>
+                    {
+                        if (!item.Active) return;
+
+                        foreach (var obj in selectedObjects)
+                            obj.RenderMode = mode;
+
+                        RefreshTree();
+                        ObjectActionRequested?.Invoke(this, (null!, "refresh_viewport"));
+                    };
+
+                    renderMenu.Append(item);
+                }
+
+                menu.Append(renderItem);
             }
 
             menu.Append(new SeparatorMenuItem());

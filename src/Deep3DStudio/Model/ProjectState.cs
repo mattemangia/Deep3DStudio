@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using OpenTK.Mathematics;
+using Deep3DStudio.Scene;
 
 namespace Deep3DStudio.Model
 {
@@ -12,8 +13,40 @@ namespace Deep3DStudio.Model
         public List<string> ImagePaths { get; set; } = new List<string>();
         public List<ProjectImage> Images { get; set; } = new List<ProjectImage>();
         public SceneGraphDTO Scene { get; set; } = new SceneGraphDTO();
+        public ProjectGeoReferenceDTO GeoReference { get; set; } = new ProjectGeoReferenceDTO();
+        public List<GcpEntryDTO> Gcps { get; set; } = new List<GcpEntryDTO>();
         public DateTime Created { get; set; } = DateTime.Now;
         public DateTime LastModified { get; set; } = DateTime.Now;
+    }
+
+    public class ProjectGeoReferenceDTO
+    {
+        public bool Enabled { get; set; } = false;
+        public string ProjectCrsEpsg { get; set; } = "EPSG:4326";
+        public List<float> ModelToWorldMatrix { get; set; } = new List<float>();
+        public string HorizontalUnit { get; set; } = "meter";
+        public string VerticalUnit { get; set; } = "meter";
+    }
+
+    public class GcpEntryDTO
+    {
+        public string Id { get; set; } = Guid.NewGuid().ToString("N");
+        public string ImagePath { get; set; } = "";
+        public float PixelX { get; set; }
+        public float PixelY { get; set; }
+        public bool InputIsLatLon { get; set; }
+        public double InputLonOrX { get; set; }
+        public double InputLatOrY { get; set; }
+        public double InputZ { get; set; }
+
+        [JsonConverter(typeof(Vector3Converter))]
+        public Vector3 ModelPoint { get; set; }
+
+        [JsonConverter(typeof(Vector3Converter))]
+        public Vector3 WorldPoint { get; set; }
+
+        public float Residual { get; set; }
+        public bool Enabled { get; set; } = true;
     }
 
     public class SceneGraphDTO
@@ -30,6 +63,7 @@ namespace Deep3DStudio.Model
     {
         public string Name { get; set; } = "Object";
         public bool Visible { get; set; } = true;
+        public ObjectRenderMode RenderMode { get; set; } = ObjectRenderMode.InheritGlobal;
 
         [JsonConverter(typeof(Vector3Converter))]
         public Vector3 Position { get; set; }
@@ -55,6 +89,7 @@ namespace Deep3DStudio.Model
     {
         public List<float> Points { get; set; } = new List<float>(); // Flattened [x,y,z, x,y,z...]
         public List<float> Colors { get; set; } = new List<float>();
+        public List<float> Normals { get; set; } = new List<float>();
         public float PointSize { get; set; }
     }
 
