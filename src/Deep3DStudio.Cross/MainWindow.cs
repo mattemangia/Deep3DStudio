@@ -152,7 +152,10 @@ namespace Deep3DStudio
         private float _logPanelHeight = 150;
         private float _toolbarHeight = 42;
         private float _auxToolbarHeight = 34;
-        private float _verticalToolbarWidth = 42;
+        private float _verticalToolbarWidth = 38;
+        private static readonly System.Numerics.Vector2 ToolbarIconSize = new System.Numerics.Vector2(20, 20);
+        private static readonly System.Numerics.Vector2 ToolbarWindowPadding = new System.Numerics.Vector2(6, 6);
+        private static readonly System.Numerics.Vector2 ToolbarItemSpacing = new System.Numerics.Vector2(6, 4);
 
         // View State
         private bool _showTopToolbar = true;
@@ -1246,13 +1249,10 @@ namespace Deep3DStudio
 
         private void RenderTopToolbar(float yPos)
         {
-            ImGui.SetNextWindowPos(new System.Numerics.Vector2(0, yPos));
-            ImGui.SetNextWindowSize(new System.Numerics.Vector2(ClientSize.X, _toolbarHeight));
-
-            ImGui.Begin("##Toolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
-                       ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings);
+            bool shown = BeginStyledToolbarWindow("##Toolbar", new System.Numerics.Vector2(0, yPos), new System.Numerics.Vector2(ClientSize.X, _toolbarHeight));
+            if (shown)
             {
-                var size = new System.Numerics.Vector2(22, 22);
+                var size = ToolbarIconSize;
 
                 // Gizmo Modes
                 DrawToolbarButton("##Select", IconType.Select, _viewport.CurrentGizmoMode == GizmoMode.Select,
@@ -1307,7 +1307,7 @@ namespace Deep3DStudio
                 // Video input button - show when using Multi-View workflow with MUSt3R
                 if (_selectedWorkflow == 0 && isMust3rSelected)
                 {
-                    if (ImGui.ImageButton("##VideoInput", _iconFactory.GetIcon(IconType.Video), new System.Numerics.Vector2(24, 24)))
+                    if (ImGui.ImageButton("##VideoInput", _iconFactory.GetIcon(IconType.Video), ToolbarIconSize))
                     {
                         LoadVideoFile();
                     }
@@ -1371,18 +1371,15 @@ namespace Deep3DStudio
                 DrawToolbarButton("##Fullscreen", IconType.Fullscreen, isFullscreen, ToggleFullscreen,
                     isFullscreen ? "Exit Fullscreen (F11)" : "Fullscreen (F11)", size);
             }
-            ImGui.End();
+            EndStyledToolbarWindow();
         }
 
         private void RenderMeshEditorToolbar(float yPos)
         {
-            ImGui.SetNextWindowPos(new System.Numerics.Vector2(0, yPos));
-            ImGui.SetNextWindowSize(new System.Numerics.Vector2(ClientSize.X, _auxToolbarHeight));
-
-            ImGui.Begin("##MeshEditorToolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
-                       ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings);
+            bool shown = BeginStyledToolbarWindow("##MeshEditorToolbar", new System.Numerics.Vector2(0, yPos), new System.Numerics.Vector2(ClientSize.X, _auxToolbarHeight));
+            if (shown)
             {
-                var size = new System.Numerics.Vector2(20, 20);
+                var size = ToolbarIconSize;
 
                 ImGui.TextDisabled("Create:");
                 ImGui.SameLine();
@@ -1439,18 +1436,15 @@ namespace Deep3DStudio
                 ImGui.SameLine();
                 DrawToolbarButton("##PenBridge", IconType.Bridge, false, ApplyPenBridge, "Bridge two selected triangles", size);
             }
-            ImGui.End();
+            EndStyledToolbarWindow();
         }
 
         private void RenderPointCloudToolbar(float yPos)
         {
-            ImGui.SetNextWindowPos(new System.Numerics.Vector2(0, yPos));
-            ImGui.SetNextWindowSize(new System.Numerics.Vector2(ClientSize.X, _auxToolbarHeight));
-
-            ImGui.Begin("##PointCloudToolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
-                       ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings);
+            bool shown = BeginStyledToolbarWindow("##PointCloudToolbar", new System.Numerics.Vector2(0, yPos), new System.Numerics.Vector2(ClientSize.X, _auxToolbarHeight));
+            if (shown)
             {
-                var size = new System.Numerics.Vector2(20, 20);
+                var size = ToolbarIconSize;
                 ImGui.TextDisabled("Point Cloud:");
                 ImGui.SameLine();
 
@@ -1475,7 +1469,7 @@ namespace Deep3DStudio
                 DrawToolbarButton("##PcDense", IconType.DenseCloud, false, () => ApplyPointCloudDenseCloud(), "Point Cloud to Dense Cloud", size,
                     OpenPointCloudDenseOptionsDialog);
             }
-            ImGui.End();
+            EndStyledToolbarWindow();
         }
 
         private void DrawToolbarButton(
@@ -1551,18 +1545,34 @@ namespace Deep3DStudio
             return clicked;
         }
 
+        private const ImGuiWindowFlags ToolbarWindowFlags =
+            ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings;
+
+        private bool BeginStyledToolbarWindow(string id, System.Numerics.Vector2 position, System.Numerics.Vector2 size)
+        {
+            ImGui.SetNextWindowPos(position);
+            ImGui.SetNextWindowSize(size);
+            ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, ToolbarWindowPadding);
+            ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, ToolbarItemSpacing);
+            return ImGui.Begin(id, ToolbarWindowFlags);
+        }
+
+        private static void EndStyledToolbarWindow()
+        {
+            ImGui.End();
+            ImGui.PopStyleVar(2);
+        }
+
         private void RenderVerticalToolbar()
         {
             float startY = GetTopUiHeight();
             float height = ClientSize.Y - startY - (_showLogPanel ? _logPanelHeight : 0);
 
-            ImGui.SetNextWindowPos(new System.Numerics.Vector2(0, startY));
-            ImGui.SetNextWindowSize(new System.Numerics.Vector2(_verticalToolbarWidth, height));
-
-            ImGui.Begin("##VToolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
-                       ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings);
+            bool shown = BeginStyledToolbarWindow("##VToolbar", new System.Numerics.Vector2(0, startY), new System.Numerics.Vector2(_verticalToolbarWidth, height));
+            if (shown)
             {
-                var size = new System.Numerics.Vector2(22, 22);
+                var size = ToolbarIconSize;
 
                 // Focus
                 if (ImGui.ImageButton("##Focus", _iconFactory.GetIcon(IconType.Focus), size))
@@ -1683,7 +1693,7 @@ namespace Deep3DStudio
                 }
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Delete Selected");
             }
-            ImGui.End();
+            EndStyledToolbarWindow();
         }
 
         private void RenderLeftPanel()

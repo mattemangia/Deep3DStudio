@@ -34,6 +34,9 @@ namespace Deep3DStudio
             if (ImGui.Begin("AI Diagnostics", ref _visible))
             {
                 // Toolbar
+                ImGui.Dummy(new System.Numerics.Vector2(0, 2));
+                ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new System.Numerics.Vector2(8, 4));
+                ImGui.Indent(4);
                 if (ImGui.Button("Run Diagnostics") && !_isRunning)
                 {
                     RunDiagnostics();
@@ -45,6 +48,8 @@ namespace Deep3DStudio
                 }
                 ImGui.SameLine();
                 if (ImGui.Button("Close")) _visible = false;
+                ImGui.Unindent(4);
+                ImGui.PopStyleVar();
 
                 ImGui.Separator();
 

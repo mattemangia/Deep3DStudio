@@ -29,25 +29,26 @@ namespace Deep3DStudio
 
         private void RenderGeoreferenceToolbar(float yPos)
         {
-            ImGui.SetNextWindowPos(new System.Numerics.Vector2(_showVerticalToolbar ? _verticalToolbarWidth : 0, yPos));
-            ImGui.SetNextWindowSize(new System.Numerics.Vector2(ClientSize.X - (_showVerticalToolbar ? _verticalToolbarWidth : 0), _auxToolbarHeight));
-            ImGui.Begin("##GeoreferenceToolbar", ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
-                                              ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoSavedSettings);
-
-            var size = new System.Numerics.Vector2(22, 22);
-            DrawToolbarButton("##GeoOpen", IconType.Georef, false, () => _showGeoreferenceWindow = true, "GCP Editor", size);
-            ImGui.SameLine();
-            DrawToolbarButton("##GeoSolve", IconType.Residuals, false, SolveGeoFromRuntime, "Solve from GCP", size);
-            ImGui.SameLine();
-            DrawToolbarButton("##GeoDem", IconType.Dem, false, OnExportDemImGui, "Export DEM", size);
-            ImGui.SameLine();
-            DrawToolbarButton("##GeoExport", IconType.GeoExport, false, OnExportGeoreferencedSelectionImGui, "Export georeferenced selection", size);
-            ImGui.SameLine();
-            ImGui.TextUnformatted(GeoReferenceRuntime.HasActiveGeoreference
-                ? $"CRS: {GeoReferenceRuntime.GeoReference.ProjectCrsEpsg}"
-                : "CRS: disabled");
-
-            ImGui.End();
+            bool shown = BeginStyledToolbarWindow(
+                "##GeoreferenceToolbar",
+                new System.Numerics.Vector2(_showVerticalToolbar ? _verticalToolbarWidth : 0, yPos),
+                new System.Numerics.Vector2(ClientSize.X - (_showVerticalToolbar ? _verticalToolbarWidth : 0), _auxToolbarHeight));
+            if (shown)
+            {
+                var size = ToolbarIconSize;
+                DrawToolbarButton("##GeoOpen", IconType.Georef, false, () => _showGeoreferenceWindow = true, "GCP Editor", size);
+                ImGui.SameLine();
+                DrawToolbarButton("##GeoSolve", IconType.Residuals, false, SolveGeoFromRuntime, "Solve from GCP", size);
+                ImGui.SameLine();
+                DrawToolbarButton("##GeoDem", IconType.Dem, false, OnExportDemImGui, "Export DEM", size);
+                ImGui.SameLine();
+                DrawToolbarButton("##GeoExport", IconType.GeoExport, false, OnExportGeoreferencedSelectionImGui, "Export georeferenced selection", size);
+                ImGui.SameLine();
+                ImGui.TextUnformatted(GeoReferenceRuntime.HasActiveGeoreference
+                    ? $"CRS: {GeoReferenceRuntime.GeoReference.ProjectCrsEpsg}"
+                    : "CRS: disabled");
+            }
+            EndStyledToolbarWindow();
         }
 
         private void DrawGeoreferenceWindow()
