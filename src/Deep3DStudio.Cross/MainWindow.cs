@@ -404,7 +404,8 @@ namespace Deep3DStudio
             colors[(int)ImGuiCol.WindowBg] = new System.Numerics.Vector4(0.12f, 0.12f, 0.12f, 1.0f);
             colors[(int)ImGuiCol.ChildBg] = new System.Numerics.Vector4(0.14f, 0.14f, 0.14f, 1.0f);
             colors[(int)ImGuiCol.PopupBg] = new System.Numerics.Vector4(0.08f, 0.08f, 0.08f, 0.98f);
-            colors[(int)ImGuiCol.ModalWindowDimBg] = new System.Numerics.Vector4(0.02f, 0.02f, 0.02f, 0.70f);
+            // Keep toolbar option dialogs readable without dimming the whole UI.
+            colors[(int)ImGuiCol.ModalWindowDimBg] = new System.Numerics.Vector4(0.0f, 0.0f, 0.0f, 0.0f);
             colors[(int)ImGuiCol.Border] = new System.Numerics.Vector4(0.25f, 0.25f, 0.25f, 1.0f);
             colors[(int)ImGuiCol.FrameBg] = new System.Numerics.Vector4(0.18f, 0.18f, 0.18f, 1.0f);
             colors[(int)ImGuiCol.FrameBgHovered] = new System.Numerics.Vector4(0.25f, 0.25f, 0.25f, 1.0f);
