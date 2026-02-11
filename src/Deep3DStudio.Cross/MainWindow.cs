@@ -106,6 +106,7 @@ namespace Deep3DStudio
         // Auto Workflow Toggle - when enabled, Play button runs the full selected workflow
         // When disabled, user can manually trigger each step (e.g., Dust3R -> then LGM -> then UniRig)
         private bool _autoWorkflowEnabled = true;
+        private bool _workflowInProgress = false;
         private string _logBuffer = "";
         private bool _autoScroll = true;
         private int _lastLogLength = 0;
@@ -567,12 +568,12 @@ namespace Deep3DStudio
                         if (mesh != null)
                         {
                             var obj = new MeshObject(Path.GetFileName(file), mesh);
-                            lock (_sceneGraph)
+                            EnqueueAction(() =>
                             {
                                 _sceneGraph.AddObject(obj);
-                            }
-                            ProgressDialog.Instance.Log($"Imported mesh: {Path.GetFileName(file)}");
-                            ProgressDialog.Instance.Complete();
+                                ProgressDialog.Instance.Log($"Imported mesh: {Path.GetFileName(file)}");
+                                ProgressDialog.Instance.Complete();
+                            });
                         }
                         else
                         {
@@ -581,7 +582,7 @@ namespace Deep3DStudio
                     }
                     catch (Exception ex)
                     {
-                        ProgressDialog.Instance.Fail(ex);
+                        EnqueueAction(() => ProgressDialog.Instance.Fail(ex));
                     }
                 });
             }
@@ -594,13 +595,13 @@ namespace Deep3DStudio
                         var pc = PointCloudImporter.Load(file);
                         if (pc != null)
                         {
-                            IniSettings.Instance.ShowPointCloud = true;
-                            lock (_sceneGraph)
+                            EnqueueAction(() =>
                             {
+                                IniSettings.Instance.ShowPointCloud = true;
                                 _sceneGraph.AddObject(pc);
-                            }
-                            ProgressDialog.Instance.Log($"Imported point cloud: {Path.GetFileName(file)}");
-                            ProgressDialog.Instance.Complete();
+                                ProgressDialog.Instance.Log($"Imported point cloud: {Path.GetFileName(file)}");
+                                ProgressDialog.Instance.Complete();
+                            });
                         }
                         else
                         {
@@ -609,7 +610,7 @@ namespace Deep3DStudio
                     }
                     catch (Exception ex)
                     {
-                        ProgressDialog.Instance.Fail(ex);
+                        EnqueueAction(() => ProgressDialog.Instance.Fail(ex));
                     }
                 });
             }
@@ -1747,7 +1748,13 @@ namespace Deep3DStudio
 
         private void RenderImagesPanel()
         {
-            ImGui.Text($"Loaded: {_loadedImages.Count}");
+            int thumbnailCount;
+            lock (_imageThumbnails)
+            {
+                thumbnailCount = _imageThumbnails.Count;
+            }
+
+            ImGui.Text($"Loaded: {_loadedImages.Count}  Thumbs: {thumbnailCount}");
 
             if (ImGui.Button("Add Images..."))
             {
@@ -1939,141 +1946,175 @@ namespace Deep3DStudio
 
         private void RenderSceneGraph()
         {
-            int i = 0;
             SceneObject? objectToDelete = null;
             SceneObject? objectToDuplicate = null;
 
-            // Take a snapshot of all objects so hidden items can be re-shown from the tree
-            var allObjects = _sceneGraph.AllObjects.ToList();
+            var allObjects = _sceneGraph.GetAllObjects().ToList();
+            int visibleCount = allObjects.Count(o => o.Visible);
+            int selectedCount = _sceneGraph.SelectedObjects.Count;
 
-            foreach (var obj in allObjects)
+            ImGui.Text($"Total: {allObjects.Count}  Visible: {visibleCount}  Selected: {selectedCount}");
+            ImGui.Separator();
+
+            ImGui.BeginChild("SceneList", new System.Numerics.Vector2(0, 0), ImGuiChildFlags.Borders);
+            if (allObjects.Count == 0)
             {
-                bool selected = obj.Selected;
-                string name = obj.Name ?? $"Object {obj.Id}";
-                int depth = GetSceneObjectDepth(obj);
-                string indent = depth > 0 ? new string(' ', depth * 2) : string.Empty;
-                string icon = obj switch
-                {
-                    MeshObject => "[M] ",
-                    PointCloudObject => "[P] ",
-                    CameraObject => "[C] ",
-                    SkeletonObject => "[S] ",
-                    GroupObject => "[G] ",
-                    _ => "[O] "
-                };
-                string displayName = obj.Visible ? $"{indent}{icon}{name}" : $"{indent}{icon}{name} (hidden)";
-                float reservedWidth = obj is CameraObject ? 180f : 90f;
+                ImGui.TextDisabled("No objects in scene");
+                ImGui.EndChild();
+                return;
+            }
 
-                if (_renamingObject == obj)
-                {
-                    ImGui.SetKeyboardFocusHere();
-                    if (ImGui.InputText($"##renameObj{i}", ref _renameBuffer, 64, ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.AutoSelectAll))
-                    {
-                        obj.Name = _renameBuffer;
-                        _renamingObject = null;
-                        _isDirty = true;
-                    }
-                    if (ImGui.IsItemDeactivated() && ImGui.IsKeyPressed(ImGuiKey.Escape))
-                    {
-                        _renamingObject = null;
-                    }
-                    if (ImGui.IsItemDeactivatedAfterEdit())
-                    {
-                        obj.Name = _renameBuffer;
-                        _renamingObject = null;
-                        _isDirty = true;
-                    }
-                }
-                else
-                {
-                    if (!obj.Visible) ImGui.PushStyleVar(ImGuiStyleVar.Alpha, 0.55f);
-                    if (ImGui.Selectable($"{displayName}##{i}", selected, ImGuiSelectableFlags.None, new System.Numerics.Vector2(-reservedWidth, 0)))
-                    {
-                        if (!ImGui.GetIO().KeyCtrl) _sceneGraph.ClearSelection();
-                        _sceneGraph.Select(obj, !selected);
-                    }
-                    if (!obj.Visible) ImGui.PopStyleVar();
+            const ImGuiTableFlags tableFlags =
+                ImGuiTableFlags.RowBg |
+                ImGuiTableFlags.BordersInnerV |
+                ImGuiTableFlags.BordersOuter |
+                ImGuiTableFlags.SizingFixedFit;
 
-                    if (ImGui.BeginPopupContextItem($"SceneGraphItemCtx##{i}"))
-                    {
-                        if (!obj.Selected)
-                        {
-                            _sceneGraph.ClearSelection();
-                            _sceneGraph.Select(obj, false);
-                        }
+            if (ImGui.BeginTable("SceneObjectTable", 3, tableFlags))
+            {
+                ImGui.TableSetupColumn("Object", ImGuiTableColumnFlags.WidthStretch);
+                ImGui.TableSetupColumn("Visible", ImGuiTableColumnFlags.WidthFixed, 64f);
+                ImGui.TableSetupColumn("Camera", ImGuiTableColumnFlags.WidthFixed, 64f);
+                ImGui.TableHeadersRow();
 
-                        if (ImGui.MenuItem("Rename"))
+                foreach (var obj in allObjects)
+                {
+                    bool selected = obj.Selected;
+                    string name = obj.Name ?? $"Object {obj.Id}";
+                    int depth = GetSceneObjectDepth(obj);
+                    string indent = depth > 0 ? new string(' ', depth * 2) : string.Empty;
+                    string icon = obj switch
+                    {
+                        MeshObject => "[M] ",
+                        PointCloudObject => "[P] ",
+                        CameraObject => "[C] ",
+                        SkeletonObject => "[S] ",
+                        GroupObject => "[G] ",
+                        _ => "[O] "
+                    };
+                    string displayName = obj.Visible ? $"{indent}{icon}{name}" : $"{indent}{icon}{name} (hidden)";
+
+                    ImGui.PushID(obj.Id);
+                    ImGui.TableNextRow();
+
+                    ImGui.TableSetColumnIndex(0);
+                    if (_renamingObject == obj)
+                    {
+                        ImGui.SetKeyboardFocusHere();
+                        if (ImGui.InputText("##renameObj", ref _renameBuffer, 64, ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.AutoSelectAll))
                         {
-                            _renamingObject = obj;
-                            _renameBuffer = obj.Name ?? "";
-                        }
-                        if (ImGui.MenuItem("Focus")) _viewport.FocusOnObject(obj);
-                        if (ImGui.MenuItem(obj.Visible ? "Hide" : "Show"))
-                        {
-                            obj.Visible = !obj.Visible;
+                            obj.Name = _renameBuffer;
+                            _renamingObject = null;
                             _isDirty = true;
                         }
-                        if (ImGui.BeginMenu("Render Mode"))
+                        if (ImGui.IsItemDeactivated() && ImGui.IsKeyPressed(ImGuiKey.Escape))
                         {
-                            _isDirty |= DrawRenderModeMenuItem(obj, "Inherit (Global)", ObjectRenderMode.InheritGlobal);
-                            _isDirty |= DrawRenderModeMenuItem(obj, "Shading", ObjectRenderMode.Shaded);
-                            _isDirty |= DrawRenderModeMenuItem(obj, "Wireframe", ObjectRenderMode.Wireframe);
-                            _isDirty |= DrawRenderModeMenuItem(obj, "No Textures", ObjectRenderMode.NoTexture);
-                            _isDirty |= DrawRenderModeMenuItem(obj, "Textures", ObjectRenderMode.Texture);
-                            _isDirty |= DrawRenderModeMenuItem(obj, "Bounding Box Only", ObjectRenderMode.BoundingBoxOnly);
-                            ImGui.EndMenu();
+                            _renamingObject = null;
                         }
-                        ImGui.Separator();
-                        if (ImGui.MenuItem("Move..."))
+                        if (ImGui.IsItemDeactivatedAfterEdit())
                         {
-                            OpenTransformDialog(TransformDialogMode.Move);
-                        }
-                        if (ImGui.MenuItem("Rotate..."))
-                        {
-                            OpenTransformDialog(TransformDialogMode.Rotate);
-                        }
-                        if (ImGui.MenuItem("Scale..."))
-                        {
-                            OpenTransformDialog(TransformDialogMode.Scale);
-                        }
-                        if (ImGui.MenuItem("Reset Transform"))
-                        {
-                            OnResetTransform();
+                            obj.Name = _renameBuffer;
+                            _renamingObject = null;
                             _isDirty = true;
                         }
-                        ImGui.Separator();
-                        if (obj is CameraObject contextCam && ImGui.MenuItem(contextCam.ShowFrustum ? "Hide Frustum" : "Show Frustum"))
+                    }
+                    else
+                    {
+                        if (!obj.Visible)
+                            ImGui.PushStyleVar(ImGuiStyleVar.Alpha, 0.55f);
+
+                        if (ImGui.Selectable($"{displayName}##sel", selected))
                         {
-                            contextCam.ShowFrustum = !contextCam.ShowFrustum;
-                            _isDirty = true;
+                            bool addToSelection = ImGui.GetIO().KeyCtrl;
+                            if (!addToSelection)
+                                _sceneGraph.ClearSelection();
+
+                            if (addToSelection && selected)
+                                _sceneGraph.Deselect(obj);
+                            else
+                                _sceneGraph.Select(obj, addToSelection);
                         }
-                        if (ImGui.MenuItem("Delete")) objectToDelete = obj;
-                        if (ImGui.MenuItem("Duplicate")) objectToDuplicate = obj;
-                        ImGui.EndPopup();
+
+                        if (!obj.Visible)
+                            ImGui.PopStyleVar();
+
+                        if (ImGui.BeginPopupContextItem("SceneGraphItemCtx"))
+                        {
+                            if (!obj.Selected)
+                            {
+                                _sceneGraph.ClearSelection();
+                                _sceneGraph.Select(obj, false);
+                            }
+
+                            if (ImGui.MenuItem("Rename"))
+                            {
+                                _renamingObject = obj;
+                                _renameBuffer = obj.Name ?? "";
+                            }
+                            if (ImGui.MenuItem("Focus")) _viewport.FocusOnObject(obj);
+                            if (ImGui.MenuItem(obj.Visible ? "Hide" : "Show"))
+                            {
+                                obj.Visible = !obj.Visible;
+                                _isDirty = true;
+                            }
+                            if (ImGui.BeginMenu("Render Mode"))
+                            {
+                                _isDirty |= DrawRenderModeMenuItem(obj, "Inherit (Global)", ObjectRenderMode.InheritGlobal);
+                                _isDirty |= DrawRenderModeMenuItem(obj, "Shading", ObjectRenderMode.Shaded);
+                                _isDirty |= DrawRenderModeMenuItem(obj, "Wireframe", ObjectRenderMode.Wireframe);
+                                _isDirty |= DrawRenderModeMenuItem(obj, "No Textures", ObjectRenderMode.NoTexture);
+                                _isDirty |= DrawRenderModeMenuItem(obj, "Textures", ObjectRenderMode.Texture);
+                                _isDirty |= DrawRenderModeMenuItem(obj, "Bounding Box Only", ObjectRenderMode.BoundingBoxOnly);
+                                ImGui.EndMenu();
+                            }
+                            ImGui.Separator();
+                            if (ImGui.MenuItem("Move...")) OpenTransformDialog(TransformDialogMode.Move);
+                            if (ImGui.MenuItem("Rotate...")) OpenTransformDialog(TransformDialogMode.Rotate);
+                            if (ImGui.MenuItem("Scale...")) OpenTransformDialog(TransformDialogMode.Scale);
+                            if (ImGui.MenuItem("Reset Transform"))
+                            {
+                                OnResetTransform();
+                                _isDirty = true;
+                            }
+                            ImGui.Separator();
+                            if (obj is CameraObject contextCam && ImGui.MenuItem(contextCam.ShowFrustum ? "Hide Frustum" : "Show Frustum"))
+                            {
+                                contextCam.ShowFrustum = !contextCam.ShowFrustum;
+                                _isDirty = true;
+                            }
+                            if (ImGui.MenuItem("Delete")) objectToDelete = obj;
+                            if (ImGui.MenuItem("Duplicate")) objectToDuplicate = obj;
+                            ImGui.EndPopup();
+                        }
                     }
 
-                    ImGui.SameLine();
-                    if (ImGui.SmallButton($"{(obj.Visible ? "Hide" : "Show")}##vis{i}"))
+                    ImGui.TableSetColumnIndex(1);
+                    if (ImGui.SmallButton($"{(obj.Visible ? "Hide" : "Show")}##vis"))
                     {
                         obj.Visible = !obj.Visible;
                         _isDirty = true;
                     }
 
+                    ImGui.TableSetColumnIndex(2);
                     if (obj is CameraObject cam)
                     {
-                        ImGui.SameLine();
-                        if (ImGui.SmallButton($"{(cam.ShowFrustum ? "Fr Off" : "Fr On")}##fr{i}"))
+                        if (ImGui.SmallButton($"{(cam.ShowFrustum ? "FrOff" : "FrOn")}##fr"))
                         {
                             cam.ShowFrustum = !cam.ShowFrustum;
                             _isDirty = true;
                         }
                     }
+                    else
+                    {
+                        ImGui.TextDisabled("-");
+                    }
+
+                    ImGui.PopID();
                 }
 
-                i++;
+                ImGui.EndTable();
             }
 
-            // Perform deferred operations after iteration is complete
             if (objectToDelete != null)
             {
                 _sceneGraph.RemoveObject(objectToDelete);
@@ -2084,10 +2125,7 @@ namespace Deep3DStudio
                 OnDuplicateObject(objectToDuplicate);
             }
 
-            if (_sceneGraph.ObjectCount == 0)
-            {
-                ImGui.TextDisabled("No objects in scene");
-            }
+            ImGui.EndChild();
         }
 
         private static bool DrawRenderModeMenuItem(SceneObject obj, string label, ObjectRenderMode mode)
@@ -2486,7 +2524,10 @@ namespace Deep3DStudio
                 {
                     float ps = pc.PointSize;
                     if (ImGui.SliderFloat("Point Size", ref ps, 1.0f, 20.0f)) pc.PointSize = ps;
-                    ImGui.Text($"Points: {pc.PointCount:N0}");
+                    float visiblePct = pc.VisibleFraction * 100.0f;
+                    if (ImGui.SliderFloat("Visible Points (%)", ref visiblePct, 0.0f, 100.0f, "%.1f%%"))
+                        pc.VisibleFraction = Math.Clamp(visiblePct / 100.0f, 0.0f, 1.0f);
+                    ImGui.Text($"Points: {pc.VisiblePointCount:N0} / {pc.PointCount:N0} visible");
                     ImGui.Text($"Normals: {(pc.Normals.Count == pc.PointCount ? "Estimated" : "None")}");
 
                     ImGui.Separator();
@@ -4309,11 +4350,16 @@ namespace Deep3DStudio
                 return;
             }
 
+            int before = selected.Sum(pc => pc.PointCount);
             int added = 0;
             foreach (var pc in selected)
                 added += PointCloudOperations.Densify(pc, _pcDenseRadius, _pcDensePointsPerSeed);
+            int after = selected.Sum(pc => pc.PointCount);
 
-            _logBuffer += $"Dense cloud added {added:N0} points.\n";
+            if (added > 0)
+                _logBuffer += $"Dense cloud added {added:N0} points ({before:N0} -> {after:N0}).\n";
+            else
+                _logBuffer += $"Dense cloud added 0 points. Increase radius (current {_pcDenseRadius:F4}) or reduce filtering.\n";
             _isDirty = true;
             UpdateTitle();
         }
@@ -5364,17 +5410,25 @@ namespace Deep3DStudio
 
         private async void RunReconstruction(bool generateMesh = true, bool generateCloud = true)
         {
+            if (_workflowInProgress)
+            {
+                _logBuffer += "AI workflow already in progress.\n";
+                return;
+            }
+
             if (_loadedImages.Count == 0)
             {
                 _logBuffer += "Error: No images loaded.\n";
                 return;
             }
 
+            _workflowInProgress = true;
             var workflowNames = GetWorkflowNames();
-            ProgressDialog.Instance.Start($"Running {workflowNames[_selectedWorkflow]}...", OperationType.Processing);
+            string resultLabel = "Reconstruction";
 
             try
             {
+                ProgressDialog.Instance.Start($"Running {workflowNames[_selectedWorkflow]}...", OperationType.Processing);
                 SceneResult? result = null;
 
                 await Task.Run(async () =>
@@ -5406,6 +5460,8 @@ namespace Deep3DStudio
                     else
                         pipeline = WorkflowPipeline.ImageToDust3rToMesh;
 
+                    resultLabel = pipeline.Name;
+
                     // Convert ProjectImage list to string list
                     var imagePaths = _loadedImages.Select(i => i.FilePath).ToList();
 
@@ -5415,49 +5471,85 @@ namespace Deep3DStudio
                         ProgressDialog.Instance.Update(p, s);
                     }, cancellationToken);
                 });
-
-                if (result != null)
+                EnqueueAction(() =>
                 {
-                    bool hasGeometry = result.Meshes.Any(m => m.Vertices.Count > 0);
-                    if (!hasGeometry)
+                    try
                     {
-                        ProgressDialog.Instance.Fail(new Exception("Reconstruction completed but no geometry was generated."));
-                        return;
-                    }
-
-                    foreach (var mesh in result.Meshes)
-                    {
-                        if (mesh.Vertices.Count > 0)
+                        if (result != null)
                         {
-                            var obj = new MeshObject("Reconstructed Mesh", mesh);
-                            lock (_sceneGraph)
+                            bool hasPointCloud = HasPointCloudData(result);
+                            bool hasTriangulatedMesh = HasTriangulatedMesh(result);
+                            if (!hasPointCloud)
                             {
-                                _sceneGraph.AddObject(obj);
+                                ProgressDialog.Instance.Fail(new Exception(
+                                    $"Reconstruction completed but no geometry was generated. {DescribeGeometry(result)}"));
+                                return;
                             }
+
+                            if (!hasTriangulatedMesh)
+                            {
+                                ApplyPointCloudResultToScene(result, resultLabel);
+                                ProgressDialog.Instance.Log($"Reconstruction complete. Result classified as point cloud: {result.Meshes.Count} cloud(s), {result.Poses.Count} camera(s).");
+                            }
+                            else
+                            {
+                                MeshObject? firstMeshObject = null;
+                                int meshCount = 0;
+
+                                foreach (var mesh in result.Meshes)
+                                {
+                                    if (mesh.Vertices.Count > 0 && mesh.Indices.Count >= 3)
+                                    {
+                                        var obj = new MeshObject($"Reconstructed Mesh {meshCount + 1}", mesh);
+                                        _sceneGraph.AddObject(obj);
+                                        if (firstMeshObject == null)
+                                            firstMeshObject = obj;
+                                        meshCount++;
+                                    }
+                                }
+
+                                if (firstMeshObject != null)
+                                {
+                                    _sceneGraph.Select(firstMeshObject);
+                                    _viewport.FocusOnSelection();
+                                }
+
+                                // Populate depth maps for visualization
+                                PopulateDepthData(result);
+
+                                ProgressDialog.Instance.Log($"Reconstruction complete. Result classified as mesh: {meshCount} mesh(es).");
+                            }
+                            if (!(ProgressDialog.Instance.CancellationTokenSource?.IsCancellationRequested ?? false))
+                                ProgressDialog.Instance.Complete();
+                        }
+                        else
+                        {
+                            // If no result but no exception, maybe cancelled or empty?
+                            if (ProgressDialog.Instance.State == ProgressState.Running)
+                                ProgressDialog.Instance.Fail(new Exception("Unknown failure: No result returned."));
                         }
                     }
-
-                    // Populate depth maps for visualization
-                    PopulateDepthData(result);
-
-                    ProgressDialog.Instance.Log($"Reconstruction complete. Added {result.Meshes.Count} objects.");
-                    if (!(ProgressDialog.Instance.CancellationTokenSource?.IsCancellationRequested ?? false))
-                        ProgressDialog.Instance.Complete();
-                }
-                else
-                {
-                    // If no result but no exception, maybe cancelled or empty?
-                    if (ProgressDialog.Instance.State == ProgressState.Running)
-                        ProgressDialog.Instance.Fail(new Exception("Unknown failure: No result returned."));
-                }
+                    finally
+                    {
+                        _workflowInProgress = false;
+                    }
+                });
             }
             catch (OperationCanceledException)
             {
-                ProgressDialog.Instance.Log("Reconstruction cancelled.");
+                EnqueueAction(() =>
+                {
+                    ProgressDialog.Instance.Log("Reconstruction cancelled.");
+                    _workflowInProgress = false;
+                });
             }
             catch (Exception ex)
             {
-                ProgressDialog.Instance.Fail(ex);
+                EnqueueAction(() =>
+                {
+                    ProgressDialog.Instance.Fail(ex);
+                    _workflowInProgress = false;
+                });
             }
         }
 
@@ -5470,6 +5562,12 @@ namespace Deep3DStudio
             if (step == WorkflowStep.PoissonReconstruction)
             {
                 RunMeshFromSelectedPointClouds();
+                return;
+            }
+
+            if (_workflowInProgress)
+            {
+                _logBuffer += $"AI workflow already in progress. Cannot start {GetStepDisplayName(step)}.\n";
                 return;
             }
 
@@ -5514,10 +5612,11 @@ namespace Deep3DStudio
             }
 
             string stepName = GetStepDisplayName(step);
-            ProgressDialog.Instance.Start($"Running {stepName}...", OperationType.Processing);
+            _workflowInProgress = true;
 
             try
             {
+                ProgressDialog.Instance.Start($"Running {stepName}...", OperationType.Processing);
                 SceneResult? result = null;
                 var imagePaths = _loadedImages.Select(i => i.FilePath).ToList();
 
@@ -5548,55 +5647,95 @@ namespace Deep3DStudio
                         ProgressDialog.Instance.Update(p, s);
                     }, cancellationToken);
                 });
-
-                if (result != null)
+                EnqueueAction(() =>
                 {
-                    bool hasGeometry = result.Meshes.Any(m => m.Vertices.Count > 0);
-                    if (!hasGeometry)
+                    try
                     {
-                        ProgressDialog.Instance.Fail(new Exception($"{stepName} completed but no geometry was generated."));
-                        return;
-                    }
-
-                    if (step == WorkflowStep.Dust3rReconstruction ||
-                        step == WorkflowStep.Mast3rReconstruction ||
-                        step == WorkflowStep.Must3rReconstruction ||
-                        step == WorkflowStep.SfMReconstruction)
-                    {
-                        ApplyPointCloudResultToScene(result, stepName);
-                        ProgressDialog.Instance.Log($"{stepName} complete. Added {result.Meshes.Count} point cloud(s).");
-                        if (!(ProgressDialog.Instance.CancellationTokenSource?.IsCancellationRequested ?? false))
-                            ProgressDialog.Instance.Complete();
-                        return;
-                    }
-
-                    foreach (var mesh in result.Meshes)
-                    {
-                        if (mesh.Vertices.Count > 0)
+                        if (result != null)
                         {
-                            var obj = new MeshObject($"{stepName} Result", mesh);
-                            lock (_sceneGraph)
+                            bool hasPointCloud = HasPointCloudData(result);
+                            bool hasTriangulatedMesh = HasTriangulatedMesh(result);
+                            if (!hasPointCloud)
                             {
-                                _sceneGraph.AddObject(obj);
+                                ProgressDialog.Instance.Fail(new Exception(
+                                    $"{stepName} completed but no geometry was generated. {DescribeGeometry(result)}"));
+                                return;
                             }
+
+                            bool isReconstructionStep =
+                                step == WorkflowStep.Dust3rReconstruction ||
+                                step == WorkflowStep.Mast3rReconstruction ||
+                                step == WorkflowStep.Must3rReconstruction ||
+                                step == WorkflowStep.SfMReconstruction;
+
+                            if (isReconstructionStep || !hasTriangulatedMesh)
+                            {
+                                ApplyPointCloudResultToScene(result, stepName);
+                                ProgressDialog.Instance.Log($"{stepName} complete. Added {result.Meshes.Count} point cloud(s).");
+                                if (!(ProgressDialog.Instance.CancellationTokenSource?.IsCancellationRequested ?? false))
+                                    ProgressDialog.Instance.Complete();
+                                return;
+                            }
+
+                            foreach (var mesh in result.Meshes)
+                            {
+                                if (mesh.Vertices.Count > 0 && mesh.Indices.Count >= 3)
+                                {
+                                    var obj = new MeshObject($"{stepName} Result", mesh);
+                                    _sceneGraph.AddObject(obj);
+                                }
+                            }
+
+                            PopulateDepthData(result);
+                            ProgressDialog.Instance.Log($"{stepName} complete. Added {result.Meshes.Count} objects.");
+                            if (!(ProgressDialog.Instance.CancellationTokenSource?.IsCancellationRequested ?? false))
+                                ProgressDialog.Instance.Complete();
+                        }
+                        else
+                        {
+                            if (ProgressDialog.Instance.State == ProgressState.Running)
+                                ProgressDialog.Instance.Fail(new Exception($"{stepName} failed: No result returned."));
                         }
                     }
-
-                    PopulateDepthData(result);
-                    ProgressDialog.Instance.Log($"{stepName} complete. Added {result.Meshes.Count} objects.");
-                    if (!(ProgressDialog.Instance.CancellationTokenSource?.IsCancellationRequested ?? false))
-                        ProgressDialog.Instance.Complete();
-                }
-                else
-                {
-                    if (ProgressDialog.Instance.State == ProgressState.Running)
-                        ProgressDialog.Instance.Fail(new Exception($"{stepName} failed: No result returned."));
-                }
+                    finally
+                    {
+                        _workflowInProgress = false;
+                    }
+                });
             }
             catch (Exception ex)
             {
-                ProgressDialog.Instance.Fail(ex);
+                EnqueueAction(() =>
+                {
+                    ProgressDialog.Instance.Fail(ex);
+                    _workflowInProgress = false;
+                });
             }
+        }
+
+        /// <summary>
+        /// Returns true when at least one output mesh has valid triangle indices.
+        /// </summary>
+        private static bool HasTriangulatedMesh(SceneResult result)
+        {
+            return result.Meshes.Any(m => m.Vertices.Count > 0 && m.Indices.Count >= 3);
+        }
+
+        /// <summary>
+        /// Returns true when at least one output contains points.
+        /// </summary>
+        private static bool HasPointCloudData(SceneResult result)
+        {
+            return result.Meshes.Any(m => m.Vertices.Count > 0);
+        }
+
+        private static string DescribeGeometry(SceneResult result)
+        {
+            int meshCount = result.Meshes.Count;
+            int vertexCount = result.Meshes.Sum(m => m.Vertices.Count);
+            int triangleMeshCount = result.Meshes.Count(m => m.Vertices.Count > 0 && m.Indices.Count >= 3);
+            int poseCount = result.Poses.Count;
+            return $"meshes={meshCount}, vertices={vertexCount}, triangleMeshes={triangleMeshCount}, poses={poseCount}";
         }
 
         /// <summary>
@@ -5642,10 +5781,7 @@ namespace Deep3DStudio
                 var mesh = result.Meshes[i];
                 if (mesh.Vertices.Count == 0) continue;
                 var pcObj = new PointCloudObject($"{stepName} Points {i + 1}", mesh);
-                lock (_sceneGraph)
-                {
-                    _sceneGraph.AddObject(pcObj);
-                }
+                _sceneGraph.AddObject(pcObj);
                 if (firstPc == null) firstPc = pcObj;
             }
 
@@ -5658,10 +5794,7 @@ namespace Deep3DStudio
             {
                 var pose = result.Poses[i];
                 var camObj = new CameraObject($"Camera {i + 1}", pose);
-                lock (_sceneGraph)
-                {
-                    _sceneGraph.AddObject(camObj);
-                }
+                _sceneGraph.AddObject(camObj);
             }
 
             PopulateDepthData(result);
@@ -5686,6 +5819,14 @@ namespace Deep3DStudio
             if (selectedPointClouds.Count == 0)
             {
                 ShowError("No Point Cloud Selected", "Please select a point cloud to generate a mesh.");
+                return;
+            }
+
+            int totalPoints = selectedPointClouds.Sum(pc => pc.PointCount);
+            int visiblePoints = selectedPointClouds.Sum(pc => pc.VisiblePointCount);
+            if (visiblePoints == 0 && totalPoints > 0)
+            {
+                ShowError("No Visible Points", "All selected point clouds currently expose 0 visible points. Increase the Visible Points slider before meshing.");
                 return;
             }
 
@@ -5795,7 +5936,7 @@ namespace Deep3DStudio
 
                     foreach (var pc in selectedPointClouds)
                     {
-                        var mesh = ToMeshData(pc);
+                        var mesh = ToMeshData(pc, visibleOnly: true);
                         EnsureMeshColors(mesh);
                         inputMeshes.Add(mesh);
                     }
@@ -5836,33 +5977,18 @@ namespace Deep3DStudio
 
         private MeshData GenerateMeshFromPointClouds(List<PointCloudObject> pointClouds, MeshingAlgorithm algorithm, int maxRes = 200)
         {
-            var meshes = pointClouds.Select(ToMeshData).ToList();
+            var meshes = pointClouds.Select(pc => ToMeshData(pc, visibleOnly: true)).ToList();
+            if (meshes.Sum(m => m.Vertices.Count) == 0)
+                return new MeshData();
+
             var (grid, min, size) = VoxelizePoints(meshes, maxRes);
             var mesher = GetMesher(algorithm);
             return mesher.GenerateMesh(grid, min, size, 0.5f);
         }
 
-        private MeshData ToMeshData(PointCloudObject pointCloud)
+        private MeshData ToMeshData(PointCloudObject pointCloud, bool visibleOnly = false)
         {
-            var mesh = new MeshData();
-            mesh.Vertices.AddRange(pointCloud.Points);
-
-            if (pointCloud.Colors.Count >= pointCloud.Points.Count)
-            {
-                mesh.Colors.AddRange(pointCloud.Colors.Take(pointCloud.Points.Count));
-            }
-            else
-            {
-                for (int i = 0; i < pointCloud.Points.Count; i++)
-                {
-                    if (i < pointCloud.Colors.Count)
-                        mesh.Colors.Add(pointCloud.Colors[i]);
-                    else
-                        mesh.Colors.Add(new Vector3(1f, 1f, 1f));
-                }
-            }
-
-            return mesh;
+            return PointCloudOperations.ToMeshData(pointCloud, visibleOnly);
         }
 
         private void EnsureMeshColors(MeshData mesh)

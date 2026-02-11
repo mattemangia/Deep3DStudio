@@ -1,0 +1,16 @@
+{
+  "timestampUtc": "2026-02-11T21:29:59.1893757Z",
+  "status": "SUCCESS",
+  "message": "Geometry reconstructed",
+  "pipeline": "mast3r",
+  "fallbackPipeline": "dust3r",
+  "inputs": [
+    "C:\\Users\\Matteo\\RiderProjects\\Deep3DStudio\\scripts\\dist\\win_amd64\\python\\python\\Lib\\site-packages\\croco\\assets\\Chateau1.png",
+    "C:\\Users\\Matteo\\RiderProjects\\Deep3DStudio\\scripts\\dist\\win_amd64\\python\\python\\Lib\\site-packages\\croco\\assets\\Chateau2.png"
+  ],
+  "vertexCount": 270433,
+  "triangleCount": 0,
+  "outputs": [
+    "C:\\Users\\Matteo\\RiderProjects\\Deep3DStudio\\_tmp_cli_verify_mast3r\\mast3r_reconstruction.ply"
+  ]
+}

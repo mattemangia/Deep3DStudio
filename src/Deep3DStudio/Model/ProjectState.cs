@@ -91,6 +91,7 @@ namespace Deep3DStudio.Model
         public List<float> Colors { get; set; } = new List<float>();
         public List<float> Normals { get; set; } = new List<float>();
         public float PointSize { get; set; }
+        public float VisibleFraction { get; set; } = 1.0f;
     }
 
     public class CameraObjectDTO : SceneObjectDTO

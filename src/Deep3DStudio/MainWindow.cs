@@ -38,6 +38,7 @@ namespace Deep3DStudio
 
         private bool _isDirty = false;
         private bool _meshingInProgress = false;
+        private bool _workflowInProgress = false;
 
         // UI References for updates
         private ComboBoxText _workflowCombo = null!;
@@ -94,6 +95,9 @@ namespace Deep3DStudio
         private float _pcRadius = 1.0f;
         private float _pcDenseRadius = 0.03f;
         private int _pcDensePointsPerSeed = 2;
+        private Scale? _pcVisibilityScale;
+        private Label? _pcVisibilityLabel;
+        private bool _updatingPointCloudVisibilityControls = false;
 
         /// <summary>
         /// Gets the current reconstruction engine display name from settings.
@@ -190,6 +194,7 @@ namespace Deep3DStudio
             // Initialize Scene Graph
             _sceneGraph = new SceneGraph();
             _sceneGraph.SceneChanged += (s, e) => { _isDirty = true; UpdateTitle(); };
+            _sceneGraph.SelectionChanged += (s, e) => UpdatePointCloudVisibilityControls();
 
             // Create viewport early (needed by menu bar)
             _viewport = new ThreeDView();
@@ -229,6 +234,7 @@ namespace Deep3DStudio
             _pointCloudToolbar.Visible = settings.ShowPointCloudToolbar;
             _pointCloudToolbar.SetSizeRequest(-1, 35);
             mainVBox.PackStart(_pointCloudToolbar, false, false, 0);
+            UpdatePointCloudVisibilityControls();
 
             // 2d. Georeferencing toolbar
             _georeferenceToolbar = CreateGeoreferenceToolbar();

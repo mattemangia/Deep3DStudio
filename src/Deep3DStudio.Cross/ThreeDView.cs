@@ -620,7 +620,7 @@ namespace Deep3DStudio.Viewport
                     bool bboxOnly = pc.RenderMode == ObjectRenderMode.BoundingBoxOnly;
                     if (!bboxOnly && s.ShowPointCloud)
                     {
-                        DrawPointCloud(pc.Points, pc.Colors, pc.PointSize);
+                        DrawPointCloud(pc);
                     }
                     if (bboxOnly || obj.Selected)
                     {
@@ -770,6 +770,38 @@ namespace Deep3DStudio.Viewport
                 }
                 GL.Vertex3(points[i]);
             }
+            GL.End();
+        }
+
+        private static void DrawPointCloud(PointCloudObject pointCloud)
+        {
+            int totalPoints = pointCloud.Points.Count;
+            int visibleCount = pointCloud.GetVisiblePointCount();
+            if (totalPoints == 0 || visibleCount == 0) return;
+
+            GL.PointSize(pointCloud.PointSize);
+            GL.Begin(PrimitiveType.Points);
+
+            bool hasColors = pointCloud.Colors.Count >= totalPoints;
+            for (int i = 0; i < visibleCount; i++)
+            {
+                int sourceIndex = pointCloud.GetSourcePointIndex(i, visibleCount);
+                if (sourceIndex < 0 || sourceIndex >= totalPoints)
+                    continue;
+
+                if (hasColors)
+                {
+                    var c = pointCloud.Colors[sourceIndex];
+                    GL.Color3(c.X, c.Y, c.Z);
+                }
+                else
+                {
+                    GL.Color3(1.0f, 1.0f, 1.0f);
+                }
+
+                GL.Vertex3(pointCloud.Points[sourceIndex]);
+            }
+
             GL.End();
         }
 

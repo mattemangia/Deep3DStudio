@@ -2,13 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Deep3DStudio.Configuration;
 using Deep3DStudio.Model.SfM;
-using Deep3DStudio.Python;
-using OpenCvSharp;
 using OpenTK.Mathematics;
-using Python.Runtime;
 
 namespace Deep3DStudio.Model.AIModels
 {
@@ -205,6 +203,7 @@ namespace Deep3DStudio.Model.AIModels
         private Wonder3DInference? _wonder3D;
         private UniRigInference? _uniRig;
         private Dust3rInference? _dust3r;
+        private readonly SemaphoreSlim _workflowSemaphore = new(1, 1);
 
         private bool _disposed;
 
@@ -246,6 +245,46 @@ namespace Deep3DStudio.Model.AIModels
         public UniRigInference? UniRig => CreateInferenceWithProgress(ref _uniRig, () => new UniRigInference());
         public Dust3rInference? Dust3r => _dust3r ??= new Dust3rInference();  // Dust3r doesn't inherit from BasePythonInference
 
+        private SceneResult? GenerateFromSingleImageInternal(
+            string imagePath,
+            ImageTo3DModel model,
+            Action<string>? statusCallback = null,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                statusCallback?.Invoke($"Loading image: {Path.GetFileName(imagePath)}...");
+                MeshData? mesh = null;
+
+                switch (model)
+                {
+                    case ImageTo3DModel.TripoSR: mesh = TripoSR?.GenerateFromImage(imagePath, cancellationToken); break;
+                    case ImageTo3DModel.LGM: mesh = LGM?.GenerateFromImage(imagePath, cancellationToken); break;
+                    case ImageTo3DModel.Wonder3D: mesh = Wonder3D?.GenerateFromImage(imagePath, cancellationToken); break;
+                }
+
+                if (mesh != null && mesh.Vertices.Count > 0)
+                {
+                    var res = new SceneResult();
+                    res.Meshes.Add(mesh);
+                    return res;
+                }
+
+                return null;
+            }
+            catch (OperationCanceledException)
+            {
+                statusCallback?.Invoke("Cancelled.");
+                throw;
+            }
+            catch (Exception ex)
+            {
+                statusCallback?.Invoke($"Error: {ex.Message}");
+                return null;
+            }
+        }
+
         public async Task<SceneResult?> GenerateFromSingleImageAsync(
             string imagePath,
             ImageTo3DModel model,
@@ -253,39 +292,8 @@ namespace Deep3DStudio.Model.AIModels
             System.Threading.CancellationToken cancellationToken = default)
         {
             return await Task.Run(() =>
-            {
-                try
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    statusCallback?.Invoke($"Loading image: {Path.GetFileName(imagePath)}...");
-                    MeshData? mesh = null;
-
-                    switch (model)
-                    {
-                        case ImageTo3DModel.TripoSR: mesh = TripoSR?.GenerateFromImage(imagePath, cancellationToken); break;
-                        case ImageTo3DModel.LGM: mesh = LGM?.GenerateFromImage(imagePath, cancellationToken); break;
-                        case ImageTo3DModel.Wonder3D: mesh = Wonder3D?.GenerateFromImage(imagePath, cancellationToken); break;
-                    }
-
-                    if (mesh != null && mesh.Vertices.Count > 0)
-                    {
-                        var res = new SceneResult();
-                        res.Meshes.Add(mesh);
-                        return res;
-                    }
-                    return null;
-                }
-                catch (OperationCanceledException)
-                {
-                    statusCallback?.Invoke("Cancelled.");
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    statusCallback?.Invoke($"Error: {ex.Message}");
-                    return null;
-                }
-            }, cancellationToken);
+                GenerateFromSingleImageInternal(imagePath, model, statusCallback, cancellationToken),
+                cancellationToken);
         }
 
         public async Task<SceneResult?> ExecuteWorkflowAsync(
@@ -295,8 +303,13 @@ namespace Deep3DStudio.Model.AIModels
             Action<string, float>? progressCallback = null,
             System.Threading.CancellationToken cancellationToken = default)
         {
-            return await Task.Run(async () =>
+            bool lockAcquired = false;
+            try
             {
+                await _workflowSemaphore.WaitAsync(cancellationToken);
+                lockAcquired = true;
+                return await Task.Run(async () =>
+                {
                 SceneResult? currentResult = existingScene ?? new SceneResult();
                 float[,,]? voxelGrid = null;
                 Vector3 voxelOrigin = Vector3.Zero;
@@ -313,8 +326,23 @@ namespace Deep3DStudio.Model.AIModels
                     {
                         float clamped = Math.Clamp(stepProgress, 0f, 1f);
                         float overall = Math.Clamp(stepBase + clamped * stepSpan, 0f, 1f);
-                        ProgressUpdated?.Invoke(message, overall);
-                        progressCallback?.Invoke(message, overall);
+                        try
+                        {
+                            ProgressUpdated?.Invoke(message, overall);
+                        }
+                        catch (Exception callbackEx)
+                        {
+                            Console.WriteLine($"[AIModelManager] ProgressUpdated callback failed: {callbackEx.Message}");
+                        }
+
+                        try
+                        {
+                            progressCallback?.Invoke(message, overall);
+                        }
+                        catch (Exception callbackEx)
+                        {
+                            Console.WriteLine($"[AIModelManager] progressCallback failed: {callbackEx.Message}");
+                        }
                     }
 
                     if (cancellationToken.IsCancellationRequested)
@@ -340,15 +368,16 @@ namespace Deep3DStudio.Model.AIModels
                                 // Try Dust3r first - it will attempt to initialize internally
                                 SceneResult? dust3rResult = null;
                                 Action<string, float, string>? dust3rProgress = null;
+                                var dust3r = Dust3r;
                                 try
                                 {
-                                    if (Dust3r != null)
+                                    if (dust3r != null)
                                     {
                                         dust3rProgress = (stage, p, message) => Report($"Dust3r: {message}", p);
-                                        Dust3r.OnProgress += dust3rProgress;
-                                        Dust3r.LogCallback = msg => Report(msg, 0.1f);
+                                        dust3r.OnProgress += dust3rProgress;
+                                        dust3r.LogCallback = msg => Report(msg, 0.1f);
                                     }
-                                    dust3rResult = Dust3r?.ReconstructScene(imagePaths, cancellationToken);
+                                    dust3rResult = dust3r?.ReconstructScene(imagePaths, cancellationToken);
                                 }
                                 catch (OperationCanceledException)
                                 {
@@ -361,9 +390,9 @@ namespace Deep3DStudio.Model.AIModels
                                 }
                                 finally
                                 {
-                                    if (Dust3r != null && dust3rProgress != null)
+                                    if (dust3r != null && dust3rProgress != null)
                                     {
-                                        Dust3r.OnProgress -= dust3rProgress;
+                                        dust3r.OnProgress -= dust3rProgress;
                                     }
                                 }
 
@@ -379,78 +408,21 @@ namespace Deep3DStudio.Model.AIModels
                                     // Fall back to SfM (Feature Matching)
                                     Report("Dust3r not available or failed, trying Feature Matching SfM...", 0.2f);
 
-                                    // Clean up any corrupted state from Dust3r before running SfM
-                                    // This is critical to prevent crashes when falling back from failed Python/native operations
+                                    // Reset only the failed Dust3r subprocess wrapper before SfM fallback.
+                                    // Avoid Python.NET/GC aggressive cleanup here because it can destabilize native runtime state.
                                     try
                                     {
-                                        Report("Cleaning up resources before SfM fallback...", 0.25f);
-
-                                        // Dispose and reset Dust3r instance if it failed
+                                        Report("Resetting Dust3r state before SfM fallback...", 0.25f);
                                         if (_dust3r != null)
                                         {
                                             _dust3r.Dispose();
                                             _dust3r = null;
                                         }
-
-                                        // Force Python cleanup if Python is initialized
-                                        // This releases PyTorch tensors and CUDA memory that could corrupt other native libraries
-                                        if (PythonService.Instance.IsInitialized)
-                                        {
-                                            try
-                                            {
-                                                Report("Releasing Python/GPU resources...", 0.3f);
-                                                using (Py.GIL())
-                                                {
-                                                    // Run aggressive Python cleanup
-                                                    string cleanupScript = @"
-import gc
-gc.collect()
-try:
-    import torch
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        torch.cuda.synchronize()
-except ImportError:
-    pass
-except Exception:
-    pass
-gc.collect()
-";
-                                                    PythonEngine.Exec(cleanupScript);
-                                                }
-                                            }
-                                            catch (Exception pyEx)
-                                            {
-                                                Report($"Warning: Python cleanup had issues: {pyEx.Message}", 0.3f);
-                                            }
-                                        }
-
-                                        // Force garbage collection to clean up any lingering native objects
-                                        GC.Collect();
-                                        GC.WaitForPendingFinalizers();
-                                        GC.Collect();
-
-                                        // Reset OpenCV state to ensure clean initialization for SfM
-                                        // This prevents any corrupted state from affecting OpenCV operations
-                                        try
-                                        {
-                                            Report("Resetting OpenCV state...", 0.4f);
-                                            // Reset OpenCV optimization settings to default
-                                            Cv2.SetUseOptimized(true);
-                                            // Note: OpenCvSharp doesn't expose direct memory pool reset,
-                                            // but creating fresh Mat objects in SfM will use clean allocations
-                                        }
-                                        catch (Exception cvEx)
-                                        {
-                                            Report($"Warning: OpenCV reset had issues: {cvEx.Message}", 0.4f);
-                                        }
-
-                                        // Small delay to ensure native resources are fully released
-                                        System.Threading.Thread.Sleep(200);
+                                        Report("Dust3r state reset complete.", 0.3f);
                                     }
                                     catch (Exception cleanupEx)
                                     {
-                                        Report($"Warning: cleanup before SfM fallback had issues: {cleanupEx.Message}", 0.45f);
+                                        Report($"Warning: Dust3r reset before SfM fallback had issues: {cleanupEx.Message}", 0.3f);
                                     }
 
                                     try
@@ -650,8 +622,11 @@ gc.collect()
 
                                 try
                                 {
-                                    currentResult = await GenerateFromSingleImageAsync(imagePaths[0], ImageTo3DModel.TripoSR,
-                                        msg => Report(msg, 0.1f), cancellationToken);
+                                    currentResult = GenerateFromSingleImageInternal(
+                                        imagePaths[0],
+                                        ImageTo3DModel.TripoSR,
+                                        msg => Report(msg, 0.1f),
+                                        cancellationToken);
                                 }
                                 finally
                                 {
@@ -682,8 +657,11 @@ gc.collect()
 
                                 try
                                 {
-                                    currentResult = await GenerateFromSingleImageAsync(imagePaths[0], ImageTo3DModel.LGM,
-                                        msg => Report(msg, 0.1f), cancellationToken);
+                                    currentResult = GenerateFromSingleImageInternal(
+                                        imagePaths[0],
+                                        ImageTo3DModel.LGM,
+                                        msg => Report(msg, 0.1f),
+                                        cancellationToken);
                                 }
                                 finally
                                 {
@@ -714,8 +692,11 @@ gc.collect()
 
                                 try
                                 {
-                                    currentResult = await GenerateFromSingleImageAsync(imagePaths[0], ImageTo3DModel.Wonder3D,
-                                        msg => Report(msg, 0.1f), cancellationToken);
+                                    currentResult = GenerateFromSingleImageInternal(
+                                        imagePaths[0],
+                                        ImageTo3DModel.Wonder3D,
+                                        msg => Report(msg, 0.1f),
+                                        cancellationToken);
                                 }
                                 finally
                                 {
@@ -936,15 +917,37 @@ gc.collect()
                 if (currentResult != null && currentResult.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
                 {
                     int totalVerts = currentResult.Meshes.Sum(m => m.Vertices.Count);
-                    progressCallback?.Invoke($"Workflow complete. Total: {totalVerts} vertices, {currentResult.Meshes.Count} mesh(es), {currentResult.Poses.Count} pose(s).", 1.0f);
+                    try
+                    {
+                        progressCallback?.Invoke($"Workflow complete. Total: {totalVerts} vertices, {currentResult.Meshes.Count} mesh(es), {currentResult.Poses.Count} pose(s).", 1.0f);
+                    }
+                    catch (Exception callbackEx)
+                    {
+                        Console.WriteLine($"[AIModelManager] progressCallback failed: {callbackEx.Message}");
+                    }
                 }
                 else
                 {
-                    progressCallback?.Invoke("Workflow completed but no geometry was generated.", 1.0f);
+                    try
+                    {
+                        progressCallback?.Invoke("Workflow completed but no geometry was generated.", 1.0f);
+                    }
+                    catch (Exception callbackEx)
+                    {
+                        Console.WriteLine($"[AIModelManager] progressCallback failed: {callbackEx.Message}");
+                    }
                 }
 
                 return currentResult;
-            });
+                }, cancellationToken);
+            }
+            finally
+            {
+                if (lockAcquired)
+                {
+                    _workflowSemaphore.Release();
+                }
+            }
         }
 
         private static (float[,,]? grid, Vector3 origin, float voxelSize) VoxelizePointClouds(List<MeshData> meshes, int maxRes)

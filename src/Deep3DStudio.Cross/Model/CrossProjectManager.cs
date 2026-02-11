@@ -87,6 +87,7 @@ namespace Deep3DStudio.Model
                 var pcDto = new PointCloudObjectDTO
                 {
                     PointSize = pc.PointSize,
+                    VisibleFraction = pc.VisibleFraction,
                     Points = FlattenVector3(pc.Points),
                     Colors = FlattenVector3(pc.Colors),
                     Normals = FlattenVector3(pc.Normals)
@@ -182,7 +183,8 @@ namespace Deep3DStudio.Model
                     Points = UnflattenVector3(pcDto.Points),
                     Colors = UnflattenVector3(pcDto.Colors),
                     Normals = UnflattenVector3(pcDto.Normals),
-                    PointSize = pcDto.PointSize
+                    PointSize = pcDto.PointSize,
+                    VisibleFraction = pcDto.VisibleFraction
                 };
                 pc.UpdateBounds();
                 obj = pc;

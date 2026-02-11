@@ -371,15 +371,24 @@ namespace Deep3DStudio
 
         private async void RunAIWorkflowAsync(AIModels.WorkflowPipeline pipeline)
         {
-            // Process pending GTK events before starting to ensure clean state
-            while (Application.EventsPending()) Application.RunIteration();
+            if (_workflowInProgress)
+            {
+                _statusLabel.Text = "AI workflow already in progress.";
+                return;
+            }
 
-            // Start the progress dialog
-            UI.ProgressDialog.Instance.Start($"Running {pipeline.Name}...", UI.OperationType.Processing);
-            var cancellationToken = UI.ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
+            _workflowInProgress = true;
+            var cancellationToken = System.Threading.CancellationToken.None;
 
             try
             {
+                // Process pending GTK events before starting to ensure clean state
+                while (Application.EventsPending()) Application.RunIteration();
+
+                // Start the progress dialog
+                UI.ProgressDialog.Instance.Start($"Running {pipeline.Name}...", UI.OperationType.Processing);
+                cancellationToken = UI.ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
+
                 var manager = AIModels.AIModelManager.Instance;
                 var result = await manager.ExecuteWorkflowAsync(
                     pipeline,
@@ -401,12 +410,14 @@ namespace Deep3DStudio
 
                 if (result != null)
                 {
-                    bool hasGeometry = result.Meshes.Any(m => m.Vertices.Count > 0);
-                    if (!hasGeometry)
+                    bool hasPointCloud = HasPointCloudData(result);
+                    bool hasTriangulatedMesh = HasTriangulatedMesh(result);
+                    if (!hasPointCloud)
                     {
                         Application.Invoke((s, e) =>
                         {
-                            UI.ProgressDialog.Instance.Fail(new Exception("Workflow completed but no geometry was generated."));
+                            UI.ProgressDialog.Instance.Fail(new Exception(
+                                $"Workflow completed but no geometry was generated. {DescribeGeometry(result)}"));
                             _statusLabel.Text = $"Workflow '{pipeline.Name}' failed.";
                         });
                         return;
@@ -414,7 +425,14 @@ namespace Deep3DStudio
                     Application.Invoke((s, e) =>
                     {
                         _lastSceneResult = result;
-                        UpdateSceneFromResult(result);
+                        if (hasTriangulatedMesh)
+                        {
+                            UpdateSceneFromResult(result);
+                        }
+                        else
+                        {
+                            ApplyPointCloudResultToScene(result);
+                        }
                         if (cancellationToken.IsCancellationRequested)
                         {
                             _statusLabel.Text = $"Workflow '{pipeline.Name}' cancelled.";
@@ -449,9 +467,12 @@ namespace Deep3DStudio
                     _statusLabel.Text = "Workflow failed.";
                 });
             }
-
-            // Final event processing to ensure all UI updates are applied
-            while (Application.EventsPending()) Application.RunIteration();
+            finally
+            {
+                _workflowInProgress = false;
+                // Final event processing to ensure all UI updates are applied
+                while (Application.EventsPending()) Application.RunIteration();
+            }
         }
 
         private void UpdateSceneFromResult(SceneResult result)
@@ -478,6 +499,12 @@ namespace Deep3DStudio
             if (step == AIModels.WorkflowStep.PoissonReconstruction)
             {
                 await RunMeshing();
+                return;
+            }
+
+            if (_workflowInProgress)
+            {
+                _statusLabel.Text = "AI workflow already in progress.";
                 return;
             }
 
@@ -529,6 +556,7 @@ namespace Deep3DStudio
             // Start the progress dialog
             UI.ProgressDialog.Instance.Start($"Running {stepName}...", UI.OperationType.Processing);
             var cancellationToken = UI.ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
+            _workflowInProgress = true;
 
             try
             {
@@ -560,12 +588,14 @@ namespace Deep3DStudio
 
                 if (result != null)
                 {
-                    bool hasGeometry = result.Meshes.Any(m => m.Vertices.Count > 0);
-                    if (!hasGeometry)
+                    bool hasPointCloud = HasPointCloudData(result);
+                    bool hasTriangulatedMesh = HasTriangulatedMesh(result);
+                    if (!hasPointCloud)
                     {
                         Application.Invoke((s, e) =>
                         {
-                            UI.ProgressDialog.Instance.Fail(new Exception($"{stepName} completed but no geometry was generated."));
+                            UI.ProgressDialog.Instance.Fail(new Exception(
+                                $"{stepName} completed but no geometry was generated. {DescribeGeometry(result)}"));
                             _statusLabel.Text = $"{stepName} failed.";
                         });
                         return;
@@ -573,10 +603,13 @@ namespace Deep3DStudio
                     Application.Invoke((s, e) =>
                     {
                         _lastSceneResult = result;
-                        if (step == AIModels.WorkflowStep.Dust3rReconstruction ||
+                        bool isReconstructionStep =
+                            step == AIModels.WorkflowStep.Dust3rReconstruction ||
                             step == AIModels.WorkflowStep.Mast3rReconstruction ||
                             step == AIModels.WorkflowStep.Must3rReconstruction ||
-                            step == AIModels.WorkflowStep.SfMReconstruction)
+                            step == AIModels.WorkflowStep.SfMReconstruction;
+
+                        if (isReconstructionStep || !hasTriangulatedMesh)
                         {
                             ApplyPointCloudResultToScene(result);
                         }
@@ -618,9 +651,37 @@ namespace Deep3DStudio
                     _statusLabel.Text = $"{stepName} failed.";
                 });
             }
+            finally
+            {
+                _workflowInProgress = false;
+                // Final event processing to ensure all UI updates are applied
+                while (Application.EventsPending()) Application.RunIteration();
+            }
+        }
 
-            // Final event processing to ensure all UI updates are applied
-            while (Application.EventsPending()) Application.RunIteration();
+        /// <summary>
+        /// Returns true when at least one output mesh has valid triangle indices.
+        /// </summary>
+        private static bool HasTriangulatedMesh(SceneResult result)
+        {
+            return result.Meshes.Any(m => m.Vertices.Count > 0 && m.Indices.Count >= 3);
+        }
+
+        /// <summary>
+        /// Returns true when at least one output contains points.
+        /// </summary>
+        private static bool HasPointCloudData(SceneResult result)
+        {
+            return result.Meshes.Any(m => m.Vertices.Count > 0);
+        }
+
+        private static string DescribeGeometry(SceneResult result)
+        {
+            int meshCount = result.Meshes.Count;
+            int vertexCount = result.Meshes.Sum(m => m.Vertices.Count);
+            int triangleMeshCount = result.Meshes.Count(m => m.Vertices.Count > 0 && m.Indices.Count >= 3);
+            int poseCount = result.Poses.Count;
+            return $"meshes={meshCount}, vertices={vertexCount}, triangleMeshes={triangleMeshCount}, poses={poseCount}";
         }
 
         /// <summary>

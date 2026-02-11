@@ -385,9 +385,21 @@ namespace Deep3DStudio
                     return;
                 }
 
+                if (!isLGM)
+                {
+                    int selectedTotalPoints = selectedPointClouds.Sum(pc => pc.PointCount);
+                    int selectedVisiblePoints = selectedPointClouds.Sum(pc => pc.VisiblePointCount);
+                    if (selectedVisiblePoints == 0 && selectedTotalPoints > 0)
+                    {
+                        ShowMessage("No Visible Points", "All selected point clouds currently expose 0 visible points. Increase the Visible slider before meshing.");
+                        return;
+                    }
+                }
+
                 // Log point cloud stats
                 int totalPoints = selectedPointClouds.Sum(pc => pc.PointCount);
-                Console.WriteLine($"[Meshing] Total points to mesh: {totalPoints}");
+                int visiblePoints = selectedPointClouds.Sum(pc => pc.VisiblePointCount);
+                Console.WriteLine($"[Meshing] Total points to mesh: {visiblePoints}/{totalPoints} visible");
 
                 _statusLabel.Text = $"Meshing ({workflow})...";
                 while (Application.EventsPending()) Application.RunIteration();
@@ -481,9 +493,14 @@ namespace Deep3DStudio
         {
             Console.WriteLine($"[Meshing] GenerateMeshFromPointClouds: {pointClouds.Count} point clouds, algorithm={algorithm}, maxRes={maxRes}");
 
-            var meshes = pointClouds.Select(ToMeshData).ToList();
+            var meshes = pointClouds.Select(pc => ToMeshData(pc, visibleOnly: true)).ToList();
             int totalVerts = meshes.Sum(m => m.Vertices.Count);
             Console.WriteLine($"[Meshing] Total vertices from point clouds: {totalVerts}");
+            if (totalVerts == 0)
+            {
+                Console.WriteLine("[Meshing] No visible points available for meshing.");
+                return new MeshData();
+            }
 
             var (grid, min, size) = VoxelizePoints(meshes, maxRes);
             int gridX = grid.GetLength(0);
@@ -539,27 +556,9 @@ namespace Deep3DStudio
             return inputMesh;
         }
 
-        private MeshData ToMeshData(PointCloudObject pointCloud)
+        private MeshData ToMeshData(PointCloudObject pointCloud, bool visibleOnly = false)
         {
-            var mesh = new MeshData();
-            mesh.Vertices.AddRange(pointCloud.Points);
-
-            if (pointCloud.Colors.Count >= pointCloud.Points.Count)
-            {
-                mesh.Colors.AddRange(pointCloud.Colors.Take(pointCloud.Points.Count));
-            }
-            else
-            {
-                for (int i = 0; i < pointCloud.Points.Count; i++)
-                {
-                    if (i < pointCloud.Colors.Count)
-                        mesh.Colors.Add(pointCloud.Colors[i]);
-                    else
-                        mesh.Colors.Add(new OpenTK.Mathematics.Vector3(1f, 1f, 1f));
-                }
-            }
-
-            return mesh;
+            return PointCloudOperations.ToMeshData(pointCloud, visibleOnly);
         }
 
         private async Task<bool> RunAIMeshingAsync(MeshingAlgorithm algorithm, string? contextLabel = null)

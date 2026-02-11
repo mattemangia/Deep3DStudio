@@ -680,6 +680,59 @@ namespace Deep3DStudio
             return _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
         }
 
+        private void OnPointCloudVisibilitySliderChanged(object? sender, EventArgs e)
+        {
+            if (_updatingPointCloudVisibilityControls || _pcVisibilityScale == null)
+                return;
+
+            var selected = GetSelectedPointClouds();
+            if (selected.Count == 0)
+                return;
+
+            float fraction = Math.Clamp((float)(_pcVisibilityScale.Value / 100.0), 0.0f, 1.0f);
+            foreach (var pc in selected)
+                pc.VisibleFraction = fraction;
+
+            UpdatePointCloudVisibilityControls();
+            _viewport.QueueDraw();
+
+            int visible = selected.Sum(pc => pc.VisiblePointCount);
+            int total = selected.Sum(pc => pc.PointCount);
+            _statusLabel.Text = $"Visible points: {visible:N0}/{total:N0} ({fraction * 100f:F1}%)";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void UpdatePointCloudVisibilityControls()
+        {
+            if (_pcVisibilityScale == null || _pcVisibilityLabel == null)
+                return;
+
+            var selected = GetSelectedPointClouds();
+            _updatingPointCloudVisibilityControls = true;
+            try
+            {
+                if (selected.Count == 0)
+                {
+                    _pcVisibilityScale.Sensitive = false;
+                    _pcVisibilityLabel.Text = "--";
+                    return;
+                }
+
+                _pcVisibilityScale.Sensitive = true;
+                float avgFraction = selected.Average(pc => pc.VisibleFraction);
+                _pcVisibilityScale.Value = Math.Round(avgFraction * 100.0f, 1);
+
+                int visible = selected.Sum(pc => pc.VisiblePointCount);
+                int total = selected.Sum(pc => pc.PointCount);
+                _pcVisibilityLabel.Text = $"{avgFraction * 100f:F1}% ({visible:N0}/{total:N0})";
+            }
+            finally
+            {
+                _updatingPointCloudVisibilityControls = false;
+            }
+        }
+
         private void OnPointCloudVoxelDownsampleClicked(object? sender, EventArgs e)
         {
             var selected = GetSelectedPointClouds();
@@ -694,6 +747,7 @@ namespace Deep3DStudio
                 removed += PointCloudOperations.VoxelDownsample(pc, _pcVoxelSize);
 
             _sceneTreeView.RefreshTree();
+            UpdatePointCloudVisibilityControls();
             _viewport.QueueDraw();
             _statusLabel.Text = $"Voxel downsample complete. Removed {removed:N0} points.";
             _isDirty = true;
@@ -724,6 +778,7 @@ namespace Deep3DStudio
                 removed += PointCloudOperations.RemoveStatisticalOutliers(pc, _pcOutlierK, _pcOutlierStdRatio);
 
             _sceneTreeView.RefreshTree();
+            UpdatePointCloudVisibilityControls();
             _viewport.QueueDraw();
             _statusLabel.Text = $"Outlier filter complete. Removed {removed:N0} points.";
             _isDirty = true;
@@ -763,6 +818,7 @@ namespace Deep3DStudio
                 removed += PointCloudOperations.RemoveDuplicates(pc, _pcDuplicateThreshold);
 
             _sceneTreeView.RefreshTree();
+            UpdatePointCloudVisibilityControls();
             _viewport.QueueDraw();
             _statusLabel.Text = $"Duplicate removal complete. Removed {removed:N0} points.";
             _isDirty = true;
@@ -792,6 +848,7 @@ namespace Deep3DStudio
                 PointCloudOperations.EstimateNormals(pc, _pcNormalK);
 
             _sceneTreeView.RefreshTree();
+            UpdatePointCloudVisibilityControls();
             _viewport.QueueDraw();
             _statusLabel.Text = $"Estimated normals for {selected.Count} point cloud(s).";
             _isDirty = true;
@@ -822,6 +879,7 @@ namespace Deep3DStudio
                 removed += PointCloudOperations.PassThroughAxis(pc, _pcPassAxis, _pcPassMin, _pcPassMax);
 
             _sceneTreeView.RefreshTree();
+            UpdatePointCloudVisibilityControls();
             _viewport.QueueDraw();
             _statusLabel.Text = $"Pass-through complete. Removed {removed:N0} points.";
             _isDirty = true;
@@ -880,6 +938,7 @@ namespace Deep3DStudio
                 removed += PointCloudOperations.RadiusCrop(pc, _pcRadiusCenter, _pcRadius);
 
             _sceneTreeView.RefreshTree();
+            UpdatePointCloudVisibilityControls();
             _viewport.QueueDraw();
             _statusLabel.Text = $"Radius crop complete. Removed {removed:N0} points.";
             _isDirty = true;
@@ -921,13 +980,23 @@ namespace Deep3DStudio
                 return;
             }
 
+            int before = selected.Sum(pc => pc.PointCount);
             int added = 0;
             foreach (var pc in selected)
                 added += PointCloudOperations.Densify(pc, _pcDenseRadius, _pcDensePointsPerSeed);
+            int after = selected.Sum(pc => pc.PointCount);
 
             _sceneTreeView.RefreshTree();
+            UpdatePointCloudVisibilityControls();
             _viewport.QueueDraw();
-            _statusLabel.Text = $"Dense cloud complete. Added {added:N0} points.";
+            if (added > 0)
+            {
+                _statusLabel.Text = $"Dense cloud complete. Added {added:N0} points ({before:N0} -> {after:N0}).";
+            }
+            else
+            {
+                _statusLabel.Text = $"Dense cloud: no points added. Increase radius (current {_pcDenseRadius:F4}) or reduce filtering.";
+            }
             _isDirty = true;
             UpdateTitle();
         }

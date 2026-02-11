@@ -545,6 +545,31 @@ namespace Deep3DStudio
                 OnAlignClicked, null);
             toolbar.Insert(alignBtn, -1);
 
+            toolbar.Insert(new SeparatorToolItem(), -1);
+
+            var visibilityItem = new ToolItem();
+            var visibilityBox = new Box(Orientation.Horizontal, 4);
+            visibilityBox.PackStart(new Label("Visible"), false, false, 0);
+
+            _pcVisibilityScale = new Scale(Orientation.Horizontal, 0, 100, 1)
+            {
+                DrawValue = false,
+                Value = 100,
+                WidthRequest = 140,
+                Sensitive = false
+            };
+            _pcVisibilityScale.ValueChanged += OnPointCloudVisibilitySliderChanged;
+            visibilityBox.PackStart(_pcVisibilityScale, false, false, 0);
+
+            _pcVisibilityLabel = new Label("--")
+            {
+                WidthRequest = 120
+            };
+            visibilityBox.PackStart(_pcVisibilityLabel, false, false, 0);
+
+            visibilityItem.Add(visibilityBox);
+            toolbar.Insert(visibilityItem, -1);
+
             return toolbar;
         }
 

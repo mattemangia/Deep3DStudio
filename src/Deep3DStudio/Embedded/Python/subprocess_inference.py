@@ -224,6 +224,63 @@ def _sanitize_points_colors(points, colors):
         colors = colors[finite]
     return points, colors
 
+def _build_confidence_mask(confidence, target_shape, default_threshold=1.0, min_points=3000, max_points=120000):
+    """Build a confidence mask without flooding low-confidence outliers."""
+    import numpy as np
+
+    conf = np.asarray(confidence)
+    if conf.ndim >= 3:
+        conf = conf[0]
+
+    if conf.shape != target_shape:
+        return np.ones(target_shape, dtype=bool)
+
+    finite = np.isfinite(conf)
+    if not finite.any():
+        return np.ones(target_shape, dtype=bool)
+
+    mask = finite & (conf >= float(default_threshold))
+    if int(mask.sum()) < min_points:
+        values = conf[finite]
+        keep = min(int(min_points), int(values.size))
+        if keep > 0:
+            if keep >= int(values.size):
+                threshold = float(np.min(values))
+            else:
+                threshold = float(np.partition(values, int(values.size) - keep)[int(values.size) - keep])
+            mask = finite & (conf >= threshold)
+
+    if max_points is not None and int(mask.sum()) > int(max_points):
+        ys, xs = np.where(mask)
+        chosen = np.random.choice(len(ys), int(max_points), replace=False)
+        reduced = np.zeros_like(mask, dtype=bool)
+        reduced[ys[chosen], xs[chosen]] = True
+        mask = reduced
+
+    return mask
+
+def _ensure_dense_mask(mask, points, min_points=3000):
+    """Guarantee a valid mask shape and fallback to all finite points when too sparse."""
+    import numpy as np
+
+    pts = np.asarray(points)
+    if pts.ndim < 3 or pts.shape[-1] < 3:
+        return np.ones(pts.shape[:2], dtype=bool)
+
+    valid = np.isfinite(pts[..., :3]).all(axis=2)
+    if mask is None:
+        out = valid
+    else:
+        out = np.asarray(mask, dtype=bool)
+        if out.shape != valid.shape:
+            out = valid
+        else:
+            out = out & valid
+
+    if int(out.sum()) < int(min_points):
+        out = valid
+    return out
+
 def _sanitize_for_json(obj):
     import math
     if isinstance(obj, float):
@@ -1088,12 +1145,13 @@ def infer_must3r(images_data, use_retrieval=True):
                     img_resized = img
                 img_np = np.array(img_resized.convert('RGB')) / 255.0
 
-                # Create mask from confidence or use all points
+                # Build an adaptive confidence mask to avoid overly sparse outputs.
                 if conf is not None:
                     conf_np = conf.cpu().numpy() if hasattr(conf, 'cpu') else conf
-                    mask = conf_np > 1.5  # confidence threshold
+                    mask = _build_confidence_mask(conf_np, pts.shape[:2], default_threshold=1.0, min_points=3000, max_points=120000)
                 else:
                     mask = np.ones(pts.shape[:2], dtype=bool)
+                mask = _ensure_dense_mask(mask, pts, min_points=3000)
 
                 valid_pts = pts[mask].reshape(-1, 3)
                 valid_colors = img_np[mask].reshape(-1, 3)
@@ -1204,11 +1262,10 @@ def infer_stereo_model(model_name, images_data, use_retrieval=True):
                 mask = np.ones(pts_np.shape[:2], dtype=bool)
                 if conf_np is not None:
                     try:
-                        mask = conf_np > 1.2
+                        mask = _build_confidence_mask(conf_np, pts_np.shape[:2], default_threshold=0.9, min_points=3000, max_points=120000)
                     except Exception:
                         mask = np.ones(pts_np.shape[:2], dtype=bool)
-                if mask.shape != pts_np.shape[:2]:
-                    mask = np.ones(pts_np.shape[:2], dtype=bool)
+                mask = _ensure_dense_mask(mask, pts_np, min_points=3000)
 
                 img = pil_images[0]
                 h, w = pts_np.shape[:2]
@@ -1261,8 +1318,7 @@ def infer_stereo_model(model_name, images_data, use_retrieval=True):
                         img = img.resize((w, h), Image.LANCZOS)
                     img_np = np.array(img) / 255.0
 
-                    if mask.shape != pts.shape[:2]:
-                        mask = np.ones(pts.shape[:2], dtype=bool)
+                    mask = _ensure_dense_mask(mask, pts, min_points=3000)
 
                     valid_pts = pts[mask]
                     valid_colors = img_np[mask]

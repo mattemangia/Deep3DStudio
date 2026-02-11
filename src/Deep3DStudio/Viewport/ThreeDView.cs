@@ -1027,7 +1027,8 @@ namespace Deep3DStudio.Viewport
 
         private void DrawPointCloudObject(PointCloudObject pc)
         {
-            if (pc.Points.Count == 0) return;
+            int visibleCount = pc.GetVisiblePointCount();
+            if (visibleCount == 0) return;
 
             GL.PointSize(pc.PointSize);
 
@@ -1045,11 +1046,15 @@ namespace Deep3DStudio.Viewport
 
             bool hasColors = pc.Colors.Count >= pc.Points.Count;
 
-            for (int i = 0; i < pc.Points.Count; i++)
+            for (int i = 0; i < visibleCount; i++)
             {
+                int sourceIndex = pc.GetSourcePointIndex(i, visibleCount);
+                if (sourceIndex < 0 || sourceIndex >= pc.Points.Count)
+                    continue;
+
                 if (hasColors)
                 {
-                    var c = pc.Colors[i];
+                    var c = pc.Colors[sourceIndex];
                     GL.Color3(c.X, c.Y, c.Z);
                 }
                 else
@@ -1057,7 +1062,7 @@ namespace Deep3DStudio.Viewport
                     // Default white color if no colors available
                     GL.Color3(1.0f, 1.0f, 1.0f);
                 }
-                GL.Vertex3(pc.Points[i]);
+                GL.Vertex3(pc.Points[sourceIndex]);
             }
 
             GL.End();
@@ -1065,8 +1070,12 @@ namespace Deep3DStudio.Viewport
 
         private void DrawPointCloudModern(PointCloudObject pc)
         {
+            int visibleCount = pc.GetVisiblePointCount();
+            if (visibleCount == 0)
+                return;
+
             // Create or update VAO/VBO for this point cloud
-            if (!_pointCloudBuffers.TryGetValue(pc.Id, out var buffers) || buffers.count != pc.Points.Count)
+            if (!_pointCloudBuffers.TryGetValue(pc.Id, out var buffers) || buffers.count != visibleCount)
             {
                 // Delete old buffers if they exist
                 if (buffers.vao != 0)
@@ -1076,19 +1085,23 @@ namespace Deep3DStudio.Viewport
                 }
 
                 // Create interleaved buffer: position (vec3) + color (vec3)
-                var data = new float[pc.Points.Count * 6];
+                var data = new float[visibleCount * 6];
                 bool hasColors = pc.Colors.Count >= pc.Points.Count;
 
-                for (int i = 0; i < pc.Points.Count; i++)
+                for (int i = 0; i < visibleCount; i++)
                 {
-                    var p = pc.Points[i];
+                    int sourceIndex = pc.GetSourcePointIndex(i, visibleCount);
+                    if (sourceIndex < 0 || sourceIndex >= pc.Points.Count)
+                        continue;
+
+                    var p = pc.Points[sourceIndex];
                     data[i * 6 + 0] = p.X;
                     data[i * 6 + 1] = p.Y;
                     data[i * 6 + 2] = p.Z;
 
                     if (hasColors)
                     {
-                        var c = pc.Colors[i];
+                        var c = pc.Colors[sourceIndex];
                         data[i * 6 + 3] = c.X;
                         data[i * 6 + 4] = c.Y;
                         data[i * 6 + 5] = c.Z;
@@ -1118,15 +1131,15 @@ namespace Deep3DStudio.Viewport
 
                 GL.BindVertexArray(0);
 
-                _pointCloudBuffers[pc.Id] = (vao, vbo, pc.Points.Count);
-                buffers = (vao, vbo, pc.Points.Count);
+                _pointCloudBuffers[pc.Id] = (vao, vbo, visibleCount);
+                buffers = (vao, vbo, visibleCount);
 
                 // Log sample data for debugging
-                Console.WriteLine($"Created modern GL buffers for point cloud {pc.Id}: {pc.Points.Count} points");
-                if (pc.Points.Count > 0)
+                Console.WriteLine($"Created modern GL buffers for point cloud {pc.Id}: {visibleCount}/{pc.Points.Count} visible points");
+                if (visibleCount > 0)
                 {
                     Console.WriteLine($"  Sample point 0: pos=({data[0]:F3},{data[1]:F3},{data[2]:F3}) color=({data[3]:F2},{data[4]:F2},{data[5]:F2})");
-                    if (pc.Points.Count > 100)
+                    if (visibleCount > 100)
                     {
                         int midIdx = 100 * 6;
                         Console.WriteLine($"  Sample point 100: pos=({data[midIdx]:F3},{data[midIdx+1]:F3},{data[midIdx+2]:F3}) color=({data[midIdx+3]:F2},{data[midIdx+4]:F2},{data[midIdx+5]:F2})");

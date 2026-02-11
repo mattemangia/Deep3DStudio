@@ -39,6 +39,8 @@ namespace Deep3DStudio
             {
                 _statusLabel.Text += $" ({cam.ImageWidth}x{cam.ImageHeight})";
             }
+
+            UpdatePointCloudVisibilityControls();
         }
 
         private void OnSceneObjectDoubleClicked(object? sender, SceneObject obj)
@@ -205,6 +207,8 @@ namespace Deep3DStudio
             {
                 _sceneTreeView.SelectObject(obj);
             }
+
+            UpdatePointCloudVisibilityControls();
         }
 
         private void ApplySceneTransformFromDialog(

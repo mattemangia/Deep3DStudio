@@ -195,7 +195,14 @@ namespace Deep3DStudio.Model
                 // Convert results
                 for (int i = 0; i < meshes.Count; i++)
                 {
-                    result.Meshes.Add(meshes[i]);
+                    var mesh = meshes[i];
+                    if (ReconstructionPoseNormalizer.TryApplyPoseIfLikelyLocal(mesh, out float localScore, out float worldScore))
+                    {
+                        Log($"[Mast3r] Applied pose to point cloud {i}: localScore={localScore:F2}, worldScore={worldScore:F2}");
+                    }
+                    ReconstructionPoseNormalizer.ConvertOpenCvConventionToViewport(mesh);
+
+                    result.Meshes.Add(mesh);
 
                     if (i < validImagePaths.Count)
                     {
@@ -205,7 +212,7 @@ namespace Deep3DStudio.Model
                             ImagePath = validImagePaths[i]
                         };
 
-                        if (meshes[i].Pose is Matrix4 poseMatrix)
+                        if (mesh.Pose is Matrix4 poseMatrix)
                         {
                             pose.CameraToWorld = poseMatrix;
                             try

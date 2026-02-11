@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using OpenTK.Mathematics;
 using Deep3DStudio.Model;
 
@@ -76,6 +77,25 @@ namespace Deep3DStudio.Scene
             var sourcePoints = pointCloud.Points.ToArray();
             var sourceColors = pointCloud.Colors.Count == sourcePoints.Length ? pointCloud.Colors.ToArray() : null;
             var sourceNormals = pointCloud.Normals.Count == sourcePoints.Length ? pointCloud.Normals.ToArray() : null;
+
+            // Auto-scale radius to scene size so dense cloud works on large-coordinate reconstructions.
+            var min = new Vector3(float.MaxValue);
+            var max = new Vector3(float.MinValue);
+            for (int i = 0; i < sourcePoints.Length; i++)
+            {
+                min = Vector3.ComponentMin(min, sourcePoints[i]);
+                max = Vector3.ComponentMax(max, sourcePoints[i]);
+            }
+
+            float diagonal = (max - min).Length;
+            if (diagonal > 0f)
+            {
+                float adaptiveMinRadius = Math.Max(0.0001f, diagonal * 0.005f);
+                if (neighborRadius < adaptiveMinRadius)
+                {
+                    neighborRadius = adaptiveMinRadius;
+                }
+            }
 
             float cellSize = neighborRadius;
             var buckets = new Dictionary<(int x, int y, int z), List<int>>();
@@ -201,6 +221,53 @@ namespace Deep3DStudio.Scene
                     ? pointCloud.Normals.ConvertAll(ToNumerics).ToArray()
                     : null
             };
+        }
+
+        public static MeshData ToMeshData(PointCloudObject pointCloud, bool visibleOnly = false)
+        {
+            var mesh = new MeshData();
+            int totalPoints = pointCloud.Points.Count;
+            if (totalPoints == 0)
+                return mesh;
+
+            int visibleCount = visibleOnly ? pointCloud.GetVisiblePointCount() : totalPoints;
+            if (visibleCount <= 0)
+                return mesh;
+
+            bool fullCloud = visibleCount >= totalPoints;
+            bool hasFullColors = pointCloud.Colors.Count >= totalPoints;
+
+            if (fullCloud)
+            {
+                mesh.Vertices.AddRange(pointCloud.Points);
+                if (hasFullColors)
+                {
+                    mesh.Colors.AddRange(pointCloud.Colors.Take(totalPoints));
+                }
+                else
+                {
+                    for (int i = 0; i < totalPoints; i++)
+                    {
+                        if (i < pointCloud.Colors.Count) mesh.Colors.Add(pointCloud.Colors[i]);
+                        else mesh.Colors.Add(new Vector3(1f, 1f, 1f));
+                    }
+                }
+
+                return mesh;
+            }
+
+            for (int i = 0; i < visibleCount; i++)
+            {
+                int sourceIndex = pointCloud.GetSourcePointIndex(i, visibleCount);
+                if (sourceIndex < 0 || sourceIndex >= totalPoints)
+                    continue;
+
+                mesh.Vertices.Add(pointCloud.Points[sourceIndex]);
+                if (sourceIndex < pointCloud.Colors.Count) mesh.Colors.Add(pointCloud.Colors[sourceIndex]);
+                else mesh.Colors.Add(new Vector3(1f, 1f, 1f));
+            }
+
+            return mesh;
         }
 
         public static void ApplyData(PointCloudObject pointCloud, PointCloudData data)

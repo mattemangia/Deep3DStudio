@@ -343,12 +343,20 @@ namespace Deep3DStudio.Scene
     /// </summary>
     public class PointCloudObject : SceneObject
     {
+        private float _visibleFraction = 1.0f;
+
         public List<Vector3> Points { get; set; } = new List<Vector3>();
         public List<Vector3> Colors { get; set; } = new List<Vector3>();
         public List<Vector3> Normals { get; set; } = new List<Vector3>();
         public float PointSize { get; set; } = 8.0f;
+        public float VisibleFraction
+        {
+            get => _visibleFraction;
+            set => _visibleFraction = Math.Clamp(value, 0.0f, 1.0f);
+        }
 
         public int PointCount => Points.Count;
+        public int VisiblePointCount => GetVisiblePointCount();
 
         public PointCloudObject(string name) : base(name)
         {
@@ -391,12 +399,44 @@ namespace Deep3DStudio.Scene
                 Colors = new List<Vector3>(Colors),
                 Normals = new List<Vector3>(Normals),
                 PointSize = PointSize,
+                VisibleFraction = VisibleFraction,
                 Position = Position,
                 Rotation = Rotation,
                 Scale = Scale,
                 Visible = Visible,
                 RenderMode = RenderMode
             };
+        }
+
+        public int GetVisiblePointCount()
+        {
+            if (Points.Count == 0)
+                return 0;
+
+            if (VisibleFraction >= 0.9999f)
+                return Points.Count;
+
+            if (VisibleFraction <= 0.0f)
+                return 0;
+
+            int count = (int)MathF.Round(Points.Count * VisibleFraction);
+            return Math.Clamp(count, 1, Points.Count);
+        }
+
+        public int GetSourcePointIndex(int visibleIndex, int visibleCount)
+        {
+            if (Points.Count == 0)
+                return -1;
+
+            if (visibleCount <= 0)
+                return -1;
+
+            if (visibleCount >= Points.Count)
+                return Math.Clamp(visibleIndex, 0, Points.Count - 1);
+
+            long scaled = (long)visibleIndex * Points.Count;
+            int sourceIndex = (int)(scaled / visibleCount);
+            return Math.Clamp(sourceIndex, 0, Points.Count - 1);
         }
     }
 
