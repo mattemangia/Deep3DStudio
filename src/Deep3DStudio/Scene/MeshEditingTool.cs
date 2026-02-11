@@ -15,7 +15,10 @@ namespace Deep3DStudio.Scene
         Delete,
         Paint,
         Weld,
-        Extrude
+        Extrude,
+        Inset,
+        MoveVertices,
+        Bridge
     }
 
     /// <summary>
@@ -611,6 +614,235 @@ namespace Deep3DStudio.Scene
             meshData.Colors = uniqueColors;
             meshData.UVs = uniqueUVs;
             meshObj.UpdateBounds();
+        }
+
+        /// <summary>
+        /// Moves all vertices referenced by selected triangles.
+        /// </summary>
+        public int MoveSelectedVertices(Vector3 delta)
+        {
+            int movedVertices = 0;
+            var byMesh = _selectedTriangles.GroupBy(x => x.mesh);
+
+            foreach (var group in byMesh)
+            {
+                var meshObj = group.Key;
+                var mesh = meshObj.MeshData;
+                if (mesh == null)
+                    continue;
+
+                var selectedVerts = new HashSet<int>();
+                foreach (var (_, triIdx) in group)
+                {
+                    int baseIdx = triIdx * 3;
+                    if (baseIdx + 2 >= mesh.Indices.Count)
+                        continue;
+
+                    selectedVerts.Add(mesh.Indices[baseIdx]);
+                    selectedVerts.Add(mesh.Indices[baseIdx + 1]);
+                    selectedVerts.Add(mesh.Indices[baseIdx + 2]);
+                }
+
+                foreach (int vIdx in selectedVerts)
+                {
+                    if (vIdx >= 0 && vIdx < mesh.Vertices.Count)
+                    {
+                        mesh.Vertices[vIdx] += delta;
+                        movedVertices++;
+                    }
+                }
+
+                meshObj.UpdateBounds();
+                MeshModified?.Invoke(this, meshObj);
+            }
+
+            return movedVertices;
+        }
+
+        /// <summary>
+        /// Extrudes selected triangles along their local face normal.
+        /// </summary>
+        public void ExtrudeSelectedTriangles(float distance = 0.05f)
+        {
+            if (_selectedTriangles.Count == 0)
+                return;
+
+            var byMesh = _selectedTriangles.GroupBy(x => x.mesh);
+            foreach (var group in byMesh)
+            {
+                var meshObj = group.Key;
+                var mesh = meshObj.MeshData;
+                if (mesh == null)
+                    continue;
+
+                var selection = group.Select(x => x.triangleIndex).Distinct().ToList();
+                foreach (int triIdx in selection)
+                {
+                    int baseIdx = triIdx * 3;
+                    if (baseIdx + 2 >= mesh.Indices.Count)
+                        continue;
+
+                    int i0 = mesh.Indices[baseIdx];
+                    int i1 = mesh.Indices[baseIdx + 1];
+                    int i2 = mesh.Indices[baseIdx + 2];
+                    if (i0 >= mesh.Vertices.Count || i1 >= mesh.Vertices.Count || i2 >= mesh.Vertices.Count)
+                        continue;
+
+                    var v0 = mesh.Vertices[i0];
+                    var v1 = mesh.Vertices[i1];
+                    var v2 = mesh.Vertices[i2];
+
+                    var normal = Vector3.Cross(v1 - v0, v2 - v0);
+                    if (normal.LengthSquared < 1e-10f)
+                        continue;
+                    normal.Normalize();
+
+                    int ni0 = AddExtrudedVertex(mesh, i0, v0 + normal * distance);
+                    int ni1 = AddExtrudedVertex(mesh, i1, v1 + normal * distance);
+                    int ni2 = AddExtrudedVertex(mesh, i2, v2 + normal * distance);
+
+                    // New top face.
+                    mesh.Indices.Add(ni0);
+                    mesh.Indices.Add(ni1);
+                    mesh.Indices.Add(ni2);
+
+                    // Side quads (as triangles).
+                    AddQuadAsTriangles(mesh.Indices, i0, i1, ni1, ni0);
+                    AddQuadAsTriangles(mesh.Indices, i1, i2, ni2, ni1);
+                    AddQuadAsTriangles(mesh.Indices, i2, i0, ni0, ni2);
+                }
+
+                meshObj.UpdateBounds();
+                MeshModified?.Invoke(this, meshObj);
+            }
+        }
+
+        /// <summary>
+        /// Insets selected triangles toward their centroids and creates support faces.
+        /// </summary>
+        public void InsetSelectedTriangles(float amount = 0.2f)
+        {
+            if (_selectedTriangles.Count == 0)
+                return;
+
+            amount = Math.Clamp(amount, 0.01f, 0.95f);
+            var byMesh = _selectedTriangles.GroupBy(x => x.mesh);
+
+            foreach (var group in byMesh)
+            {
+                var meshObj = group.Key;
+                var mesh = meshObj.MeshData;
+                if (mesh == null)
+                    continue;
+
+                var triangles = group.Select(x => x.triangleIndex).Distinct().OrderByDescending(x => x).ToList();
+
+                foreach (int triIdx in triangles)
+                {
+                    int baseIdx = triIdx * 3;
+                    if (baseIdx + 2 >= mesh.Indices.Count)
+                        continue;
+
+                    int i0 = mesh.Indices[baseIdx];
+                    int i1 = mesh.Indices[baseIdx + 1];
+                    int i2 = mesh.Indices[baseIdx + 2];
+                    if (i0 >= mesh.Vertices.Count || i1 >= mesh.Vertices.Count || i2 >= mesh.Vertices.Count)
+                        continue;
+
+                    var v0 = mesh.Vertices[i0];
+                    var v1 = mesh.Vertices[i1];
+                    var v2 = mesh.Vertices[i2];
+                    var centroid = (v0 + v1 + v2) / 3f;
+
+                    int ni0 = AddExtrudedVertex(mesh, i0, Vector3.Lerp(v0, centroid, amount));
+                    int ni1 = AddExtrudedVertex(mesh, i1, Vector3.Lerp(v1, centroid, amount));
+                    int ni2 = AddExtrudedVertex(mesh, i2, Vector3.Lerp(v2, centroid, amount));
+
+                    // Replace original face.
+                    mesh.Indices.RemoveRange(baseIdx, 3);
+                    mesh.Indices.InsertRange(baseIdx, new[] { ni0, ni1, ni2 });
+
+                    // Build ring.
+                    AddQuadAsTriangles(mesh.Indices, i0, i1, ni1, ni0);
+                    AddQuadAsTriangles(mesh.Indices, i1, i2, ni2, ni1);
+                    AddQuadAsTriangles(mesh.Indices, i2, i0, ni0, ni2);
+                }
+
+                meshObj.UpdateBounds();
+                MeshModified?.Invoke(this, meshObj);
+            }
+        }
+
+        /// <summary>
+        /// Bridges two selected triangles of the same mesh with side faces.
+        /// </summary>
+        public bool BridgeSelectedTrianglesSimple()
+        {
+            if (_selectedTriangles.Count != 2)
+                return false;
+
+            var selected = _selectedTriangles.ToList();
+            if (!ReferenceEquals(selected[0].mesh, selected[1].mesh))
+                return false;
+
+            var meshObj = selected[0].mesh;
+            var mesh = meshObj.MeshData;
+            if (mesh == null)
+                return false;
+
+            int[] triA = GetTriangleIndices(mesh, selected[0].triangleIndex);
+            int[] triB = GetTriangleIndices(mesh, selected[1].triangleIndex);
+            if (triA.Length != 3 || triB.Length != 3)
+                return false;
+
+            AddQuadAsTriangles(mesh.Indices, triA[0], triA[1], triB[1], triB[0]);
+            AddQuadAsTriangles(mesh.Indices, triA[1], triA[2], triB[2], triB[1]);
+            AddQuadAsTriangles(mesh.Indices, triA[2], triA[0], triB[0], triB[2]);
+
+            meshObj.UpdateBounds();
+            MeshModified?.Invoke(this, meshObj);
+            return true;
+        }
+
+        private static int[] GetTriangleIndices(MeshData mesh, int triangleIndex)
+        {
+            int baseIdx = triangleIndex * 3;
+            if (baseIdx + 2 >= mesh.Indices.Count)
+                return Array.Empty<int>();
+
+            return new[]
+            {
+                mesh.Indices[baseIdx],
+                mesh.Indices[baseIdx + 1],
+                mesh.Indices[baseIdx + 2]
+            };
+        }
+
+        private static void AddQuadAsTriangles(List<int> indices, int a, int b, int c, int d)
+        {
+            indices.Add(a);
+            indices.Add(b);
+            indices.Add(c);
+
+            indices.Add(a);
+            indices.Add(c);
+            indices.Add(d);
+        }
+
+        private static int AddExtrudedVertex(MeshData mesh, int sourceVertexIndex, Vector3 newPosition)
+        {
+            int idx = mesh.Vertices.Count;
+            mesh.Vertices.Add(newPosition);
+
+            if (sourceVertexIndex >= 0 && sourceVertexIndex < mesh.Colors.Count)
+                mesh.Colors.Add(mesh.Colors[sourceVertexIndex]);
+            else
+                mesh.Colors.Add(new Vector3(0.8f));
+
+            if (sourceVertexIndex >= 0 && sourceVertexIndex < mesh.UVs.Count)
+                mesh.UVs.Add(mesh.UVs[sourceVertexIndex]);
+
+            return idx;
         }
 
         /// <summary>

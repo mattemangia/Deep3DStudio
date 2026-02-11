@@ -30,6 +30,7 @@ namespace Deep3DStudio
             _imageBrowser.Clear();
             _sceneGraph.Clear();
             _lastSceneResult = null;
+            GeoReferenceRuntime.Clear();
 
             _statusLabel.Text = "Project cleared. Ready.";
             _isDirty = false;
@@ -144,6 +145,7 @@ namespace Deep3DStudio
 
                     // Restore scene
                     ProjectManager.RestoreSceneFromState(state, _sceneGraph);
+                    GeoReferenceRuntime.LoadFromState(state);
 
                     _statusLabel.Text = $"Project loaded from {path}";
                     _isDirty = false;
@@ -263,14 +265,64 @@ namespace Deep3DStudio
             var fc = new FileChooserDialog("Export Mesh", this, FileChooserAction.Save,
                 "Cancel", ResponseType.Cancel, "Save", ResponseType.Accept);
 
-            var filter = new FileFilter();
-            filter.Name = "OBJ Files";
-            filter.AddPattern("*.obj");
-            fc.AddFilter(filter);
+            var objFilter = new FileFilter { Name = "OBJ Files" };
+            objFilter.AddPattern("*.obj");
+            fc.AddFilter(objFilter);
+            var plyFilter = new FileFilter { Name = "PLY Files" };
+            plyFilter.AddPattern("*.ply");
+            fc.AddFilter(plyFilter);
+            var gltfFilter = new FileFilter { Name = "glTF Files" };
+            gltfFilter.AddPattern("*.gltf");
+            fc.AddFilter(gltfFilter);
+            var glbFilter = new FileFilter { Name = "GLB Files" };
+            glbFilter.AddPattern("*.glb");
+            fc.AddFilter(glbFilter);
+            var fbxFilter = new FileFilter { Name = "FBX Files" };
+            fbxFilter.AddPattern("*.fbx");
+            fc.AddFilter(fbxFilter);
+
+            fc.CurrentName = $"{selectedMeshes[0].Name}.obj";
+
+            bool applyGeo = false;
+            if (GeoReferenceRuntime.HasActiveGeoreference)
+            {
+                var geoMsg = new MessageDialog(this, DialogFlags.Modal, MessageType.Question, ButtonsType.YesNo,
+                    $"Apply georeferencing ({GeoReferenceRuntime.GeoReference.ProjectCrsEpsg}) on export?");
+                applyGeo = geoMsg.Run() == (int)ResponseType.Yes;
+                geoMsg.Destroy();
+            }
 
             if (fc.Run() == (int)ResponseType.Accept)
             {
-                _statusLabel.Text = $"Export to {fc.Filename} - Not yet implemented";
+                string basePath = fc.Filename;
+                string ext = System.IO.Path.GetExtension(basePath);
+                if (string.IsNullOrWhiteSpace(ext))
+                {
+                    ext = ".obj";
+                    basePath += ext;
+                }
+
+                int count = 0;
+                foreach (var meshObj in selectedMeshes)
+                {
+                    string outPath = basePath;
+                    if (selectedMeshes.Count > 1)
+                    {
+                        string dir = System.IO.Path.GetDirectoryName(basePath) ?? "";
+                        string name = System.IO.Path.GetFileNameWithoutExtension(basePath);
+                        outPath = System.IO.Path.Combine(dir, $"{name}_{meshObj.Name}{ext}");
+                    }
+
+                    var exportMesh = applyGeo
+                        ? GeoExportService.PrepareMeshForExport(meshObj)
+                        : meshObj.MeshData;
+                    MeshExporter.Save(outPath, exportMesh);
+                    if (applyGeo)
+                        GeoExportService.TryWriteGeoSidecar(outPath, exportMesh.Vertices);
+                    count++;
+                }
+
+                _statusLabel.Text = $"Exported {count} mesh(es).";
             }
             fc.Destroy();
         }
@@ -313,6 +365,15 @@ namespace Deep3DStudio
                 if (colorMsg.Run() == (int)ResponseType.No) includeColors = false;
                 colorMsg.Destroy();
 
+                bool applyGeo = false;
+                if (GeoReferenceRuntime.HasActiveGeoreference)
+                {
+                    var geoMsg = new MessageDialog(this, DialogFlags.Modal, MessageType.Question, ButtonsType.YesNo,
+                        $"Apply georeferencing ({GeoReferenceRuntime.GeoReference.ProjectCrsEpsg}) on export?");
+                    applyGeo = geoMsg.Run() == (int)ResponseType.Yes;
+                    geoMsg.Destroy();
+                }
+
                 int count = 0;
                 foreach (var obj in selectedObjects)
                 {
@@ -329,12 +390,22 @@ namespace Deep3DStudio
 
                     if (obj is MeshObject meshObj)
                     {
-                        PointCloudExporter.Export(currentPath, meshObj.MeshData, format, includeColors);
+                        var meshData = applyGeo
+                            ? GeoExportService.PrepareMeshForExport(meshObj)
+                            : meshObj.MeshData;
+                        PointCloudExporter.Export(currentPath, meshData, format, includeColors);
+                        if (applyGeo)
+                            GeoExportService.TryWriteGeoSidecar(currentPath, meshData.Vertices);
                         count++;
                     }
                     else if (obj is PointCloudObject pcObj)
                     {
-                        PointCloudExporter.Export(currentPath, pcObj, format, includeColors);
+                        var pcData = applyGeo
+                            ? GeoExportService.PreparePointCloudForExport(pcObj)
+                            : pcObj;
+                        PointCloudExporter.Export(currentPath, pcData, format, includeColors);
+                        if (applyGeo)
+                            GeoExportService.TryWriteGeoSidecar(currentPath, pcData.Points);
                         count++;
                     }
                 }

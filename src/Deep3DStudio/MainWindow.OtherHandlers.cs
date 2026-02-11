@@ -48,6 +48,14 @@ namespace Deep3DStudio
             if (_camerasToggle != null) _camerasToggle.Active = s.ShowCameras;
             if (_rgbColorToggle != null) _rgbColorToggle.Active = s.PointCloudColor == PointCloudColorMode.RGB;
             if (_depthColorToggle != null) _depthColorToggle.Active = s.PointCloudColor == PointCloudColorMode.DistanceMap;
+            if (_topToolbar != null) _topToolbar.Visible = s.ShowTopToolbar;
+            if (_verticalToolbar != null) _verticalToolbar.Visible = s.ShowVerticalToolbar;
+            if (_meshEditorToolbar != null) _meshEditorToolbar.Visible = s.ShowMeshEditorToolbar;
+            if (_pointCloudToolbar != null) _pointCloudToolbar.Visible = s.ShowPointCloudToolbar;
+            if (_showTopToolbarMenuItem != null) _showTopToolbarMenuItem.Active = s.ShowTopToolbar;
+            if (_showVerticalToolbarMenuItem != null) _showVerticalToolbarMenuItem.Active = s.ShowVerticalToolbar;
+            if (_showMeshEditorToolbarMenuItem != null) _showMeshEditorToolbarMenuItem.Active = s.ShowMeshEditorToolbar;
+            if (_showPointCloudToolbarMenuItem != null) _showPointCloudToolbarMenuItem.Active = s.ShowPointCloudToolbar;
             _viewport.QueueDraw();
         }
 

@@ -145,5 +145,118 @@ namespace Deep3DStudio
             _viewport.QueueDraw();
             _statusLabel.Text = "Welded duplicate vertices in selected area";
         }
+
+        private void OnMoveSelectedVertices(object? sender, EventArgs e)
+        {
+            var tool = _viewport.MeshEditingTool;
+            if (tool.SelectedTriangles.Count == 0)
+            {
+                _statusLabel.Text = "No triangles selected. Use Pen tool (P) to select triangles first.";
+                return;
+            }
+
+            int moved = tool.MoveSelectedVertices(_penMoveDelta);
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Moved {moved} selected vertices";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ConfigureMoveSelectedVertices()
+        {
+            var dialog = new Vector3InputDialog(
+                this,
+                "Move Selected Vertices",
+                "Delta X", "Delta Y", "Delta Z",
+                _penMoveDelta,
+                -10000f, 10000f, 0.01f, 4);
+
+            if (dialog.Run() == (int)ResponseType.Ok)
+            {
+                _penMoveDelta = dialog.Value;
+            }
+
+            dialog.Destroy();
+        }
+
+        private void OnExtrudeSelectedTriangles(object? sender, EventArgs e)
+        {
+            var tool = _viewport.MeshEditingTool;
+            if (tool.SelectedTriangles.Count == 0)
+            {
+                _statusLabel.Text = "No triangles selected. Use Pen tool (P) to select triangles first.";
+                return;
+            }
+
+            var stats = tool.GetSelectionStats();
+            tool.ExtrudeSelectedTriangles(_penExtrudeDistance);
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Extruded {stats.triangleCount} selected triangles";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ConfigureExtrudeSelectedTriangles()
+        {
+            var dlg = new NumericInputDialog(this, "Extrude Triangles", "Extrusion Distance:", _penExtrudeDistance, -10f, 10f, 0.01f, 4);
+            if (dlg.Run() == (int)ResponseType.Ok)
+            {
+                _penExtrudeDistance = dlg.Value;
+            }
+            dlg.Destroy();
+        }
+
+        private void OnInsetSelectedTriangles(object? sender, EventArgs e)
+        {
+            var tool = _viewport.MeshEditingTool;
+            if (tool.SelectedTriangles.Count == 0)
+            {
+                _statusLabel.Text = "No triangles selected. Use Pen tool (P) to select triangles first.";
+                return;
+            }
+
+            var stats = tool.GetSelectionStats();
+            tool.InsetSelectedTriangles(_penInsetAmount);
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Inset {stats.triangleCount} selected triangles";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ConfigureInsetSelectedTriangles()
+        {
+            var dlg = new NumericInputDialog(this, "Inset Triangles", "Inset Amount (0-1):", _penInsetAmount, 0.01f, 0.95f, 0.01f, 3);
+            if (dlg.Run() == (int)ResponseType.Ok)
+            {
+                _penInsetAmount = dlg.Value;
+            }
+            dlg.Destroy();
+        }
+
+        private void OnBridgeSelectedTriangles(object? sender, EventArgs e)
+        {
+            var tool = _viewport.MeshEditingTool;
+            if (tool.SelectedTriangles.Count != 2)
+            {
+                _statusLabel.Text = "Bridge requires exactly 2 selected triangles on the same mesh.";
+                return;
+            }
+
+            if (tool.BridgeSelectedTrianglesSimple())
+            {
+                _sceneTreeView.RefreshTree();
+                _viewport.QueueDraw();
+                _statusLabel.Text = "Created bridge faces between selected triangles";
+                _isDirty = true;
+                UpdateTitle();
+            }
+            else
+            {
+                _statusLabel.Text = "Could not bridge selection. Ensure 2 valid triangles from the same mesh are selected.";
+            }
+        }
     }
 }

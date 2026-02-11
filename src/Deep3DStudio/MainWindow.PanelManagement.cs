@@ -60,7 +60,7 @@ namespace Deep3DStudio
 
         private void OnToggleSceneTree(object? sender, EventArgs e)
         {
-            if (_showSceneTreeMenuItem != null)
+            if (_showSceneTreeMenuItem != null && _leftPanel != null)
             {
                 _leftPanel.Visible = _showSceneTreeMenuItem.Active;
             }
@@ -68,28 +68,81 @@ namespace Deep3DStudio
 
         private void OnToggleVerticalToolbar(object? sender, EventArgs e)
         {
-            if (_showVerticalToolbarMenuItem != null)
+            if (_showVerticalToolbarMenuItem != null && _verticalToolbar != null)
             {
                 _verticalToolbar.Visible = _showVerticalToolbarMenuItem.Active;
+                IniSettings.Instance.ShowVerticalToolbar = _showVerticalToolbarMenuItem.Active;
+            }
+        }
+
+        private void OnToggleTopToolbar(object? sender, EventArgs e)
+        {
+            if (_showTopToolbarMenuItem != null && _topToolbar != null)
+            {
+                _topToolbar.Visible = _showTopToolbarMenuItem.Active;
+                IniSettings.Instance.ShowTopToolbar = _showTopToolbarMenuItem.Active;
+            }
+        }
+
+        private void OnToggleMeshEditorToolbar(object? sender, EventArgs e)
+        {
+            if (_showMeshEditorToolbarMenuItem != null && _meshEditorToolbar != null)
+            {
+                _meshEditorToolbar.Visible = _showMeshEditorToolbarMenuItem.Active;
+                IniSettings.Instance.ShowMeshEditorToolbar = _showMeshEditorToolbarMenuItem.Active;
+            }
+        }
+
+        private void OnTogglePointCloudToolbar(object? sender, EventArgs e)
+        {
+            if (_showPointCloudToolbarMenuItem != null && _pointCloudToolbar != null)
+            {
+                _pointCloudToolbar.Visible = _showPointCloudToolbarMenuItem.Active;
+                IniSettings.Instance.ShowPointCloudToolbar = _showPointCloudToolbarMenuItem.Active;
+            }
+        }
+
+        private void OnToggleGeoreferenceToolbar(object? sender, EventArgs e)
+        {
+            if (_showGeoreferenceToolbarMenuItem != null && _georeferenceToolbar != null)
+            {
+                _georeferenceToolbar.Visible = _showGeoreferenceToolbarMenuItem.Active;
+                IniSettings.Instance.ShowGeoreferenceToolbar = _showGeoreferenceToolbarMenuItem.Active;
             }
         }
 
         private void OnFullViewportMode(object? sender, EventArgs e)
         {
             _leftPanel.Visible = false;
+            _topToolbar.Visible = false;
             _verticalToolbar.Visible = false;
+            _meshEditorToolbar.Visible = false;
+            _pointCloudToolbar.Visible = false;
+            _georeferenceToolbar.Visible = false;
 
             if (_showSceneTreeMenuItem != null) _showSceneTreeMenuItem.Active = false;
+            if (_showTopToolbarMenuItem != null) _showTopToolbarMenuItem.Active = false;
             if (_showVerticalToolbarMenuItem != null) _showVerticalToolbarMenuItem.Active = false;
+            if (_showMeshEditorToolbarMenuItem != null) _showMeshEditorToolbarMenuItem.Active = false;
+            if (_showPointCloudToolbarMenuItem != null) _showPointCloudToolbarMenuItem.Active = false;
+            if (_showGeoreferenceToolbarMenuItem != null) _showGeoreferenceToolbarMenuItem.Active = false;
         }
 
         private void OnRestoreAllPanels(object? sender, EventArgs e)
         {
             _leftPanel.Visible = true;
+            _topToolbar.Visible = true;
             _verticalToolbar.Visible = true;
+            _meshEditorToolbar.Visible = true;
+            _pointCloudToolbar.Visible = true;
+            _georeferenceToolbar.Visible = true;
 
             if (_showSceneTreeMenuItem != null) _showSceneTreeMenuItem.Active = true;
+            if (_showTopToolbarMenuItem != null) _showTopToolbarMenuItem.Active = true;
             if (_showVerticalToolbarMenuItem != null) _showVerticalToolbarMenuItem.Active = true;
+            if (_showMeshEditorToolbarMenuItem != null) _showMeshEditorToolbarMenuItem.Active = true;
+            if (_showPointCloudToolbarMenuItem != null) _showPointCloudToolbarMenuItem.Active = true;
+            if (_showGeoreferenceToolbarMenuItem != null) _showGeoreferenceToolbarMenuItem.Active = true;
         }
     }
 }

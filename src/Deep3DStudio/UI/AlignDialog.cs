@@ -8,8 +8,17 @@ namespace Deep3DStudio.UI
         private SpinButton _spinIterations;
         private SpinButton _spinThreshold;
 
-        public int Iterations => (int)_spinIterations.Value;
-        public float Threshold => (float)_spinThreshold.Value;
+        public int Iterations
+        {
+            get => (int)_spinIterations.Value;
+            set => _spinIterations.Value = Math.Clamp(value, 1, 500);
+        }
+
+        public float Threshold
+        {
+            get => (float)_spinThreshold.Value;
+            set => _spinThreshold.Value = Math.Clamp(value, 0.000001f, 0.1f);
+        }
 
         public AlignDialog(Window parent) : base("Align Meshes (ICP)", parent, DialogFlags.Modal)
         {

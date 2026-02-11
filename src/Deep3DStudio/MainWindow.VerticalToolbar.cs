@@ -60,13 +60,19 @@ namespace Deep3DStudio
             vbox.PackStart(new Separator(Orientation.Horizontal), false, false, 5);
 
             // Mesh operations
-            var decimateBtn = CreateIconButton("decimate", "Decimate", btnSize, () => OnDecimateClicked(null, EventArgs.Empty));
+            var decimateBtn = CreateIconButton("decimate", "Decimate", btnSize,
+                () => OnDecimateClicked(null, EventArgs.Empty),
+                ConfigureDecimateOptions);
             vbox.PackStart(decimateBtn, false, false, 1);
 
-            var smoothBtn = CreateIconButton("smooth", "Smooth", btnSize, () => OnSmoothClicked(null, EventArgs.Empty));
+            var smoothBtn = CreateIconButton("smooth", "Smooth", btnSize,
+                () => OnSmoothClicked(null, EventArgs.Empty),
+                ConfigureSmoothOptions);
             vbox.PackStart(smoothBtn, false, false, 1);
 
-            var optimizeBtn = CreateIconButton("optimize", "Optimize", btnSize, () => OnOptimizeClicked(null, EventArgs.Empty));
+            var optimizeBtn = CreateIconButton("optimize", "Optimize", btnSize,
+                () => OnOptimizeClicked(null, EventArgs.Empty),
+                ConfigureOptimizeOptions);
             vbox.PackStart(optimizeBtn, false, false, 1);
 
             var splitBtn = CreateIconButton("split", "Split", btnSize, () => OnSplitClicked(null, EventArgs.Empty));
@@ -75,10 +81,14 @@ namespace Deep3DStudio
             vbox.PackStart(new Separator(Orientation.Horizontal), false, false, 5);
 
             // Merge/Align
-            var mergeBtn = CreateIconButton("merge", "Merge", btnSize, () => OnMergeClicked(null, EventArgs.Empty));
+            var mergeBtn = CreateIconButton("merge", "Merge", btnSize,
+                () => OnMergeClicked(null, EventArgs.Empty),
+                () => OnMergeClicked(null, EventArgs.Empty));
             vbox.PackStart(mergeBtn, false, false, 1);
 
-            var alignBtn = CreateIconButton("align", "Align (ICP)", btnSize, () => OnAlignClicked(null, EventArgs.Empty));
+            var alignBtn = CreateIconButton("align", "Align (ICP)", btnSize,
+                () => OnAlignClicked(null, EventArgs.Empty),
+                () => OnAlignClicked(null, EventArgs.Empty));
             vbox.PackStart(alignBtn, false, false, 1);
 
             vbox.PackStart(new Separator(Orientation.Horizontal), false, false, 5);
@@ -92,10 +102,10 @@ namespace Deep3DStudio
             return vbox;
         }
 
-        private Button CreateIconButton(string iconType, string tooltip, int size, Action onClick)
+        private Button CreateIconButton(string iconType, string tooltip, int size, Action onClick, Action? onRightClick = null)
         {
             var btn = new Button();
-            btn.TooltipText = tooltip;
+            btn.TooltipText = onRightClick == null ? tooltip : $"{tooltip} (Right click for options)";
             btn.SetSizeRequest(size, size);
             btn.Relief = ReliefStyle.None;
 
@@ -104,6 +114,18 @@ namespace Deep3DStudio
             btn.Add(icon);
 
             btn.Clicked += (s, e) => onClick();
+            if (onRightClick != null)
+            {
+                btn.Events |= EventMask.ButtonPressMask;
+                btn.ButtonPressEvent += (s, e) =>
+                {
+                    if (e.Event.Button == 3)
+                    {
+                        onRightClick();
+                        e.RetVal = true;
+                    }
+                };
+            }
 
             return btn;
         }

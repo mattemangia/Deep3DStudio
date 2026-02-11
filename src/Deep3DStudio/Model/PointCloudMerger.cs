@@ -442,6 +442,76 @@ namespace Deep3DStudio.Model
             };
         }
 
+        /// <summary>
+        /// Pass-through filter along one axis.
+        /// axis: 0=X, 1=Y, 2=Z.
+        /// </summary>
+        public PointCloudData PassThroughAxis(PointCloudData cloud, int axis, float minValue, float maxValue)
+        {
+            if (minValue > maxValue)
+                (minValue, maxValue) = (maxValue, minValue);
+
+            var points = new List<System.Numerics.Vector3>();
+            var colors = HasAlignedColors(cloud) ? new List<System.Numerics.Vector3>() : null;
+            var normals = HasAlignedNormals(cloud) ? new List<System.Numerics.Vector3>() : null;
+
+            for (int i = 0; i < cloud.Points.Length; i++)
+            {
+                var p = cloud.Points[i];
+                float value = axis switch
+                {
+                    0 => p.X,
+                    1 => p.Y,
+                    _ => p.Z
+                };
+
+                if (value < minValue || value > maxValue)
+                    continue;
+
+                points.Add(p);
+                if (colors != null && cloud.Colors != null) colors.Add(cloud.Colors[i]);
+                if (normals != null && cloud.Normals != null) normals.Add(cloud.Normals[i]);
+            }
+
+            return new PointCloudData
+            {
+                Points = points.ToArray(),
+                Colors = colors?.ToArray(),
+                Normals = normals?.ToArray()
+            };
+        }
+
+        /// <summary>
+        /// Keeps only points inside a radius from center.
+        /// </summary>
+        public PointCloudData RadiusCrop(PointCloudData cloud, Vector3 center, float radius)
+        {
+            float r2 = Math.Max(0.000001f, radius * radius);
+
+            var points = new List<System.Numerics.Vector3>();
+            var colors = HasAlignedColors(cloud) ? new List<System.Numerics.Vector3>() : null;
+            var normals = HasAlignedNormals(cloud) ? new List<System.Numerics.Vector3>() : null;
+
+            for (int i = 0; i < cloud.Points.Length; i++)
+            {
+                var p = cloud.Points[i];
+                var d = new Vector3(p.X - center.X, p.Y - center.Y, p.Z - center.Z);
+                if (d.LengthSquared > r2)
+                    continue;
+
+                points.Add(p);
+                if (colors != null && cloud.Colors != null) colors.Add(cloud.Colors[i]);
+                if (normals != null && cloud.Normals != null) normals.Add(cloud.Normals[i]);
+            }
+
+            return new PointCloudData
+            {
+                Points = points.ToArray(),
+                Colors = colors?.ToArray(),
+                Normals = normals?.ToArray()
+            };
+        }
+
         private static bool HasAlignedColors(PointCloudData cloud)
         {
             return cloud.Colors != null && cloud.Colors.Length == cloud.Points.Length;

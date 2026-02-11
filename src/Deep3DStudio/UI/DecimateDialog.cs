@@ -10,9 +10,28 @@ namespace Deep3DStudio.UI
         private Scale _scalePercentage;
         private SpinButton _spinVoxelSize;
 
-        public float Ratio => (float)_scalePercentage.Value / 100.0f;
-        public float VoxelSize => (float)_spinVoxelSize.Value;
-        public bool IsUniform => _rbUniform.Active;
+        public float Ratio
+        {
+            get => (float)_scalePercentage.Value / 100.0f;
+            set => _scalePercentage.Value = Math.Clamp(value * 100.0f, 1.0f, 99.0f);
+        }
+
+        public float VoxelSize
+        {
+            get => (float)_spinVoxelSize.Value;
+            set => _spinVoxelSize.Value = Math.Clamp(value, 0.001f, 10.0f);
+        }
+
+        public bool IsUniform
+        {
+            get => _rbUniform.Active;
+            set
+            {
+                _rbUniform.Active = value;
+                _rbPercentage.Active = !value;
+                UpdateSensitivity();
+            }
+        }
 
         public DecimateDialog(Window parent) : base("Decimate Mesh", parent, DialogFlags.Modal)
         {

@@ -207,6 +207,11 @@ namespace Deep3DStudio.Configuration
         public bool ShowGizmo { get; set; } = true;
         public bool ShowInfoOverlay { get; set; } = true;
         public bool ShowPointCloudBounds { get; set; } = true; // Show bounding box for point clouds
+        public bool ShowTopToolbar { get; set; } = true;
+        public bool ShowVerticalToolbar { get; set; } = true;
+        public bool ShowMeshEditorToolbar { get; set; } = true;
+        public bool ShowPointCloudToolbar { get; set; } = true;
+        public bool ShowGeoreferenceToolbar { get; set; } = true;
         public int LastWindowWidth { get; set; } = 1400;
         public int LastWindowHeight { get; set; } = 900;
         public int LastPanelWidth { get; set; } = 250;
@@ -484,6 +489,11 @@ namespace Deep3DStudio.Configuration
                     writer.WriteLine($"Width={LastWindowWidth}");
                     writer.WriteLine($"Height={LastWindowHeight}");
                     writer.WriteLine($"PanelWidth={LastPanelWidth}");
+                    writer.WriteLine($"ShowTopToolbar={ShowTopToolbar}");
+                    writer.WriteLine($"ShowVerticalToolbar={ShowVerticalToolbar}");
+                    writer.WriteLine($"ShowMeshEditorToolbar={ShowMeshEditorToolbar}");
+                    writer.WriteLine($"ShowPointCloudToolbar={ShowPointCloudToolbar}");
+                    writer.WriteLine($"ShowGeoreferenceToolbar={ShowGeoreferenceToolbar}");
                 }
 
                 Console.WriteLine($"Settings saved to {_settingsPath}");
@@ -564,6 +574,16 @@ namespace Deep3DStudio.Configuration
                 LastWindowHeight = Math.Clamp(h, 600, 3000);
             if (TryGetValue("Window", "PanelWidth", out string? pwStr) && int.TryParse(pwStr, out var pw))
                 LastPanelWidth = Math.Clamp(pw, 100, 600);
+            if (TryGetValue("Window", "ShowTopToolbar", out string? sttStr) && bool.TryParse(sttStr, out var stt))
+                ShowTopToolbar = stt;
+            if (TryGetValue("Window", "ShowVerticalToolbar", out string? svtStr) && bool.TryParse(svtStr, out var svt))
+                ShowVerticalToolbar = svt;
+            if (TryGetValue("Window", "ShowMeshEditorToolbar", out string? smetStr) && bool.TryParse(smetStr, out var smet))
+                ShowMeshEditorToolbar = smet;
+            if (TryGetValue("Window", "ShowPointCloudToolbar", out string? spctStr) && bool.TryParse(spctStr, out var spct))
+                ShowPointCloudToolbar = spct;
+            if (TryGetValue("Window", "ShowGeoreferenceToolbar", out string? sgtStr) && bool.TryParse(sgtStr, out var sgt))
+                ShowGeoreferenceToolbar = sgt;
 
             // [AIModels]
             if (TryGetValue("AIModels", "ImageTo3D", out string? img3dStr) && Enum.TryParse<ImageTo3DModel>(img3dStr, out var img3d))
@@ -752,6 +772,11 @@ namespace Deep3DStudio.Configuration
             ShowCameras = true;
             ShowInfoOverlay = true;
             ShowPointCloudBounds = true;
+            ShowTopToolbar = true;
+            ShowVerticalToolbar = true;
+            ShowMeshEditorToolbar = true;
+            ShowPointCloudToolbar = true;
+            ShowGeoreferenceToolbar = true;
             NeRFIterations = 50;
             VoxelGridSize = 128;
             NeRFLearningRate = 0.1f;

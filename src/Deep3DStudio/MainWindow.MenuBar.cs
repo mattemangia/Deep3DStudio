@@ -71,6 +71,10 @@ namespace Deep3DStudio
             exportDepthItem.Activated += OnExportDepthMaps;
             fileMenu.Append(exportDepthItem);
 
+            var exportDemItem = new MenuItem("Export _DEM...");
+            exportDemItem.Activated += OnExportDem;
+            fileMenu.Append(exportDemItem);
+
             fileMenu.Append(new SeparatorMenuItem());
 
             var settingsItem = new MenuItem("_Settings...");
@@ -149,6 +153,49 @@ namespace Deep3DStudio
             transformMenu.Append(resetTransformItem);
 
             editMenu.Append(transformMenuItem);
+
+            // Primitive creation submenu
+            var primitiveMenu = new Menu();
+            var primitiveMenuItem = new MenuItem("_Create Primitive");
+            primitiveMenuItem.Submenu = primitiveMenu;
+
+            var planePrimitiveItem = new MenuItem("_Plane");
+            planePrimitiveItem.Activated += (s, e) => OnCreatePrimitive(MeshPrimitiveType.Plane);
+            primitiveMenu.Append(planePrimitiveItem);
+
+            var cubePrimitiveItem = new MenuItem("_Cube");
+            cubePrimitiveItem.Activated += (s, e) => OnCreatePrimitive(MeshPrimitiveType.Cube);
+            primitiveMenu.Append(cubePrimitiveItem);
+
+            var spherePrimitiveItem = new MenuItem("_UV Sphere");
+            spherePrimitiveItem.Activated += (s, e) => OnCreatePrimitive(MeshPrimitiveType.UVSphere);
+            primitiveMenu.Append(spherePrimitiveItem);
+
+            var cylinderPrimitiveItem = new MenuItem("C_ylinder");
+            cylinderPrimitiveItem.Activated += (s, e) => OnCreatePrimitive(MeshPrimitiveType.Cylinder);
+            primitiveMenu.Append(cylinderPrimitiveItem);
+
+            var conePrimitiveItem = new MenuItem("C_one");
+            conePrimitiveItem.Activated += (s, e) => OnCreatePrimitive(MeshPrimitiveType.Cone);
+            primitiveMenu.Append(conePrimitiveItem);
+
+            var torusPrimitiveItem = new MenuItem("_Torus");
+            torusPrimitiveItem.Activated += (s, e) => OnCreatePrimitive(MeshPrimitiveType.Torus);
+            primitiveMenu.Append(torusPrimitiveItem);
+
+            var circlePrimitiveItem = new MenuItem("C_ircle");
+            circlePrimitiveItem.Activated += (s, e) => OnCreatePrimitive(MeshPrimitiveType.Circle);
+            primitiveMenu.Append(circlePrimitiveItem);
+
+            var polygonPrimitiveItem = new MenuItem("_Polygon");
+            polygonPrimitiveItem.Activated += (s, e) => OnCreatePrimitive(MeshPrimitiveType.Polygon);
+            primitiveMenu.Append(polygonPrimitiveItem);
+
+            var gridPrimitiveItem = new MenuItem("_Grid");
+            gridPrimitiveItem.Activated += (s, e) => OnCreatePrimitive(MeshPrimitiveType.Grid);
+            primitiveMenu.Append(gridPrimitiveItem);
+
+            editMenu.Append(primitiveMenuItem);
 
             // Mesh Operations submenu
             var meshOpsMenu = new Menu();
@@ -244,11 +291,88 @@ namespace Deep3DStudio
 
             triangleOpsMenu.Append(new SeparatorMenuItem());
 
+            var moveVerticesItem = new MenuItem("_Move Selected Vertices");
+            moveVerticesItem.Activated += OnMoveSelectedVertices;
+            triangleOpsMenu.Append(moveVerticesItem);
+
+            var extrudeItem = new MenuItem("_Extrude Selected Triangles");
+            extrudeItem.Activated += OnExtrudeSelectedTriangles;
+            triangleOpsMenu.Append(extrudeItem);
+
+            var insetItem = new MenuItem("_Inset Selected Triangles");
+            insetItem.Activated += OnInsetSelectedTriangles;
+            triangleOpsMenu.Append(insetItem);
+
+            var bridgeItem = new MenuItem("_Bridge 2 Triangles");
+            bridgeItem.Activated += OnBridgeSelectedTriangles;
+            triangleOpsMenu.Append(bridgeItem);
+
+            triangleOpsMenu.Append(new SeparatorMenuItem());
+
             var weldVerticesItem = new MenuItem("_Weld Vertices");
             weldVerticesItem.Activated += OnWeldSelectedVertices;
             triangleOpsMenu.Append(weldVerticesItem);
 
             editMenu.Append(triangleOpsMenuItem);
+
+            // Point cloud filter submenu
+            var pointCloudFilterMenu = new Menu();
+            var pointCloudFilterMenuItem = new MenuItem("Point Cloud _Filters");
+            pointCloudFilterMenuItem.Submenu = pointCloudFilterMenu;
+
+            var voxelFilterItem = new MenuItem("_Voxel Downsample");
+            voxelFilterItem.Activated += OnPointCloudVoxelDownsampleClicked;
+            pointCloudFilterMenu.Append(voxelFilterItem);
+
+            var outlierFilterItem = new MenuItem("_Remove Outliers");
+            outlierFilterItem.Activated += OnPointCloudRemoveOutliersClicked;
+            pointCloudFilterMenu.Append(outlierFilterItem);
+
+            var dupFilterItem = new MenuItem("Remove _Duplicates");
+            dupFilterItem.Activated += OnPointCloudRemoveDuplicatesClicked;
+            pointCloudFilterMenu.Append(dupFilterItem);
+
+            var normalsItem = new MenuItem("_Estimate Normals");
+            normalsItem.Activated += OnPointCloudEstimateNormalsClicked;
+            pointCloudFilterMenu.Append(normalsItem);
+
+            var axisFilterItem = new MenuItem("_Pass-Through Axis");
+            axisFilterItem.Activated += OnPointCloudPassThroughClicked;
+            pointCloudFilterMenu.Append(axisFilterItem);
+
+            var radiusCropItem = new MenuItem("_Radius Crop");
+            radiusCropItem.Activated += OnPointCloudRadiusCropClicked;
+            pointCloudFilterMenu.Append(radiusCropItem);
+
+            var denseCloudItem = new MenuItem("Point Cloud -> _Dense Cloud");
+            denseCloudItem.Activated += OnPointCloudDenseClicked;
+            pointCloudFilterMenu.Append(denseCloudItem);
+
+            editMenu.Append(pointCloudFilterMenuItem);
+
+            editMenu.Append(new SeparatorMenuItem());
+
+            var georefMenu = new Menu();
+            var georefMenuItem = new MenuItem("_Georeferencing");
+            georefMenuItem.Submenu = georefMenu;
+
+            var gcpEditorItem = new MenuItem("_GCP Editor...");
+            gcpEditorItem.Activated += (s, e) => OnOpenGeoreferenceEditor();
+            georefMenu.Append(gcpEditorItem);
+
+            var solveGeoItem = new MenuItem("_Solve from GCP");
+            solveGeoItem.Activated += (s, e) => OnSolveGeoreferenceFromCurrentGcps();
+            georefMenu.Append(solveGeoItem);
+
+            var exportGeoItem = new MenuItem("_Export Georeferenced Selection");
+            exportGeoItem.Activated += (s, e) => OnExportGeoreferencedSelection();
+            georefMenu.Append(exportGeoItem);
+
+            var demFromGeoItem = new MenuItem("_Generate DEM...");
+            demFromGeoItem.Activated += OnExportDem;
+            georefMenu.Append(demFromGeoItem);
+
+            editMenu.Append(georefMenuItem);
 
             menuBar.Append(editMenuItem);
 
@@ -468,6 +592,10 @@ namespace Deep3DStudio
             pointCloudMergeItem.Activated += OnPointCloudMergeWorkflow;
             workflowsMenu.Append(pointCloudMergeItem);
 
+            var pointCloudDenseItem = new MenuItem("Point Cloud -> _Dense Cloud");
+            pointCloudDenseItem.Activated += OnPointCloudDenseClicked;
+            workflowsMenu.Append(pointCloudDenseItem);
+
             aiMenu.Append(workflowsMenuItem);
 
             aiMenu.Append(new SeparatorMenuItem());
@@ -488,10 +616,30 @@ namespace Deep3DStudio
             _showSceneTreeMenuItem.Toggled += OnToggleSceneTree;
             windowMenu.Append(_showSceneTreeMenuItem);
 
+            _showTopToolbarMenuItem = new CheckMenuItem("_Top Toolbar");
+            _showTopToolbarMenuItem.Active = IniSettings.Instance.ShowTopToolbar;
+            _showTopToolbarMenuItem.Toggled += OnToggleTopToolbar;
+            windowMenu.Append(_showTopToolbarMenuItem);
+
             _showVerticalToolbarMenuItem = new CheckMenuItem("_Vertical Toolbar");
-            _showVerticalToolbarMenuItem.Active = true;
+            _showVerticalToolbarMenuItem.Active = IniSettings.Instance.ShowVerticalToolbar;
             _showVerticalToolbarMenuItem.Toggled += OnToggleVerticalToolbar;
             windowMenu.Append(_showVerticalToolbarMenuItem);
+
+            _showMeshEditorToolbarMenuItem = new CheckMenuItem("_Mesh Editor Toolbar");
+            _showMeshEditorToolbarMenuItem.Active = IniSettings.Instance.ShowMeshEditorToolbar;
+            _showMeshEditorToolbarMenuItem.Toggled += OnToggleMeshEditorToolbar;
+            windowMenu.Append(_showMeshEditorToolbarMenuItem);
+
+            _showPointCloudToolbarMenuItem = new CheckMenuItem("_Point Cloud Toolbar");
+            _showPointCloudToolbarMenuItem.Active = IniSettings.Instance.ShowPointCloudToolbar;
+            _showPointCloudToolbarMenuItem.Toggled += OnTogglePointCloudToolbar;
+            windowMenu.Append(_showPointCloudToolbarMenuItem);
+
+            _showGeoreferenceToolbarMenuItem = new CheckMenuItem("_Georeference Toolbar");
+            _showGeoreferenceToolbarMenuItem.Active = IniSettings.Instance.ShowGeoreferenceToolbar;
+            _showGeoreferenceToolbarMenuItem.Toggled += OnToggleGeoreferenceToolbar;
+            windowMenu.Append(_showGeoreferenceToolbarMenuItem);
 
             windowMenu.Append(new SeparatorMenuItem());
 

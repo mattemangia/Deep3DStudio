@@ -29,36 +29,50 @@ namespace Deep3DStudio
                 return;
             }
 
-            var dlg = new DecimateDialog(this);
+            float ratio = Math.Clamp(_meshDecimateRatio, 0.01f, 0.99f);
+            float voxelSize = Math.Max(0.0001f, _meshDecimateVoxelSize);
+            bool isUniform = _meshDecimateMethod == 1;
+
+            _statusLabel.Text = "Decimating...";
+            while (Application.EventsPending()) Application.RunIteration();
+
+            Task.Run(() => {
+                var results = new List<(Scene.MeshObject obj, MeshData newData)>();
+                foreach (var meshObj in selectedMeshes)
+                {
+                    var newData = isUniform
+                        ? MeshOperations.DecimateUniform(meshObj.MeshData, voxelSize)
+                        : MeshOperations.Decimate(meshObj.MeshData, ratio);
+                    results.Add((meshObj, newData));
+                }
+
+                Application.Invoke((s, args) => {
+                    foreach (var res in results)
+                    {
+                        res.obj.MeshData = res.newData;
+                        res.obj.UpdateBounds();
+                    }
+                    _viewport.QueueDraw();
+                    _statusLabel.Text = $"Decimated {selectedMeshes.Count} mesh(es)";
+                    _isDirty = true;
+                    UpdateTitle();
+                });
+            });
+        }
+
+        private void ConfigureDecimateOptions()
+        {
+            var dlg = new DecimateDialog(this)
+            {
+                Ratio = _meshDecimateRatio,
+                VoxelSize = _meshDecimateVoxelSize,
+                IsUniform = _meshDecimateMethod == 1
+            };
             if (dlg.Run() == (int)ResponseType.Ok)
             {
-                float ratio = dlg.Ratio;
-                float voxelSize = dlg.VoxelSize;
-                bool isUniform = dlg.IsUniform;
-
-                _statusLabel.Text = "Decimating...";
-                while (Application.EventsPending()) Application.RunIteration();
-
-                Task.Run(() => {
-                    var results = new List<(Scene.MeshObject obj, MeshData newData)>();
-                    foreach (var meshObj in selectedMeshes)
-                    {
-                        var newData = isUniform
-                            ? MeshOperations.DecimateUniform(meshObj.MeshData, voxelSize)
-                            : MeshOperations.Decimate(meshObj.MeshData, ratio);
-                        results.Add((meshObj, newData));
-                    }
-
-                    Application.Invoke((s, args) => {
-                        foreach (var res in results)
-                        {
-                            res.obj.MeshData = res.newData;
-                            res.obj.UpdateBounds();
-                        }
-                        _viewport.QueueDraw();
-                        _statusLabel.Text = $"Decimated {selectedMeshes.Count} mesh(es)";
-                    });
-                });
+                _meshDecimateRatio = dlg.Ratio;
+                _meshDecimateVoxelSize = dlg.VoxelSize;
+                _meshDecimateMethod = dlg.IsUniform ? 1 : 0;
             }
             dlg.Destroy();
         }
@@ -72,37 +86,53 @@ namespace Deep3DStudio
                 return;
             }
 
-            var dlg = new SmoothDialog(this);
+            bool isTaubin = _meshSmoothMethod == 1;
+            int iterations = Math.Clamp(_meshSmoothIterations, 1, 100);
+            float lambda = Math.Clamp(_meshSmoothLambda, 0.01f, 1.0f);
+            float mu = Math.Clamp(_meshSmoothMu, -1.0f, -0.01f);
+
+            _statusLabel.Text = "Smoothing...";
+            while (Application.EventsPending()) Application.RunIteration();
+
+            Task.Run(() => {
+                var results = new List<(Scene.MeshObject obj, MeshData newData)>();
+                foreach (var meshObj in selectedMeshes)
+                {
+                    var newData = isTaubin
+                        ? MeshOperations.SmoothTaubin(meshObj.MeshData, iterations, lambda, mu)
+                        : MeshOperations.Smooth(meshObj.MeshData, iterations, lambda);
+                    results.Add((meshObj, newData));
+                }
+
+                Application.Invoke((s, args) => {
+                    foreach (var res in results)
+                    {
+                        res.obj.MeshData = res.newData;
+                        res.obj.UpdateBounds();
+                    }
+                    _viewport.QueueDraw();
+                    _statusLabel.Text = $"Smoothed {selectedMeshes.Count} mesh(es)";
+                    _isDirty = true;
+                    UpdateTitle();
+                });
+            });
+        }
+
+        private void ConfigureSmoothOptions()
+        {
+            var dlg = new SmoothDialog(this)
+            {
+                IsTaubin = _meshSmoothMethod == 1,
+                Iterations = _meshSmoothIterations,
+                Lambda = _meshSmoothLambda,
+                Mu = _meshSmoothMu
+            };
             if (dlg.Run() == (int)ResponseType.Ok)
             {
-                bool isTaubin = dlg.IsTaubin;
-                int iterations = dlg.Iterations;
-                float lambda = dlg.Lambda;
-                float mu = dlg.Mu;
-
-                _statusLabel.Text = "Smoothing...";
-                while (Application.EventsPending()) Application.RunIteration();
-
-                Task.Run(() => {
-                    var results = new List<(Scene.MeshObject obj, MeshData newData)>();
-                    foreach (var meshObj in selectedMeshes)
-                    {
-                        var newData = isTaubin
-                            ? MeshOperations.SmoothTaubin(meshObj.MeshData, iterations, lambda, mu)
-                            : MeshOperations.Smooth(meshObj.MeshData, iterations, lambda);
-                        results.Add((meshObj, newData));
-                    }
-
-                    Application.Invoke((s, args) => {
-                        foreach (var res in results)
-                        {
-                            res.obj.MeshData = res.newData;
-                            res.obj.UpdateBounds();
-                        }
-                        _viewport.QueueDraw();
-                        _statusLabel.Text = $"Smoothed {selectedMeshes.Count} mesh(es)";
-                    });
-                });
+                _meshSmoothMethod = dlg.IsTaubin ? 1 : 0;
+                _meshSmoothIterations = dlg.Iterations;
+                _meshSmoothLambda = dlg.Lambda;
+                _meshSmoothMu = dlg.Mu;
             }
             dlg.Destroy();
         }
@@ -116,35 +146,42 @@ namespace Deep3DStudio
                 return;
             }
 
-            var dlg = new NumericInputDialog(this, "Optimize Mesh", "Weld Distance / Epsilon:", 0.0001f, 0.000001f, 1.0f, 0.0001f, 6);
+            float epsilon = Math.Clamp(_meshOptimizeEpsilon, 0.000001f, 1.0f);
+            _statusLabel.Text = "Optimizing...";
+            while (Application.EventsPending()) Application.RunIteration();
+
+            Task.Run(() => {
+                var results = new List<(Scene.MeshObject obj, MeshData newData, int removed)>();
+                foreach (var meshObj in selectedMeshes)
+                {
+                    int before = meshObj.VertexCount;
+                    var newData = MeshOperations.Optimize(meshObj.MeshData, epsilon);
+                    int removed = before - newData.Vertices.Count;
+                    results.Add((meshObj, newData, removed));
+                }
+
+                Application.Invoke((s, args) => {
+                    int totalRemoved = 0;
+                    foreach (var res in results)
+                    {
+                        res.obj.MeshData = res.newData;
+                        res.obj.UpdateBounds();
+                        totalRemoved += res.removed;
+                    }
+                    _viewport.QueueDraw();
+                    _statusLabel.Text = $"Optimized: removed {totalRemoved} duplicate vertices";
+                    _isDirty = true;
+                    UpdateTitle();
+                });
+            });
+        }
+
+        private void ConfigureOptimizeOptions()
+        {
+            var dlg = new NumericInputDialog(this, "Optimize Mesh", "Weld Distance / Epsilon:", _meshOptimizeEpsilon, 0.000001f, 1.0f, 0.0001f, 6);
             if (dlg.Run() == (int)ResponseType.Ok)
             {
-                float epsilon = dlg.Value;
-                _statusLabel.Text = "Optimizing...";
-                while (Application.EventsPending()) Application.RunIteration();
-
-                Task.Run(() => {
-                    var results = new List<(Scene.MeshObject obj, MeshData newData, int removed)>();
-                    foreach (var meshObj in selectedMeshes)
-                    {
-                        int before = meshObj.VertexCount;
-                        var newData = MeshOperations.Optimize(meshObj.MeshData, epsilon);
-                        int removed = before - newData.Vertices.Count;
-                        results.Add((meshObj, newData, removed));
-                    }
-
-                    Application.Invoke((s, args) => {
-                        int totalRemoved = 0;
-                        foreach (var res in results)
-                        {
-                            res.obj.MeshData = res.newData;
-                            res.obj.UpdateBounds();
-                            totalRemoved += res.removed;
-                        }
-                        _viewport.QueueDraw();
-                        _statusLabel.Text = $"Optimized: removed {totalRemoved} duplicate vertices";
-                    });
-                });
+                _meshOptimizeEpsilon = dlg.Value;
             }
             dlg.Destroy();
         }
@@ -516,6 +553,402 @@ namespace Deep3DStudio
                 }
             }
             dlg.Destroy();
+        }
+
+        private void OnCreatePrimitive(MeshPrimitiveType type)
+        {
+            var mesh = CreatePrimitiveWithCurrentPreset(type);
+            var name = type switch
+            {
+                MeshPrimitiveType.UVSphere => "UV Sphere",
+                _ => type.ToString()
+            };
+
+            var obj = new MeshObject(name, mesh);
+            _sceneGraph.AddObject(obj);
+            _sceneGraph.Select(obj);
+            _sceneTreeView.RefreshTree();
+            _viewport.FocusOnSelection();
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Created {name} primitive";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private MeshData CreatePrimitiveWithCurrentPreset(MeshPrimitiveType type)
+        {
+            return type switch
+            {
+                MeshPrimitiveType.Plane => MeshPrimitiveFactory.CreatePlane(_primSize, _primSize),
+                MeshPrimitiveType.Cube => MeshPrimitiveFactory.CreateCube(_primSize),
+                MeshPrimitiveType.UVSphere => MeshPrimitiveFactory.CreateUVSphere(_primRadius, _primSegments, _primRings),
+                MeshPrimitiveType.Cylinder => MeshPrimitiveFactory.CreateCylinder(_primRadius, _primHeight, _primSegments, _primCapEnds),
+                MeshPrimitiveType.Cone => MeshPrimitiveFactory.CreateCone(_primRadius, _primHeight, _primSegments, _primCapEnds),
+                MeshPrimitiveType.Torus => MeshPrimitiveFactory.CreateTorus(Math.Max(_primRadius, 0.05f), Math.Max(_primRadius * 0.35f, 0.02f), _primSegments, _primMinorSegments),
+                MeshPrimitiveType.Circle => MeshPrimitiveFactory.CreateCircle(Math.Max(_primRadius, 0.01f), _primSegments),
+                MeshPrimitiveType.Polygon => MeshPrimitiveFactory.CreatePolygon(_primPolygonSides, Math.Max(_primRadius, 0.01f)),
+                MeshPrimitiveType.Grid => MeshPrimitiveFactory.CreateGrid(_primGridCells, _primCellSize),
+                _ => MeshPrimitiveFactory.CreatePrimitive(type)
+            };
+        }
+
+        private void ConfigurePrimitiveOptions(MeshPrimitiveType type)
+        {
+            using var dlg = new Dialog($"Primitive Options - {type}", this, DialogFlags.Modal);
+            dlg.SetDefaultSize(360, 260);
+            dlg.AddButton("Cancel", ResponseType.Cancel);
+            dlg.AddButton("Save", ResponseType.Ok);
+
+            var area = dlg.ContentArea;
+            area.BorderWidth = 10;
+            area.Spacing = 8;
+
+            var sizeSpin = new SpinButton(0.01, 1000, 0.01) { Digits = 3, Value = _primSize };
+            var radiusSpin = new SpinButton(0.001, 1000, 0.01) { Digits = 3, Value = _primRadius };
+            var heightSpin = new SpinButton(0.001, 1000, 0.01) { Digits = 3, Value = _primHeight };
+            var segSpin = new SpinButton(3, 256, 1) { Value = _primSegments };
+            var ringSpin = new SpinButton(3, 256, 1) { Value = _primRings };
+            var minorSegSpin = new SpinButton(3, 256, 1) { Value = _primMinorSegments };
+            var sideSpin = new SpinButton(3, 64, 1) { Value = _primPolygonSides };
+            var gridCellSpin = new SpinButton(1, 512, 1) { Value = _primGridCells };
+            var gridCellSizeSpin = new SpinButton(0.001, 100, 0.01) { Digits = 3, Value = _primCellSize };
+            var capCheck = new CheckButton("Cap Ends / Base") { Active = _primCapEnds };
+
+            void AddRow(string label, Widget widget)
+            {
+                var row = new Box(Orientation.Horizontal, 8);
+                row.PackStart(new Label(label) { Halign = Align.Start, WidthRequest = 160 }, false, false, 0);
+                row.PackStart(widget, true, true, 0);
+                area.PackStart(row, false, false, 0);
+            }
+
+            switch (type)
+            {
+                case MeshPrimitiveType.Plane:
+                case MeshPrimitiveType.Cube:
+                    AddRow("Size", sizeSpin);
+                    break;
+                case MeshPrimitiveType.UVSphere:
+                    AddRow("Radius", radiusSpin);
+                    AddRow("Segments", segSpin);
+                    AddRow("Rings", ringSpin);
+                    break;
+                case MeshPrimitiveType.Cylinder:
+                case MeshPrimitiveType.Cone:
+                    AddRow("Radius", radiusSpin);
+                    AddRow("Height", heightSpin);
+                    AddRow("Segments", segSpin);
+                    AddRow("Cap", capCheck);
+                    break;
+                case MeshPrimitiveType.Torus:
+                    AddRow("Major Radius", radiusSpin);
+                    AddRow("Major Segments", segSpin);
+                    AddRow("Minor Segments", minorSegSpin);
+                    break;
+                case MeshPrimitiveType.Circle:
+                    AddRow("Radius", radiusSpin);
+                    AddRow("Segments", segSpin);
+                    break;
+                case MeshPrimitiveType.Polygon:
+                    AddRow("Radius", radiusSpin);
+                    AddRow("Sides", sideSpin);
+                    break;
+                case MeshPrimitiveType.Grid:
+                    AddRow("Cells Per Side", gridCellSpin);
+                    AddRow("Cell Size", gridCellSizeSpin);
+                    break;
+            }
+
+            dlg.ShowAll();
+            if (dlg.Run() == (int)ResponseType.Ok)
+            {
+                _primSize = (float)sizeSpin.Value;
+                _primRadius = (float)radiusSpin.Value;
+                _primHeight = (float)heightSpin.Value;
+                _primSegments = (int)segSpin.Value;
+                _primRings = (int)ringSpin.Value;
+                _primMinorSegments = (int)minorSegSpin.Value;
+                _primPolygonSides = (int)sideSpin.Value;
+                _primGridCells = (int)gridCellSpin.Value;
+                _primCellSize = (float)gridCellSizeSpin.Value;
+                _primCapEnds = capCheck.Active;
+            }
+        }
+
+        private List<PointCloudObject> GetSelectedPointClouds()
+        {
+            return _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
+        }
+
+        private void OnPointCloudVoxelDownsampleClicked(object? sender, EventArgs e)
+        {
+            var selected = GetSelectedPointClouds();
+            if (selected.Count == 0)
+            {
+                ShowMessage("Please select at least one point cloud first.");
+                return;
+            }
+
+            int removed = 0;
+            foreach (var pc in selected)
+                removed += PointCloudOperations.VoxelDownsample(pc, _pcVoxelSize);
+
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Voxel downsample complete. Removed {removed:N0} points.";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ConfigurePointCloudVoxel()
+        {
+            var dlg = new NumericInputDialog(this, "Voxel Downsample", "Voxel Size:", _pcVoxelSize, 0.0001f, 10f, 0.001f, 4);
+            if (dlg.Run() == (int)ResponseType.Ok)
+            {
+                _pcVoxelSize = dlg.Value;
+            }
+            dlg.Destroy();
+        }
+
+        private void OnPointCloudRemoveOutliersClicked(object? sender, EventArgs e)
+        {
+            var selected = GetSelectedPointClouds();
+            if (selected.Count == 0)
+            {
+                ShowMessage("Please select at least one point cloud first.");
+                return;
+            }
+
+            int removed = 0;
+            foreach (var pc in selected)
+                removed += PointCloudOperations.RemoveStatisticalOutliers(pc, _pcOutlierK, _pcOutlierStdRatio);
+
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Outlier filter complete. Removed {removed:N0} points.";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ConfigurePointCloudOutliers()
+        {
+            var kDlg = new NumericInputDialog(this, "Outlier Removal", "K Neighbors:", _pcOutlierK, 2, 200, 1, 0);
+            if (kDlg.Run() != (int)ResponseType.Ok)
+            {
+                kDlg.Destroy();
+                return;
+            }
+            _pcOutlierK = (int)kDlg.Value;
+            kDlg.Destroy();
+
+            var stdDlg = new NumericInputDialog(this, "Outlier Removal", "Std. Ratio:", _pcOutlierStdRatio, 0.1f, 10f, 0.1f, 2);
+            if (stdDlg.Run() == (int)ResponseType.Ok)
+            {
+                _pcOutlierStdRatio = stdDlg.Value;
+            }
+            stdDlg.Destroy();
+        }
+
+        private void OnPointCloudRemoveDuplicatesClicked(object? sender, EventArgs e)
+        {
+            var selected = GetSelectedPointClouds();
+            if (selected.Count == 0)
+            {
+                ShowMessage("Please select at least one point cloud first.");
+                return;
+            }
+
+            int removed = 0;
+            foreach (var pc in selected)
+                removed += PointCloudOperations.RemoveDuplicates(pc, _pcDuplicateThreshold);
+
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Duplicate removal complete. Removed {removed:N0} points.";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ConfigurePointCloudDuplicates()
+        {
+            var dlg = new NumericInputDialog(this, "Remove Duplicates", "Distance Threshold:", _pcDuplicateThreshold, 0.000001f, 1f, 0.0001f, 6);
+            if (dlg.Run() == (int)ResponseType.Ok)
+            {
+                _pcDuplicateThreshold = dlg.Value;
+            }
+            dlg.Destroy();
+        }
+
+        private void OnPointCloudEstimateNormalsClicked(object? sender, EventArgs e)
+        {
+            var selected = GetSelectedPointClouds();
+            if (selected.Count == 0)
+            {
+                ShowMessage("Please select at least one point cloud first.");
+                return;
+            }
+
+            foreach (var pc in selected)
+                PointCloudOperations.EstimateNormals(pc, _pcNormalK);
+
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Estimated normals for {selected.Count} point cloud(s).";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ConfigurePointCloudNormals()
+        {
+            var dlg = new NumericInputDialog(this, "Estimate Normals", "K Neighbors:", _pcNormalK, 3, 200, 1, 0);
+            if (dlg.Run() == (int)ResponseType.Ok)
+            {
+                _pcNormalK = (int)dlg.Value;
+            }
+            dlg.Destroy();
+        }
+
+        private void OnPointCloudPassThroughClicked(object? sender, EventArgs e)
+        {
+            var selected = GetSelectedPointClouds();
+            if (selected.Count == 0)
+            {
+                ShowMessage("Please select at least one point cloud first.");
+                return;
+            }
+
+            int removed = 0;
+            foreach (var pc in selected)
+                removed += PointCloudOperations.PassThroughAxis(pc, _pcPassAxis, _pcPassMin, _pcPassMax);
+
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Pass-through complete. Removed {removed:N0} points.";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ConfigurePointCloudPassThrough()
+        {
+            var dlg = new Dialog("Pass-Through Filter", this, DialogFlags.Modal);
+            dlg.SetDefaultSize(320, 180);
+            dlg.AddButton("Cancel", ResponseType.Cancel);
+            dlg.AddButton("Apply", ResponseType.Ok);
+
+            var area = dlg.ContentArea;
+            area.BorderWidth = 10;
+            area.Spacing = 8;
+
+            var axisCombo = new ComboBoxText();
+            axisCombo.AppendText("X");
+            axisCombo.AppendText("Y");
+            axisCombo.AppendText("Z");
+            axisCombo.Active = Math.Clamp(_pcPassAxis, 0, 2);
+
+            var minSpin = new SpinButton(-100000, 100000, 0.01) { Digits = 3, Value = _pcPassMin };
+            var maxSpin = new SpinButton(-100000, 100000, 0.01) { Digits = 3, Value = _pcPassMax };
+
+            area.PackStart(new Label("Axis"), false, false, 0);
+            area.PackStart(axisCombo, false, false, 0);
+            area.PackStart(new Label("Min Value"), false, false, 0);
+            area.PackStart(minSpin, false, false, 0);
+            area.PackStart(new Label("Max Value"), false, false, 0);
+            area.PackStart(maxSpin, false, false, 0);
+            dlg.ShowAll();
+
+            if (dlg.Run() == (int)ResponseType.Ok)
+            {
+                _pcPassAxis = axisCombo.Active;
+                _pcPassMin = (float)minSpin.Value;
+                _pcPassMax = (float)maxSpin.Value;
+            }
+
+            dlg.Destroy();
+        }
+
+        private void OnPointCloudRadiusCropClicked(object? sender, EventArgs e)
+        {
+            var selected = GetSelectedPointClouds();
+            if (selected.Count == 0)
+            {
+                ShowMessage("Please select at least one point cloud first.");
+                return;
+            }
+
+            int removed = 0;
+            foreach (var pc in selected)
+                removed += PointCloudOperations.RadiusCrop(pc, _pcRadiusCenter, _pcRadius);
+
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Radius crop complete. Removed {removed:N0} points.";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ConfigurePointCloudRadiusCrop()
+        {
+            var centerDlg = new Vector3InputDialog(
+                this,
+                "Radius Crop Center",
+                "Center X", "Center Y", "Center Z",
+                _pcRadiusCenter,
+                -100000f, 100000f, 0.01f, 3);
+
+            if (centerDlg.Run() != (int)ResponseType.Ok)
+            {
+                centerDlg.Destroy();
+                return;
+            }
+
+            _pcRadiusCenter = centerDlg.Value;
+            centerDlg.Destroy();
+
+            var radiusDlg = new NumericInputDialog(this, "Radius Crop", "Radius:", _pcRadius, 0.001f, 100000f, 0.01f, 3);
+            if (radiusDlg.Run() == (int)ResponseType.Ok)
+            {
+                _pcRadius = radiusDlg.Value;
+            }
+            radiusDlg.Destroy();
+        }
+
+        private void OnPointCloudDenseClicked(object? sender, EventArgs e)
+        {
+            var selected = GetSelectedPointClouds();
+            if (selected.Count == 0)
+            {
+                ShowMessage("Please select at least one point cloud first.");
+                return;
+            }
+
+            int added = 0;
+            foreach (var pc in selected)
+                added += PointCloudOperations.Densify(pc, _pcDenseRadius, _pcDensePointsPerSeed);
+
+            _sceneTreeView.RefreshTree();
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Dense cloud complete. Added {added:N0} points.";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ConfigurePointCloudDense()
+        {
+            var radiusDlg = new NumericInputDialog(this, "Point Cloud to Dense Cloud", "Neighbor Radius:", _pcDenseRadius, 0.0001f, 10f, 0.001f, 4);
+            if (radiusDlg.Run() != (int)ResponseType.Ok)
+            {
+                radiusDlg.Destroy();
+                return;
+            }
+            _pcDenseRadius = radiusDlg.Value;
+            radiusDlg.Destroy();
+
+            var ppsDlg = new NumericInputDialog(this, "Point Cloud to Dense Cloud", "Points Per Seed:", _pcDensePointsPerSeed, 1, 8, 1, 0);
+            if (ppsDlg.Run() == (int)ResponseType.Ok)
+            {
+                _pcDensePointsPerSeed = (int)ppsDlg.Value;
+            }
+            ppsDlg.Destroy();
         }
     }
 }

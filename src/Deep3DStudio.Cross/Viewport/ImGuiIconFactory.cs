@@ -51,7 +51,31 @@ namespace Deep3DStudio.Viewport
         Refine,
         Mast3r,     // MASt3R - Matching And Stereo 3D Reconstruction (metric pointmaps)
         Must3r,     // MUSt3R - Multi-view Network (>2 images, video support)
-        Video       // Video file icon for MUSt3R video input
+        Video,      // Video file icon for MUSt3R video input
+        Plane,
+        Cube,
+        Sphere,
+        Cylinder,
+        Cone,
+        Torus,
+        Circle,
+        Polygon,
+        GridMesh,
+        VertexMove,
+        Extrude,
+        Inset,
+        Bridge,
+        VoxelFilter,
+        OutlierFilter,
+        DuplicateFilter,
+        Normals,
+        AxisFilter,
+        RadiusCrop,
+        DenseCloud,
+        Georef,
+        Residuals,
+        Dem,
+        GeoExport
     }
 
     public class ImGuiIconFactory : IDisposable
@@ -608,6 +632,221 @@ namespace Deep3DStudio.Viewport
                 playPath.LineTo(w * 0.6f, h * 0.5f);
                 playPath.Close();
                 canvas.DrawPath(playPath, pFill);
+            });
+
+            _icons[IconType.Plane] = CreateIcon(SKColors.SteelBlue, (canvas, w, h) => {
+                var pFill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
+                var pStroke = new SKPaint { Color = SKColors.Black, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawRect(w * 0.15f, h * 0.3f, w * 0.7f, h * 0.4f, pFill);
+                canvas.DrawRect(w * 0.15f, h * 0.3f, w * 0.7f, h * 0.4f, pStroke);
+            });
+
+            _icons[IconType.Cube] = CreateIcon(SKColors.SandyBrown, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawRect(w * 0.2f, h * 0.25f, w * 0.45f, h * 0.45f, p);
+                canvas.DrawLine(w * 0.2f, h * 0.25f, w * 0.38f, h * 0.1f, p);
+                canvas.DrawLine(w * 0.65f, h * 0.25f, w * 0.83f, h * 0.1f, p);
+                canvas.DrawLine(w * 0.38f, h * 0.1f, w * 0.83f, h * 0.1f, p);
+            });
+
+            _icons[IconType.Sphere] = CreateIcon(SKColors.LightSkyBlue, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawCircle(w * 0.5f, h * 0.5f, w * 0.28f, p);
+            });
+
+            _icons[IconType.Cylinder] = CreateIcon(SKColors.YellowGreen, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawRect(w * 0.25f, h * 0.2f, w * 0.5f, h * 0.55f, p);
+                canvas.DrawOval(new SKRect(w * 0.25f, h * 0.14f, w * 0.75f, h * 0.28f), p);
+                canvas.DrawOval(new SKRect(w * 0.25f, h * 0.68f, w * 0.75f, h * 0.82f), p);
+            });
+
+            _icons[IconType.Cone] = CreateIcon(SKColors.Orange, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                var tri = new SKPath();
+                tri.MoveTo(w * 0.5f, h * 0.15f);
+                tri.LineTo(w * 0.2f, h * 0.8f);
+                tri.LineTo(w * 0.8f, h * 0.8f);
+                tri.Close();
+                canvas.DrawPath(tri, p);
+            });
+
+            _icons[IconType.Torus] = CreateIcon(SKColors.MediumSeaGreen, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawCircle(w * 0.5f, h * 0.5f, w * 0.3f, p);
+                canvas.DrawCircle(w * 0.5f, h * 0.5f, w * 0.15f, p);
+            });
+
+            _icons[IconType.Circle] = CreateIcon(SKColors.SlateBlue, (canvas, w, h) => {
+                var pFill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
+                canvas.DrawCircle(w * 0.5f, h * 0.5f, w * 0.24f, pFill);
+            });
+
+            _icons[IconType.Polygon] = CreateIcon(SKColors.Plum, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                var path = new SKPath();
+                for (int i = 0; i < 6; i++)
+                {
+                    float a = (float)(i * Math.PI * 2.0 / 6.0 - Math.PI / 2.0);
+                    float x = w * 0.5f + (float)Math.Cos(a) * w * 0.28f;
+                    float y = h * 0.5f + (float)Math.Sin(a) * h * 0.28f;
+                    if (i == 0) path.MoveTo(x, y); else path.LineTo(x, y);
+                }
+                path.Close();
+                canvas.DrawPath(path, p);
+            });
+
+            _icons[IconType.GridMesh] = CreateIcon(SKColors.SteelBlue, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 1.6f, Style = SKPaintStyle.Stroke };
+                canvas.DrawRect(w * 0.15f, h * 0.15f, w * 0.7f, h * 0.7f, p);
+                for (int i = 1; i < 4; i++)
+                {
+                    float t = i / 4.0f;
+                    canvas.DrawLine(w * (0.15f + 0.7f * t), h * 0.15f, w * (0.15f + 0.7f * t), h * 0.85f, p);
+                    canvas.DrawLine(w * 0.15f, h * (0.15f + 0.7f * t), w * 0.85f, h * (0.15f + 0.7f * t), p);
+                }
+            });
+
+            _icons[IconType.VertexMove] = CreateIcon(SKColors.CornflowerBlue, (canvas, w, h) => {
+                var pFill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
+                canvas.DrawCircle(w * 0.35f, h * 0.65f, 4, pFill);
+                canvas.DrawCircle(w * 0.65f, h * 0.65f, 4, pFill);
+                canvas.DrawCircle(w * 0.5f, h * 0.35f, 4, pFill);
+                var p = new SKPaint { Color = SKColors.Yellow, StrokeWidth = 3, Style = SKPaintStyle.Stroke };
+                canvas.DrawLine(w * 0.5f, h * 0.2f, w * 0.5f, h * 0.48f, p);
+            });
+
+            _icons[IconType.Extrude] = CreateIcon(SKColors.Goldenrod, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawRect(w * 0.2f, h * 0.45f, w * 0.4f, h * 0.3f, p);
+                var pa = new SKPaint { Color = SKColors.LimeGreen, StrokeWidth = 3, Style = SKPaintStyle.Stroke };
+                canvas.DrawLine(w * 0.72f, h * 0.72f, w * 0.72f, h * 0.2f, pa);
+            });
+
+            _icons[IconType.Inset] = CreateIcon(SKColors.DodgerBlue, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawRect(w * 0.15f, h * 0.15f, w * 0.7f, h * 0.7f, p);
+                canvas.DrawRect(w * 0.3f, h * 0.3f, w * 0.4f, h * 0.4f, p);
+            });
+
+            _icons[IconType.Bridge] = CreateIcon(SKColors.IndianRed, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawRect(w * 0.12f, h * 0.3f, w * 0.22f, h * 0.4f, p);
+                canvas.DrawRect(w * 0.66f, h * 0.3f, w * 0.22f, h * 0.4f, p);
+                canvas.DrawLine(w * 0.34f, h * 0.5f, w * 0.66f, h * 0.5f, p);
+            });
+
+            _icons[IconType.VoxelFilter] = CreateIcon(SKColors.CadetBlue, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 1.5f, Style = SKPaintStyle.Stroke };
+                for (int r = 0; r < 3; r++)
+                {
+                    for (int c = 0; c < 3; c++)
+                    {
+                        canvas.DrawRect(w * (0.2f + c * 0.18f), h * (0.2f + r * 0.18f), w * 0.14f, h * 0.14f, p);
+                    }
+                }
+            });
+
+            _icons[IconType.OutlierFilter] = CreateIcon(SKColors.MediumSlateBlue, (canvas, w, h) => {
+                var pFill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
+                for (int i = 0; i < 8; i++)
+                {
+                    float a = (float)(i * Math.PI * 2.0 / 8.0);
+                    canvas.DrawCircle(w * (0.5f + (float)Math.Cos(a) * 0.22f), h * (0.5f + (float)Math.Sin(a) * 0.22f), 3, pFill);
+                }
+                var p = new SKPaint { Color = SKColors.Red, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawLine(w * 0.74f, h * 0.2f, w * 0.9f, h * 0.36f, p);
+            });
+
+            _icons[IconType.DuplicateFilter] = CreateIcon(SKColors.MediumTurquoise, (canvas, w, h) => {
+                var pFill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
+                canvas.DrawCircle(w * 0.4f, h * 0.5f, 7, pFill);
+                canvas.DrawCircle(w * 0.6f, h * 0.5f, 7, pFill);
+                var p = new SKPaint { Color = SKColors.LimeGreen, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawLine(w * 0.5f, h * 0.2f, w * 0.5f, h * 0.8f, p);
+            });
+
+            _icons[IconType.Normals] = CreateIcon(SKColors.DarkSeaGreen, (canvas, w, h) => {
+                var pFill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
+                canvas.DrawCircle(w * 0.35f, h * 0.65f, 3, pFill);
+                canvas.DrawCircle(w * 0.65f, h * 0.65f, 3, pFill);
+                canvas.DrawCircle(w * 0.5f, h * 0.4f, 3, pFill);
+                var p = new SKPaint { Color = SKColors.DeepSkyBlue, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawLine(w * 0.5f, h * 0.65f, w * 0.5f, h * 0.18f, p);
+            });
+
+            _icons[IconType.AxisFilter] = CreateIcon(SKColors.SteelBlue, (canvas, w, h) => {
+                var pFill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
+                canvas.DrawCircle(w * 0.25f, h * 0.5f, 3, pFill);
+                canvas.DrawCircle(w * 0.5f, h * 0.5f, 3, pFill);
+                canvas.DrawCircle(w * 0.75f, h * 0.5f, 3, pFill);
+                var p = new SKPaint { Color = SKColors.Yellow, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawRect(w * 0.35f, h * 0.35f, w * 0.3f, h * 0.3f, p);
+            });
+
+            _icons[IconType.RadiusCrop] = CreateIcon(SKColors.Teal, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawCircle(w * 0.5f, h * 0.5f, w * 0.28f, p);
+                var pFill = new SKPaint { Color = SKColors.DeepSkyBlue, Style = SKPaintStyle.Fill };
+                canvas.DrawCircle(w * 0.5f, h * 0.5f, w * 0.12f, pFill);
+            });
+
+            _icons[IconType.DenseCloud] = CreateIcon(SKColors.MediumTurquoise, (canvas, w, h) => {
+                var basePaint = new SKPaint { Color = SKColors.DeepSkyBlue, Style = SKPaintStyle.Fill };
+                canvas.DrawCircle(w * 0.24f, h * 0.28f, 3, basePaint);
+                canvas.DrawCircle(w * 0.52f, h * 0.22f, 3, basePaint);
+                canvas.DrawCircle(w * 0.72f, h * 0.44f, 3, basePaint);
+                canvas.DrawCircle(w * 0.32f, h * 0.68f, 3, basePaint);
+                canvas.DrawCircle(w * 0.68f, h * 0.72f, 3, basePaint);
+
+                var densePaint = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
+                canvas.DrawCircle(w * 0.38f, h * 0.3f, 2.5f, densePaint);
+                canvas.DrawCircle(w * 0.6f, h * 0.33f, 2.5f, densePaint);
+                canvas.DrawCircle(w * 0.48f, h * 0.52f, 2.5f, densePaint);
+                canvas.DrawCircle(w * 0.56f, h * 0.62f, 2.5f, densePaint);
+
+                var arrow = new SKPaint { Color = SKColors.Gold, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawLine(w * 0.12f, h * 0.82f, w * 0.12f, h * 0.54f, arrow);
+                var path = new SKPath();
+                path.MoveTo(w * 0.12f, h * 0.46f);
+                path.LineTo(w * 0.06f, h * 0.56f);
+                path.LineTo(w * 0.18f, h * 0.56f);
+                path.Close();
+                canvas.DrawPath(path, new SKPaint { Color = SKColors.Gold, Style = SKPaintStyle.Fill });
+            });
+
+            _icons[IconType.Georef] = CreateIcon(SKColors.CadetBlue, (canvas, w, h) => {
+                var pFill = new SKPaint { Color = SKColors.White, Style = SKPaintStyle.Fill };
+                canvas.DrawCircle(w * 0.35f, h * 0.35f, 6, pFill);
+                canvas.DrawCircle(w * 0.65f, h * 0.35f, 6, pFill);
+                var p = new SKPaint { Color = SKColors.DeepSkyBlue, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawLine(w * 0.35f, h * 0.45f, w * 0.35f, h * 0.82f, p);
+                canvas.DrawLine(w * 0.65f, h * 0.45f, w * 0.65f, h * 0.82f, p);
+            });
+
+            _icons[IconType.Residuals] = CreateIcon(SKColors.SlateGray, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawRect(w * 0.15f, h * 0.2f, w * 0.7f, h * 0.6f, p);
+                var p2 = new SKPaint { Color = SKColors.LimeGreen, StrokeWidth = 3, Style = SKPaintStyle.Stroke };
+                canvas.DrawLine(w * 0.2f, h * 0.65f, w * 0.45f, h * 0.45f, p2);
+                canvas.DrawLine(w * 0.45f, h * 0.45f, w * 0.8f, h * 0.32f, p2);
+            });
+
+            _icons[IconType.Dem] = CreateIcon(SKColors.DarkOliveGreen, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 1.6f, Style = SKPaintStyle.Stroke };
+                canvas.DrawRect(w * 0.15f, h * 0.2f, w * 0.7f, h * 0.6f, p);
+                for (int i = 1; i < 4; i++)
+                {
+                    float yy = h * (0.2f + i * 0.15f);
+                    canvas.DrawLine(w * 0.15f, yy, w * 0.85f, yy, p);
+                }
+            });
+
+            _icons[IconType.GeoExport] = CreateIcon(SKColors.RoyalBlue, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawRect(w * 0.15f, h * 0.2f, w * 0.45f, h * 0.55f, p);
+                var pArrow = new SKPaint { Color = SKColors.LimeGreen, StrokeWidth = 3, Style = SKPaintStyle.Stroke };
+                canvas.DrawLine(w * 0.62f, h * 0.55f, w * 0.88f, h * 0.55f, pArrow);
             });
         }
 

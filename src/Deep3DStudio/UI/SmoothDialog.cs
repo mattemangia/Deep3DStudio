@@ -11,10 +11,34 @@ namespace Deep3DStudio.UI
         private SpinButton _spinLambda;
         private SpinButton _spinMu;
 
-        public bool IsTaubin => _rbTaubin.Active;
-        public int Iterations => (int)_spinIterations.Value;
-        public float Lambda => (float)_spinLambda.Value;
-        public float Mu => (float)_spinMu.Value;
+        public bool IsTaubin
+        {
+            get => _rbTaubin.Active;
+            set
+            {
+                _rbTaubin.Active = value;
+                _rbLaplacian.Active = !value;
+                UpdateSensitivity();
+            }
+        }
+
+        public int Iterations
+        {
+            get => (int)_spinIterations.Value;
+            set => _spinIterations.Value = Math.Clamp(value, 1, 100);
+        }
+
+        public float Lambda
+        {
+            get => (float)_spinLambda.Value;
+            set => _spinLambda.Value = Math.Clamp(value, 0.01f, 1.0f);
+        }
+
+        public float Mu
+        {
+            get => (float)_spinMu.Value;
+            set => _spinMu.Value = Math.Clamp(value, -1.0f, -0.01f);
+        }
 
         public SmoothDialog(Window parent) : base("Smooth Mesh", parent, DialogFlags.Modal)
         {

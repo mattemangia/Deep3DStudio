@@ -54,6 +54,47 @@ namespace Deep3DStudio
         // When disabled, user can manually trigger each step (e.g., Dust3R -> then LGM -> then UniRig)
         private bool _autoWorkflowEnabled = true;
 
+        // Mesh editor operation presets (left click executes with current values)
+        private int _meshDecimateMethod = 0; // 0 = ratio, 1 = uniform
+        private float _meshDecimateRatio = 0.5f;
+        private float _meshDecimateVoxelSize = 0.01f;
+        private int _meshSmoothMethod = 1; // 0 = Laplacian, 1 = Taubin
+        private int _meshSmoothIterations = 2;
+        private float _meshSmoothLambda = 0.5f;
+        private float _meshSmoothMu = -0.53f;
+        private float _meshOptimizeEpsilon = 0.0001f;
+
+        // Primitive presets
+        private float _primSize = 1.0f;
+        private float _primRadius = 0.5f;
+        private float _primHeight = 1.0f;
+        private int _primSegments = 24;
+        private int _primRings = 16;
+        private int _primMinorSegments = 16;
+        private int _primPolygonSides = 6;
+        private int _primGridCells = 12;
+        private float _primCellSize = 0.1f;
+        private bool _primCapEnds = true;
+
+        // Triangle editing presets
+        private OpenTK.Mathematics.Vector3 _penMoveDelta = OpenTK.Mathematics.Vector3.Zero;
+        private float _penExtrudeDistance = 0.05f;
+        private float _penInsetAmount = 0.2f;
+
+        // Point cloud operation presets
+        private float _pcVoxelSize = 0.02f;
+        private int _pcOutlierK = 20;
+        private float _pcOutlierStdRatio = 2.0f;
+        private float _pcDuplicateThreshold = 0.001f;
+        private int _pcNormalK = 30;
+        private int _pcPassAxis = 2;
+        private float _pcPassMin = -0.5f;
+        private float _pcPassMax = 0.5f;
+        private OpenTK.Mathematics.Vector3 _pcRadiusCenter = OpenTK.Mathematics.Vector3.Zero;
+        private float _pcRadius = 1.0f;
+        private float _pcDenseRadius = 0.03f;
+        private int _pcDensePointsPerSeed = 2;
+
         /// <summary>
         /// Gets the current reconstruction engine display name from settings.
         /// </summary>
@@ -100,6 +141,10 @@ namespace Deep3DStudio
         }
 
         // Panel containers for show/hide
+        private Widget _topToolbar = null!;
+        private Widget _meshEditorToolbar = null!;
+        private Widget _pointCloudToolbar = null!;
+        private Widget _georeferenceToolbar = null!;
         private Widget _leftPanel = null!;
         private Widget _verticalToolbar = null!;
         private Paned _mainHPaned = null!;
@@ -107,6 +152,10 @@ namespace Deep3DStudio
         // Menu check items for panel visibility
         private CheckMenuItem? _showSceneTreeMenuItem;
         private CheckMenuItem? _showVerticalToolbarMenuItem;
+        private CheckMenuItem? _showTopToolbarMenuItem;
+        private CheckMenuItem? _showMeshEditorToolbarMenuItem;
+        private CheckMenuItem? _showPointCloudToolbarMenuItem;
+        private CheckMenuItem? _showGeoreferenceToolbarMenuItem;
         private CheckMenuItem? _showGridMenuItem;
         private CheckMenuItem? _showAxesMenuItem;
         private CheckMenuItem? _showCamerasMenuItem;
@@ -163,11 +212,29 @@ namespace Deep3DStudio
             Console.WriteLine("MainWindow: Menu bar created");
 
             // 2. Toolbar (Top)
-            var toolbar = CreateToolbar();
-            toolbar.Visible = true;
-            toolbar.SetSizeRequest(-1, 35); // Minimum height
-            mainVBox.PackStart(toolbar, false, false, 0);
+            _topToolbar = CreateToolbar();
+            _topToolbar.Visible = settings.ShowTopToolbar;
+            _topToolbar.SetSizeRequest(-1, 35); // Minimum height
+            mainVBox.PackStart(_topToolbar, false, false, 0);
             Console.WriteLine("MainWindow: Toolbar created");
+
+            // 2b. Mesh editor toolbar
+            _meshEditorToolbar = CreateMeshEditorToolbar();
+            _meshEditorToolbar.Visible = settings.ShowMeshEditorToolbar;
+            _meshEditorToolbar.SetSizeRequest(-1, 35);
+            mainVBox.PackStart(_meshEditorToolbar, false, false, 0);
+
+            // 2c. Point cloud toolbar
+            _pointCloudToolbar = CreatePointCloudToolbar();
+            _pointCloudToolbar.Visible = settings.ShowPointCloudToolbar;
+            _pointCloudToolbar.SetSizeRequest(-1, 35);
+            mainVBox.PackStart(_pointCloudToolbar, false, false, 0);
+
+            // 2d. Georeferencing toolbar
+            _georeferenceToolbar = CreateGeoreferenceToolbar();
+            _georeferenceToolbar.Visible = settings.ShowGeoreferenceToolbar;
+            _georeferenceToolbar.SetSizeRequest(-1, 35);
+            mainVBox.PackStart(_georeferenceToolbar, false, false, 0);
 
             // 3. Main Content Area
             var contentBox = new Box(Orientation.Horizontal, 0);
@@ -175,6 +242,7 @@ namespace Deep3DStudio
 
             // Vertical Toolbar (Left of viewport)
             _verticalToolbar = CreateVerticalToolbar();
+            _verticalToolbar.Visible = settings.ShowVerticalToolbar;
             contentBox.PackStart(_verticalToolbar, false, false, 0);
 
             // Main Paned (Tree + Viewport)
@@ -333,6 +401,11 @@ namespace Deep3DStudio
                 settings.ShowAxes = _viewport?.ShowAxes ?? true;
                 settings.ShowCameras = _viewport?.ShowCameras ?? true;
                 settings.ShowInfoOverlay = _viewport?.ShowInfoText ?? true;
+                settings.ShowTopToolbar = _topToolbar?.Visible ?? true;
+                settings.ShowVerticalToolbar = _verticalToolbar?.Visible ?? true;
+                settings.ShowMeshEditorToolbar = _meshEditorToolbar?.Visible ?? true;
+                settings.ShowPointCloudToolbar = _pointCloudToolbar?.Visible ?? true;
+                settings.ShowGeoreferenceToolbar = _georeferenceToolbar?.Visible ?? true;
 
                 // Save to INI file
                 settings.Save();
