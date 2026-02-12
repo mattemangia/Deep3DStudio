@@ -51,16 +51,52 @@ _tv_nms_lib_def = None
 _tv_nms_lib_cpu = None
 
 
+def _clear_torchvision_modules():
+    stale = [name for name in list(sys.modules.keys()) if name == "torchvision" or name.startswith("torchvision.")]
+    for name in stale:
+        sys.modules.pop(name, None)
+
+
+def _looks_like_missing_torchvision_nms(error):
+    msg = str(error).lower()
+    patterns = (
+        "torchvision::nms",
+        "operator torchvision::nms does not exist",
+        "couldn't load custom c++ ops",
+        "custom c++ ops",
+        "torchvision extension",
+        "failed to load image python extension",
+    )
+    return any(p in msg for p in patterns)
+
+
 def _install_torchvision_nms_stub():
     """
     Install a minimal torchvision::nms operator when torchvision C++ ops are missing.
     This avoids import-time crashes in environments with mismatched torch/torchvision.
     """
     global _tv_nms_lib_def, _tv_nms_lib_cpu
+    stub_mode = os.environ.get("DEEP3D_TORCHVISION_NMS_STUB", "auto" if sys.platform == "darwin" else "always").strip().lower()
+    if stub_mode in {"0", "false", "off", "never", "disable", "disabled"}:
+        return
+
     try:
         import torch
     except Exception:
         return
+
+    if sys.platform == "darwin":
+        try:
+            import torchvision
+            from torchvision import ops as tv_ops
+            _ = tv_ops.nms
+            return
+        except Exception as e:
+            # Avoid masking unrelated import failures with a fake op.
+            if stub_mode == "auto" and not _looks_like_missing_torchvision_nms(e):
+                log(f"Skipping torchvision::nms stub due to non-NMS import error: {e}")
+                return
+            _clear_torchvision_modules()
 
     try:
         _ = torch.ops.torchvision.nms
@@ -90,6 +126,8 @@ def _install_torchvision_nms_stub():
     try:
         _ = torch.ops.torchvision.nms
         log("Installed torchvision::nms stub.")
+        if sys.platform == "darwin":
+            os.environ["DEEP3D_TORCHVISION_NMS_STUB_ACTIVE"] = "1"
     except Exception:
         pass
 
@@ -1834,9 +1872,51 @@ def run_inference(model_name, input_path, output_path, weights_path=None, device
     log(f"Results written to {output_path}")
     return result
 
+def run_healthcheck(model_name=None, device_str='auto'):
+    """
+    Lightweight runtime probe for deployment validation.
+    This must avoid heavy model loading and only validate core runtime imports.
+    """
+    info = {
+        "success": False,
+        "model": model_name,
+        "device": device_str,
+        "tv_nms_stub_mode": os.environ.get("DEEP3D_TORCHVISION_NMS_STUB", ""),
+        "tv_nms_stub_active": os.environ.get("DEEP3D_TORCHVISION_NMS_STUB_ACTIVE", "0"),
+    }
+
+    try:
+        import torch
+        info["torch"] = getattr(torch, "__version__", "unknown")
+        info["cuda_available"] = bool(torch.cuda.is_available())
+        info["mps_available"] = bool(hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
+    except Exception as e:
+        info["error"] = f"torch import failed: {e}"
+        return info
+
+    try:
+        import torchvision
+        from torchvision import ops as tv_ops
+        _ = tv_ops.nms
+        info["torchvision"] = getattr(torchvision, "__version__", "unknown")
+    except Exception as e:
+        info["error"] = f"torchvision import failed: {e}"
+        return info
+
+    if model_name in ("dust3r", "mast3r", "must3r"):
+        try:
+            _setup_dust3r_for_mast3r()
+            info["dust3r_path_setup"] = True
+        except Exception as e:
+            info["dust3r_path_setup"] = False
+            info["warning"] = f"dust3r path setup warning: {e}"
+
+    info["success"] = True
+    return info
+
 def main():
     parser = argparse.ArgumentParser(description='Deep3DStudio Subprocess Inference')
-    parser.add_argument('--command', required=True, choices=['load', 'infer', 'unload', 'ping'])
+    parser.add_argument('--command', required=True, choices=['load', 'infer', 'unload', 'ping', 'healthcheck'])
     parser.add_argument('--model', help='Model name')
     parser.add_argument('--weights', help='Weights path')
     parser.add_argument('--device', default='cuda')
@@ -1856,6 +1936,8 @@ def main():
 
     if args.command == 'ping':
         result = {"success": True, "message": "pong"}
+    elif args.command == 'healthcheck':
+        result = run_healthcheck(args.model, args.device)
     elif args.command == 'load':
         result = load_model(args.model, args.weights, args.device)
     elif args.command == 'unload':

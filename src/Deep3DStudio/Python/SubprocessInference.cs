@@ -37,11 +37,51 @@ namespace Deep3DStudio.Python
         private bool _disposed = false;
         private Process? _persistentProcess;
         private readonly object _processLock = new object();
+        private readonly object _macRuntimeLock = new object();
+        private readonly List<MacRuntimeProfile> _macRuntimeProfiles = new();
+        private bool _macRuntimeProfilesLoaded = false;
+        private int _activeMacRuntimeProfileIndex = -1;
+        private bool _macHealthcheckAttempted = false;
 
         public event Action<string>? OnLog;
         public event Action<string, float, string>? OnProgress;
 
         public bool IsLoaded => _isLoaded;
+
+        private sealed class MacRuntimeConfig
+        {
+            [JsonPropertyName("selected_profile_id")]
+            public string? SelectedProfileId { get; set; }
+
+            [JsonPropertyName("profiles")]
+            public List<MacRuntimeConfigProfile>? Profiles { get; set; }
+        }
+
+        private sealed class MacRuntimeConfigProfile
+        {
+            [JsonPropertyName("id")]
+            public string? Id { get; set; }
+
+            [JsonPropertyName("description")]
+            public string? Description { get; set; }
+
+            [JsonPropertyName("valid")]
+            public bool Valid { get; set; } = true;
+
+            [JsonPropertyName("libomp_path")]
+            public string? LibompPath { get; set; }
+
+            [JsonPropertyName("env")]
+            public Dictionary<string, string>? Env { get; set; }
+        }
+
+        private sealed class MacRuntimeProfile
+        {
+            public string Id { get; init; } = "system-default";
+            public string Description { get; init; } = "System default runtime";
+            public string? LibompPath { get; init; }
+            public Dictionary<string, string> Env { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+        }
 
         public SubprocessInference(string modelName)
         {
@@ -277,31 +317,62 @@ namespace Deep3DStudio.Python
             LastOpenMpShmError = false;
             LastErrorMessage = null;
 
-            var firstTry = RunPythonCommandInternal(arguments, timeoutMs, cancellationToken, safeOpenMpMode: false);
-            if (!ShouldRetryWithSafeOpenMp(firstTry.exitCode, firstTry.stderr))
+            bool macProfileSensitive = OperatingSystem.IsMacOS() && IsProfileSensitiveCommand(arguments);
+            var profiles = GetMacProfilesForAttempt(macProfileSensitive);
+
+            (int exitCode, string stdout, string stderr) last = (1, "", "No attempt executed");
+
+            foreach (var profile in profiles)
             {
-                if (firstTry.exitCode != 0)
+                var firstTry = RunPythonCommandInternal(
+                    arguments,
+                    timeoutMs,
+                    cancellationToken,
+                    safeOpenMpMode: false,
+                    macProfile: profile);
+
+                if (firstTry.exitCode == 0)
                 {
-                    LastOpenMpShmError = IsOpenMpShmError(firstTry.exitCode, firstTry.stderr);
-                    LastErrorMessage = BuildErrorMessage(firstTry.exitCode, firstTry.stderr);
+                    SetActiveMacProfile(profile);
+                    LastOpenMpShmError = false;
+                    LastErrorMessage = null;
+                    return firstTry;
                 }
-                return firstTry;
+
+                last = firstTry;
+
+                bool shouldRetrySafe = ShouldRetryWithSafeOpenMp(firstTry.exitCode, firstTry.stderr)
+                    || (OperatingSystem.IsMacOS() && IsMacRuntimeBootstrapError(firstTry.exitCode, firstTry.stderr));
+
+                if (shouldRetrySafe)
+                {
+                    Log("Detected macOS runtime/bootstrap failure. Retrying with safe OpenMP settings...");
+                    var retry = RunPythonCommandInternal(
+                        arguments,
+                        timeoutMs,
+                        cancellationToken,
+                        safeOpenMpMode: true,
+                        macProfile: profile);
+
+                    if (retry.exitCode == 0)
+                    {
+                        SetActiveMacProfile(profile);
+                        LastOpenMpShmError = false;
+                        LastErrorMessage = null;
+                        return retry;
+                    }
+
+                    last = retry;
+                }
+
+                // Only cycle mac profiles for bootstrap-sensitive commands.
+                if (!macProfileSensitive)
+                    break;
             }
 
-            Log("Detected OpenMP shared-memory crash on macOS (exit 134). Retrying with safe OpenMP settings...");
-            var retry = RunPythonCommandInternal(arguments, timeoutMs, cancellationToken, safeOpenMpMode: true);
-            if (retry.exitCode == 0)
-            {
-                Log("Retry succeeded with safe OpenMP settings.");
-                LastOpenMpShmError = false;
-                LastErrorMessage = null;
-            }
-            else
-            {
-                LastOpenMpShmError = IsOpenMpShmError(retry.exitCode, retry.stderr);
-                LastErrorMessage = BuildErrorMessage(retry.exitCode, retry.stderr);
-            }
-            return retry;
+            LastOpenMpShmError = IsOpenMpShmError(last.exitCode, last.stderr);
+            LastErrorMessage = BuildErrorMessage(last.exitCode, last.stderr);
+            return last;
         }
 
         private static bool ShouldRetryWithSafeOpenMp(int exitCode, string stderr)
@@ -328,12 +399,292 @@ namespace Deep3DStudio.Python
             {
                 return "OpenMP shared-memory initialization failed on macOS (OMP #179 / SHM2).";
             }
+            if (IsTorchvisionNmsDuplicateRegistrationError(stderr))
+            {
+                return "torchvision NMS operator registration conflicted on macOS runtime startup.";
+            }
             return $"Python subprocess failed with exit code {exitCode}.";
+        }
+
+        private string? GetPythonHomeDirectory()
+        {
+            try
+            {
+                var pythonDir = Path.GetDirectoryName(_pythonPath);
+                if (string.IsNullOrWhiteSpace(pythonDir))
+                    return null;
+
+                var parent = Directory.GetParent(pythonDir);
+                return parent?.FullName;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Dictionary<string, string> BuildDefaultMacRuntimeEnv()
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["KMP_USE_SHM"] = "0",
+                ["KMP_DUPLICATE_LIB_OK"] = "TRUE",
+                ["KMP_INIT_AT_FORK"] = "FALSE",
+                ["KMP_AFFINITY"] = "disabled",
+                ["OMP_NUM_THREADS"] = "1",
+                ["OMP_WAIT_POLICY"] = "PASSIVE",
+                ["MKL_NUM_THREADS"] = "1",
+                ["OPENBLAS_NUM_THREADS"] = "1",
+                ["NUMEXPR_NUM_THREADS"] = "1",
+                ["VECLIB_MAXIMUM_THREADS"] = "1",
+                ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1",
+                ["DEEP3D_TORCHVISION_NMS_STUB"] = "auto",
+            };
+        }
+
+        private static void TryAddMacProfile(List<MacRuntimeProfile> profiles, string id, string description, string? libompPath, Dictionary<string, string>? env = null)
+        {
+            if (!string.IsNullOrWhiteSpace(libompPath) && !File.Exists(libompPath))
+                return;
+
+            if (profiles.Any(p =>
+                    p.Id.Equals(id, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(p.LibompPath, libompPath, StringComparison.Ordinal)))
+            {
+                return;
+            }
+
+            var profileEnv = BuildDefaultMacRuntimeEnv();
+            if (env != null)
+            {
+                foreach (var kv in env)
+                {
+                    if (!string.IsNullOrWhiteSpace(kv.Key) && !string.IsNullOrWhiteSpace(kv.Value))
+                        profileEnv[kv.Key] = kv.Value;
+                }
+            }
+
+            profiles.Add(new MacRuntimeProfile
+            {
+                Id = id,
+                Description = description,
+                LibompPath = libompPath,
+                Env = profileEnv
+            });
+        }
+
+        private void LoadMacRuntimeProfilesIfNeeded()
+        {
+            if (!OperatingSystem.IsMacOS())
+                return;
+
+            lock (_macRuntimeLock)
+            {
+                if (_macRuntimeProfilesLoaded)
+                    return;
+
+                _macRuntimeProfiles.Clear();
+                string? selectedId = null;
+
+                try
+                {
+                    var pythonHome = GetPythonHomeDirectory();
+                    if (!string.IsNullOrWhiteSpace(pythonHome))
+                    {
+                        string configPath = Path.Combine(pythonHome, "runtime_mac.json");
+                        if (File.Exists(configPath))
+                        {
+                            var json = File.ReadAllText(configPath);
+                            var config = JsonSerializer.Deserialize<MacRuntimeConfig>(json, JsonOptions);
+                            if (config?.Profiles != null)
+                            {
+                                selectedId = config.SelectedProfileId;
+                                foreach (var p in config.Profiles)
+                                {
+                                    if (p == null || !p.Valid || string.IsNullOrWhiteSpace(p.Id))
+                                        continue;
+
+                                    TryAddMacProfile(
+                                        _macRuntimeProfiles,
+                                        p.Id!,
+                                        p.Description ?? p.Id!,
+                                        p.LibompPath,
+                                        p.Env);
+                                }
+                            }
+                            Log($"Loaded mac runtime profile config: {configPath}");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log($"Failed to parse runtime_mac.json: {ex.Message}");
+                }
+
+                if (_macRuntimeProfiles.Count == 0)
+                {
+                    var pythonHome = GetPythonHomeDirectory();
+                    if (!string.IsNullOrWhiteSpace(pythonHome))
+                    {
+                        foreach (var pyVersion in new[] { "3.10", "3.11", "3.9" })
+                        {
+                            var bundledLibomp = Path.Combine(pythonHome, "lib", $"python{pyVersion}", "site-packages", "torch", "lib", "libomp.dylib");
+                            TryAddMacProfile(_macRuntimeProfiles, "bundled-torch-libomp", "Bundled torch libomp", bundledLibomp);
+                        }
+                    }
+
+                    TryAddMacProfile(_macRuntimeProfiles, "homebrew-arm64-libomp", "Homebrew arm64 libomp", "/opt/homebrew/opt/libomp/lib/libomp.dylib");
+                    TryAddMacProfile(_macRuntimeProfiles, "homebrew-x64-libomp", "Homebrew x64 libomp", "/usr/local/opt/libomp/lib/libomp.dylib");
+                    TryAddMacProfile(_macRuntimeProfiles, "system-default", "No libomp override", null);
+                }
+
+                _activeMacRuntimeProfileIndex = 0;
+                if (!string.IsNullOrWhiteSpace(selectedId))
+                {
+                    int idx = _macRuntimeProfiles.FindIndex(p => p.Id.Equals(selectedId, StringComparison.OrdinalIgnoreCase));
+                    if (idx >= 0)
+                        _activeMacRuntimeProfileIndex = idx;
+                }
+
+                _macRuntimeProfilesLoaded = true;
+                if (_macRuntimeProfiles.Count > 0)
+                {
+                    Log($"macOS runtime profiles loaded: {_macRuntimeProfiles.Count}, active={_macRuntimeProfiles[_activeMacRuntimeProfileIndex].Id}");
+                }
+            }
+        }
+
+        private List<MacRuntimeProfile?> GetMacProfilesForAttempt(bool profileSensitiveCommand)
+        {
+            if (!OperatingSystem.IsMacOS())
+                return new List<MacRuntimeProfile?> { null };
+
+            LoadMacRuntimeProfilesIfNeeded();
+
+            lock (_macRuntimeLock)
+            {
+                if (_macRuntimeProfiles.Count == 0)
+                    return new List<MacRuntimeProfile?> { null };
+
+                var profiles = new List<MacRuntimeProfile?>();
+                int active = Math.Clamp(_activeMacRuntimeProfileIndex, 0, _macRuntimeProfiles.Count - 1);
+                profiles.Add(_macRuntimeProfiles[active]);
+
+                if (profileSensitiveCommand)
+                {
+                    for (int i = 0; i < _macRuntimeProfiles.Count; i++)
+                    {
+                        if (i == active)
+                            continue;
+                        profiles.Add(_macRuntimeProfiles[i]);
+                    }
+                }
+
+                return profiles;
+            }
+        }
+
+        private void SetActiveMacProfile(MacRuntimeProfile? profile)
+        {
+            if (!OperatingSystem.IsMacOS() || profile == null)
+                return;
+
+            lock (_macRuntimeLock)
+            {
+                int idx = _macRuntimeProfiles.FindIndex(p => p.Id.Equals(profile.Id, StringComparison.OrdinalIgnoreCase));
+                if (idx >= 0)
+                    _activeMacRuntimeProfileIndex = idx;
+            }
+        }
+
+        private static bool IsProfileSensitiveCommand(string arguments)
+        {
+            return arguments.Contains("--command load", StringComparison.Ordinal)
+                || arguments.Contains("--command ping", StringComparison.Ordinal)
+                || arguments.Contains("--command healthcheck", StringComparison.Ordinal);
+        }
+
+        private static bool IsMacRuntimeBootstrapError(int exitCode, string stderr)
+        {
+            if (IsOpenMpShmError(exitCode, stderr))
+                return true;
+
+            if (IsTorchvisionNmsDuplicateRegistrationError(stderr))
+                return true;
+
+            if (string.IsNullOrWhiteSpace(stderr))
+                return false;
+
+            return stderr.Contains("libomp", StringComparison.OrdinalIgnoreCase)
+                || stderr.Contains("Library not loaded", StringComparison.OrdinalIgnoreCase)
+                || stderr.Contains("dlopen(", StringComparison.OrdinalIgnoreCase)
+                || stderr.Contains("image not found", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsTorchvisionNmsDuplicateRegistrationError(string stderr)
+        {
+            if (string.IsNullOrWhiteSpace(stderr))
+                return false;
+
+            return stderr.Contains("torchvision::nms", StringComparison.OrdinalIgnoreCase)
+                && (stderr.Contains("register an operator", StringComparison.OrdinalIgnoreCase)
+                    || stderr.Contains("duplicate registration", StringComparison.OrdinalIgnoreCase)
+                    || stderr.Contains("already registered", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static void SetEnvironmentIfMissing(ProcessStartInfo psi, string key, string value)
+        {
+            if (!psi.Environment.ContainsKey(key))
+                psi.Environment[key] = value;
+        }
+
+        private static string PrependPathEntry(string? existing, string prefix)
+        {
+            if (string.IsNullOrWhiteSpace(existing))
+                return prefix;
+
+            var segments = existing.Split(':', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Any(s => s.Equals(prefix, StringComparison.Ordinal)))
+                return existing;
+
+            return $"{prefix}:{existing}";
+        }
+
+        private static void ApplyMacRuntimeProfile(ProcessStartInfo psi, MacRuntimeProfile? profile)
+        {
+            foreach (var kv in BuildDefaultMacRuntimeEnv())
+            {
+                SetEnvironmentIfMissing(psi, kv.Key, kv.Value);
+            }
+
+            if (profile == null)
+                return;
+
+            foreach (var kv in profile.Env)
+            {
+                psi.Environment[kv.Key] = kv.Value;
+            }
+
+            if (!string.IsNullOrWhiteSpace(profile.LibompPath) && File.Exists(profile.LibompPath))
+            {
+                var libompDir = Path.GetDirectoryName(profile.LibompPath);
+                if (!string.IsNullOrWhiteSpace(libompDir))
+                {
+                    var dyld = PrependPathEntry(psi.Environment.TryGetValue("DYLD_LIBRARY_PATH", out var currentDyld) ? currentDyld : null, libompDir);
+                    var dyldFallback = PrependPathEntry(psi.Environment.TryGetValue("DYLD_FALLBACK_LIBRARY_PATH", out var currentFallback) ? currentFallback : null, libompDir);
+                    psi.Environment["DYLD_LIBRARY_PATH"] = dyld;
+                    psi.Environment["DYLD_FALLBACK_LIBRARY_PATH"] = dyldFallback;
+                }
+            }
+
+            psi.Environment["DEEP3D_MAC_RUNTIME_PROFILE"] = profile.Id;
         }
 
         private static void ApplySafeOpenMpSettings(ProcessStartInfo psi)
         {
             psi.Environment["KMP_USE_SHM"] = "0";
+            psi.Environment["KMP_DUPLICATE_LIB_OK"] = "TRUE";
+            psi.Environment["KMP_AFFINITY"] = "disabled";
             psi.Environment["OMP_NUM_THREADS"] = "1";
             psi.Environment["MKL_NUM_THREADS"] = "1";
             psi.Environment["OPENBLAS_NUM_THREADS"] = "1";
@@ -347,12 +698,17 @@ namespace Deep3DStudio.Python
             string arguments,
             int timeoutMs = 300000,
             CancellationToken cancellationToken = default,
-            bool safeOpenMpMode = false)
+            bool safeOpenMpMode = false,
+            MacRuntimeProfile? macProfile = null)
         {
             Log($"Running: {_pythonPath} {_scriptPath} {arguments}");
             if (safeOpenMpMode)
             {
                 Log("Applying safe OpenMP environment for this run");
+            }
+            if (OperatingSystem.IsMacOS() && macProfile != null)
+            {
+                Log($"Using mac runtime profile: {macProfile.Id}");
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -399,6 +755,10 @@ namespace Deep3DStudio.Python
             if (_modelName.Equals("triposf", StringComparison.OrdinalIgnoreCase))
             {
                 psi.Environment["DEEP3D_TRIPOSF_SKIP_MC"] = "1";
+            }
+            if (OperatingSystem.IsMacOS())
+            {
+                ApplyMacRuntimeProfile(psi, macProfile);
             }
             if (safeOpenMpMode)
             {
@@ -506,6 +866,11 @@ namespace Deep3DStudio.Python
                 return true;
             }
 
+            if (OperatingSystem.IsMacOS())
+            {
+                TryRunMacHealthcheck();
+            }
+
             try
             {
                 OnProgress?.Invoke("load", 0.1f, $"Loading {_modelName}...");
@@ -559,6 +924,36 @@ namespace Deep3DStudio.Python
             {
                 Log($"Exception during load: {ex.Message}");
                 return false;
+            }
+        }
+
+        private void TryRunMacHealthcheck()
+        {
+            if (!OperatingSystem.IsMacOS() || _macHealthcheckAttempted)
+                return;
+
+            _macHealthcheckAttempted = true;
+
+            try
+            {
+                string deviceArg = string.IsNullOrWhiteSpace(_device) ? "auto" : _device;
+                string modelArg = string.IsNullOrWhiteSpace(_modelName) ? "dust3r" : _modelName;
+                string args = $"--command healthcheck --model {modelArg} --device {deviceArg}";
+                var (exitCode, stdout, stderr) = RunPythonCommand(args, 120000);
+                if (exitCode == 0)
+                {
+                    Log("macOS runtime healthcheck succeeded.");
+                }
+                else
+                {
+                    Log($"macOS runtime healthcheck failed. exit={exitCode}");
+                    if (!string.IsNullOrWhiteSpace(stderr))
+                        Log(stderr);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"macOS runtime healthcheck exception: {ex.Message}");
             }
         }
 

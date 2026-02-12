@@ -2,6 +2,7 @@
 import os
 import sys
 import platform
+import json
 import shutil
 import urllib.request
 import zipfile
@@ -214,15 +215,18 @@ def get_macos_openmp_env_patch():
     Applied only for macOS targets.
     """
     return {
+        "KMP_USE_SHM": "0",
         "KMP_DUPLICATE_LIB_OK": "TRUE",
         "KMP_INIT_AT_FORK": "FALSE",
         "KMP_AFFINITY": "disabled",
         "OMP_NUM_THREADS": "1",
         "OMP_WAIT_POLICY": "PASSIVE",
         "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
         "VECLIB_MAXIMUM_THREADS": "1",
         "NUMEXPR_NUM_THREADS": "1",
         "PYTORCH_ENABLE_MPS_FALLBACK": "1",
+        "DEEP3D_TORCHVISION_NMS_STUB": "auto",
     }
 
 
@@ -254,6 +258,7 @@ def apply_macos_runtime_patch(site_packages, target_platform):
             os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
             os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
             os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+            os.environ.setdefault("DEEP3D_TORCHVISION_NMS_STUB", "auto")
             os.environ.setdefault("DEEP3D_MAC_OPENMP_PATCH", "1")
     """)
 
@@ -262,89 +267,31 @@ def apply_macos_runtime_patch(site_packages, target_platform):
     print(f"Applied macOS runtime patch: {sitecustomize_path}")
 
 
-def _remove_matching_torch_packages(site_packages):
-    if not os.path.exists(site_packages):
-        return
-    prefixes = ("torch", "torchvision", "functorch", "torchgen")
-    removed = 0
-    for name in os.listdir(site_packages):
-        lower = name.lower()
-        if not lower.startswith(prefixes):
-            continue
-        path = os.path.join(site_packages, name)
-        try:
-            if os.path.isdir(path):
-                shutil.rmtree(path, onerror=remove_readonly)
-            else:
-                os.remove(path)
-            removed += 1
-        except Exception as e:
-            print(f"  Warning: could not remove stale package entry '{name}': {e}")
-    if removed > 0:
-        print(f"  Removed {removed} stale torch-related entries from site-packages.")
+def _parse_last_json_line(text):
+    lines = (text or "").splitlines()
+    for line in reversed(lines):
+        line = line.strip()
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                return json.loads(line)
+            except Exception:
+                continue
+    return None
 
 
-def try_macos_torch_compat_fallback(python_exe, site_packages, base_env):
-    """
-    macOS-only torch compatibility fallback:
-    retry with known torch/torchvision version pairs when import check fails.
-    """
-    fallback_pairs = [
-        ("2.3.1", "0.18.1"),
-        ("2.2.2", "0.17.2"),
+def _find_subprocess_inference_script():
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    candidates = [
+        os.path.join(repo_root, "src", "Deep3DStudio", "Embedded", "Python", "subprocess_inference.py"),
+        os.path.join(repo_root, "src", "Deep3DStudio.Cross", "Embedded", "Python", "subprocess_inference.py"),
     ]
-
-    verify_env = get_macos_openmp_env_patch()
-    pip_env = base_env.copy() if base_env else os.environ.copy()
-    pip_env.update(verify_env)
-
-    for torch_ver, tv_ver in fallback_pairs:
-        print("=" * 60)
-        print(f"STEP: macOS torch fallback -> torch=={torch_ver}, torchvision=={tv_ver}")
-        print("=" * 60)
-
-        _remove_matching_torch_packages(site_packages)
-
-        cmd = [
-            python_exe, "-m", "pip", "install",
-            "--target", site_packages,
-            "--upgrade",
-            "--force-reinstall",
-            "--no-warn-script-location",
-            f"torch=={torch_ver}",
-            f"torchvision=={tv_ver}",
-        ]
-        print(f"  Command: {' '.join(cmd)}")
-        proc = subprocess.Popen(
-            cmd,
-            env=pip_env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-        for line in proc.stdout:
-            print(f"  {line.rstrip()}")
-        proc.wait()
-
-        if proc.returncode != 0:
-            print(f"  Fallback install failed with return code {proc.returncode}.")
-            continue
-
-        if verify_torch_stack(python_exe, extra_env=verify_env):
-            print("  macOS torch fallback succeeded.")
-            return True
-
-    print("  ERROR: all macOS torch fallback attempts failed.")
-    return False
+    for script in candidates:
+        if os.path.exists(script):
+            return script
+    return None
 
 
-def verify_torch_stack(python_exe, extra_env=None):
-    """Verify torch/torchvision import compatibility and torchvision.ops.nms availability."""
-    print("=" * 60)
-    print("STEP: Verifying torch/torchvision stack...")
-    print("=" * 60)
-
+def probe_torch_stack(python_exe, extra_env=None):
     check_code = r"""
 import json
 import sys
@@ -385,16 +332,290 @@ print(json.dumps({"ok": True, **info}))
         env=run_env,
     )
 
-    if result.stdout.strip():
-        print(f"  Torch stack info: {result.stdout.strip()}")
-    if result.returncode != 0:
+    parsed = _parse_last_json_line(result.stdout)
+    if parsed is None:
+        parsed = {"ok": result.returncode == 0}
+        if result.stdout.strip():
+            parsed["stdout"] = result.stdout.strip()
         if result.stderr.strip():
-            print(f"  stderr: {result.stderr.strip()}")
-        print("  ERROR: torch/torchvision verification failed.")
-        return False
+            parsed["stderr"] = result.stderr.strip()
+        if not parsed.get("ok", False) and "error" not in parsed:
+            parsed["error"] = "probe returned non-JSON output"
+    parsed["returncode"] = result.returncode
+    if result.stderr.strip() and "stderr" not in parsed:
+        parsed["stderr"] = result.stderr.strip()
+    return parsed
 
-    print("  torch/torchvision verification passed.")
+
+def verify_torch_stack(python_exe, extra_env=None):
+    """Verify torch/torchvision import compatibility and torchvision.ops.nms availability."""
+    print("=" * 60)
+    print("STEP: Verifying torch/torchvision stack...")
+    print("=" * 60)
+
+    probe = probe_torch_stack(python_exe, extra_env=extra_env)
+    print(f"  Torch stack probe: {json.dumps(probe, ensure_ascii=False)}")
+    if probe.get("ok"):
+        print("  torch/torchvision verification passed.")
+        return True
+
+    print("  ERROR: torch/torchvision verification failed.")
+    return False
+
+
+def run_subprocess_healthcheck(python_exe, extra_env=None, model_name="dust3r"):
+    script_path = _find_subprocess_inference_script()
+    if not script_path:
+        return {
+            "ok": True,
+            "skipped": True,
+            "reason": "subprocess_inference.py not found in repo",
+        }
+
+    run_env = None
+    if extra_env:
+        run_env = os.environ.copy()
+        run_env.update(extra_env)
+
+    cmd = [
+        python_exe,
+        script_path,
+        "--command", "healthcheck",
+        "--model", model_name,
+        "--device", "cpu",
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True, env=run_env)
+    parsed = _parse_last_json_line(result.stdout)
+    if parsed is None:
+        parsed = {
+            "success": result.returncode == 0,
+            "error": "healthcheck returned non-JSON output",
+            "stdout": result.stdout.strip(),
+        }
+    parsed["returncode"] = result.returncode
+    if result.stderr.strip():
+        parsed["stderr"] = result.stderr.strip()
+    return {"ok": bool(parsed.get("success", False)), "result": parsed}
+
+
+def _remove_matching_torch_packages(site_packages):
+    if not os.path.exists(site_packages):
+        return
+    prefixes = ("torch", "torchvision", "functorch", "torchgen")
+    removed = 0
+    for name in os.listdir(site_packages):
+        lower = name.lower()
+        if not lower.startswith(prefixes):
+            continue
+        path = os.path.join(site_packages, name)
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path, onerror=remove_readonly)
+            else:
+                os.remove(path)
+            removed += 1
+        except Exception as e:
+            print(f"  Warning: could not remove stale package entry '{name}': {e}")
+    if removed > 0:
+        print(f"  Removed {removed} stale torch-related entries from site-packages.")
+
+
+def install_torch_pair(python_exe, site_packages, base_env, torch_ver, tv_ver):
+    print("=" * 60)
+    print(f"STEP: Installing torch pair torch=={torch_ver}, torchvision=={tv_ver}")
+    print("=" * 60)
+
+    _remove_matching_torch_packages(site_packages)
+
+    pip_env = base_env.copy() if base_env else os.environ.copy()
+    pip_env.update(get_macos_openmp_env_patch())
+
+    cmd = [
+        python_exe, "-m", "pip", "install",
+        "--target", site_packages,
+        "--upgrade",
+        "--force-reinstall",
+        "--no-warn-script-location",
+        "--only-binary=:all:",
+        f"torch=={torch_ver}",
+        f"torchvision=={tv_ver}",
+    ]
+    print(f"  Command: {' '.join(cmd)}")
+    proc = subprocess.Popen(
+        cmd,
+        env=pip_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    for line in proc.stdout:
+        print(f"  {line.rstrip()}")
+    proc.wait()
+
+    if proc.returncode != 0:
+        print(f"  torch pair install failed with return code {proc.returncode}.")
+        return False
     return True
+
+
+def discover_macos_libomp_candidates(site_packages):
+    candidates = []
+
+    torch_libomp = os.path.join(site_packages, "torch", "lib", "libomp.dylib")
+    if os.path.exists(torch_libomp):
+        candidates.append({
+            "id": "bundled-torch-libomp",
+            "description": "Use bundled torch/lib/libomp.dylib",
+            "libomp_path": torch_libomp,
+        })
+
+    for path, ident, desc in (
+        ("/opt/homebrew/opt/libomp/lib/libomp.dylib", "homebrew-arm64-libomp", "Use Homebrew arm64 libomp"),
+        ("/usr/local/opt/libomp/lib/libomp.dylib", "homebrew-x64-libomp", "Use Homebrew x64 libomp"),
+    ):
+        if os.path.exists(path):
+            candidates.append({
+                "id": ident,
+                "description": desc,
+                "libomp_path": path,
+            })
+
+    candidates.append({
+        "id": "system-default",
+        "description": "No explicit libomp override",
+        "libomp_path": None,
+    })
+    return candidates
+
+
+def _build_macos_probe_env(profile, site_packages):
+    env = get_macos_openmp_env_patch().copy()
+    env["DEEP3D_MAC_RUNTIME_PROFILE"] = profile.get("id", "unknown")
+
+    dyld_dirs = []
+    libomp_path = profile.get("libomp_path")
+    if libomp_path:
+        dyld_dirs.append(os.path.dirname(libomp_path))
+
+    torch_lib_dir = os.path.join(site_packages, "torch", "lib")
+    if os.path.isdir(torch_lib_dir) and torch_lib_dir not in dyld_dirs:
+        dyld_dirs.append(torch_lib_dir)
+
+    if dyld_dirs:
+        dyld_path = ":".join(dyld_dirs)
+        env["DYLD_LIBRARY_PATH"] = dyld_path
+        env["DYLD_FALLBACK_LIBRARY_PATH"] = dyld_path
+
+    return env
+
+
+def probe_macos_runtime_profiles(python_exe, site_packages, base_env):
+    profiles = discover_macos_libomp_candidates(site_packages)
+    tested_profiles = []
+
+    for profile in profiles:
+        profile_env = _build_macos_probe_env(profile, site_packages)
+        merged_env = base_env.copy() if base_env else os.environ.copy()
+        merged_env.update(profile_env)
+
+        torch_probe = probe_torch_stack(python_exe, extra_env=merged_env)
+        health_probe = run_subprocess_healthcheck(python_exe, extra_env=merged_env, model_name="dust3r")
+        valid = bool(torch_probe.get("ok")) and bool(health_probe.get("ok"))
+
+        tested = {
+            "id": profile["id"],
+            "description": profile["description"],
+            "libomp_path": profile.get("libomp_path"),
+            "env": profile_env,
+            "valid": valid,
+            "torch": torch_probe.get("torch"),
+            "torchvision": torch_probe.get("torchvision"),
+            "torch_probe": torch_probe,
+            "healthcheck": health_probe,
+        }
+        tested_profiles.append(tested)
+
+        print(f"[MacRuntimeProbe] {tested['id']} valid={valid}")
+        if valid:
+            return {"success": True, "selected": tested, "profiles": tested_profiles}
+
+    return {"success": False, "selected": None, "profiles": tested_profiles}
+
+
+def write_macos_runtime_profile(python_root, selected_profile, profiles):
+    runtime_path = os.path.join(python_root, "runtime_mac.json")
+    selected_id = selected_profile.get("id") if selected_profile else None
+
+    serializable_profiles = []
+    for profile in profiles:
+        serializable_profiles.append({
+            "id": profile.get("id"),
+            "description": profile.get("description"),
+            "valid": bool(profile.get("valid", False)),
+            "active": profile.get("id") == selected_id,
+            "libomp_path": profile.get("libomp_path"),
+            "env": profile.get("env", {}),
+            "torch": profile.get("torch"),
+            "torchvision": profile.get("torchvision"),
+            "error": profile.get("torch_probe", {}).get("error") or profile.get("healthcheck", {}).get("result", {}).get("error"),
+        })
+
+    payload = {
+        "schema_version": 1,
+        "generated_at_utc": subprocess.check_output(["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"], text=True).strip(),
+        "selected_profile_id": selected_id,
+        "selected_torch": selected_profile.get("torch") if selected_profile else None,
+        "selected_torchvision": selected_profile.get("torchvision") if selected_profile else None,
+        "profiles": serializable_profiles,
+    }
+
+    with open(runtime_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+        f.write("\n")
+    print(f"Wrote mac runtime profile: {runtime_path}")
+
+
+def resolve_macos_runtime(python_exe, python_root, site_packages, base_env):
+    """
+    macOS-only runtime resolver:
+    1) probe currently installed torch stack with multiple libomp modes
+    2) if needed, reinstall fallback torch/torchvision pairs and probe again
+    3) write runtime_mac.json with selected profile
+    """
+    apply_macos_runtime_patch(site_packages, "osx")
+
+    print("=" * 60)
+    print("STEP: Resolving macOS Torch/OpenMP runtime profile...")
+    print("=" * 60)
+
+    probe = probe_macos_runtime_profiles(python_exe, site_packages, base_env)
+    if probe.get("success"):
+        write_macos_runtime_profile(python_root, probe.get("selected"), probe.get("profiles", []))
+        return True
+
+    fallback_pairs = [
+        ("2.4.1", "0.19.1"),
+        ("2.3.1", "0.18.1"),
+        ("2.2.2", "0.17.2"),
+        ("2.1.2", "0.16.2"),
+    ]
+
+    for torch_ver, tv_ver in fallback_pairs:
+        if not install_torch_pair(python_exe, site_packages, base_env, torch_ver, tv_ver):
+            continue
+
+        probe = probe_macos_runtime_profiles(python_exe, site_packages, base_env)
+        if probe.get("success"):
+            selected = probe.get("selected") or {}
+            selected["torch"] = torch_ver
+            selected["torchvision"] = tv_ver
+            write_macos_runtime_profile(python_root, selected, probe.get("profiles", []))
+            return True
+
+    print("ERROR: macOS runtime resolution failed: no valid torch/libomp profile found.")
+    return False
 
 
 def download_with_progress(url, target_path, description=None):
@@ -806,16 +1027,11 @@ def setup_python_embed(target_dir, target_platform):
             traceback.print_exc()
             return False
 
-        # macOS-only: write runtime patch before importing torch for verification.
-        apply_macos_runtime_patch(site_packages, target_platform)
-        mac_verify_env = get_macos_openmp_env_patch() if is_macos_target(target_platform) else None
-
-        if not verify_torch_stack(python_exe, extra_env=mac_verify_env):
-            if is_macos_target(target_platform):
-                print("macOS torch verification failed. Attempting compatibility fallback...")
-                if not try_macos_torch_compat_fallback(python_exe, site_packages, clean_env):
-                    return False
-            else:
+        if is_macos_target(target_platform):
+            if not resolve_macos_runtime(python_exe, python_root, site_packages, clean_env):
+                return False
+        else:
+            if not verify_torch_stack(python_exe):
                 return False
 
         # Verify installation - check that critical packages exist
@@ -958,8 +1174,32 @@ def setup_python_embed(target_dir, target_platform):
             print("Note: Cross-installation requires that all packages have binary wheels available for the target platform.")
             return False
 
-        # Ensure macOS runtime patch is present also for cross-installed artifacts.
-        apply_macos_runtime_patch(site_packages, target_platform)
+        # For macOS target in cross-install mode we can't execute the target Python binary.
+        # Still write a default runtime patch/profile so runtime can attempt known profiles.
+        if is_macos_target(target_platform):
+            apply_macos_runtime_patch(site_packages, target_platform)
+            discovered = []
+            for p in discover_macos_libomp_candidates(site_packages):
+                env = _build_macos_probe_env(p, site_packages)
+                discovered.append({
+                    "id": p["id"],
+                    "description": p["description"],
+                    "libomp_path": p.get("libomp_path"),
+                    "env": env,
+                    "valid": p["id"] == "bundled-torch-libomp",
+                    "torch": None,
+                    "torchvision": None,
+                    "torch_probe": {},
+                    "healthcheck": {},
+                })
+            selected = None
+            for p in discovered:
+                if p.get("valid"):
+                    selected = p
+                    break
+            if selected is None and discovered:
+                selected = discovered[0]
+            write_macos_runtime_profile(python_root, selected, discovered)
 
     # AFTER installation: Configure python._pth for runtime isolation
     # This ensures the embedded Python doesn't see system packages when running
@@ -1805,13 +2045,24 @@ if __name__ == "__main__":
     try:
         # Warn if cross-compiling blindly
         current_os = platform.system().lower()
-        if "win" in current_os and "win" not in args.platform:
+        is_host_windows = current_os.startswith("win")
+        is_host_linux = current_os.startswith("linux")
+        is_host_macos = current_os == "darwin"
+
+        target_is_windows = target_platform.startswith("win")
+        target_is_linux = target_platform.startswith("linux")
+        target_is_macos = target_platform.startswith("osx")
+
+        if is_host_windows and not target_is_windows:
             print("WARNING: You are running on Windows but targeting a non-Windows platform.")
             print("The script executes the downloaded python binary to install packages.")
             print("This will likely FAIL unless you are using WSL or compatible environment.")
-        elif "linux" in current_os and "linux" not in args.platform:
+        elif is_host_linux and not target_is_linux:
              print("WARNING: You are running on Linux but targeting a non-Linux platform.")
              print("This will likely FAIL.")
+        elif is_host_macos and not target_is_macos:
+             print("WARNING: You are running on macOS but targeting a non-macOS platform.")
+             print("This may fail because target binaries cannot be executed natively.")
 
         if setup_python_embed(python_dir, target_platform):
             setup_models(models_dir, python_dir, target_platform)
