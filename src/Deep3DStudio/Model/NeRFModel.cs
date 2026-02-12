@@ -107,6 +107,8 @@ namespace Deep3DStudio.Model
         public bool Train(List<CameraPose> poses, int iterations = 5, System.Threading.CancellationToken cancellationToken = default)
         {
             var settings = IniSettings.Instance;
+            bool unlimited = settings.NeRFUnlimited;
+            int safeIterations = Math.Max(1, iterations);
 
             // Check device settings
             // This VoxelGridNeRF implementation is primarily CPU-optimized using Parallel.For.
@@ -120,15 +122,24 @@ namespace Deep3DStudio.Model
                 Console.WriteLine($"[NeRF] Note: VoxelGridNeRF optimization currently runs on CPU (High Performance Parallel). GPU selection ({settings.AIDevice}) is acknowledged but not fully supported for this specific component yet.");
             }
 
-            Console.WriteLine($"Starting NeRF Training ({iterations} iterations)...");
-            return TrainCPU(poses, iterations, cancellationToken);
+            if (unlimited)
+            {
+                Console.WriteLine("Starting NeRF Training (unlimited mode, stop from UI to finish)...");
+            }
+            else
+            {
+                Console.WriteLine($"Starting NeRF Training ({safeIterations} iterations)...");
+            }
+
+            return TrainCPU(poses, safeIterations, unlimited, cancellationToken);
         }
 
-        private bool TrainCPU(List<CameraPose> poses, int iterations, System.Threading.CancellationToken cancellationToken)
+        private bool TrainCPU(List<CameraPose> poses, int iterations, bool unlimited, System.Threading.CancellationToken cancellationToken)
         {
             try
             {
-                for (int iter = 0; iter < iterations; iter++)
+                int iter = 0;
+                while (unlimited || iter < iterations)
                 {
                     if (cancellationToken.IsCancellationRequested)
                         return true;
@@ -143,7 +154,15 @@ namespace Deep3DStudio.Model
                     }
 
                     ApplyGradientsCPU(densityGrad, colorGrad, counts, cancellationToken);
-                    Console.WriteLine($"  Iteration {iter + 1}/{iterations} complete.");
+                    iter++;
+                    if (unlimited)
+                    {
+                        Console.WriteLine($"  Iteration {iter} complete (unlimited mode).");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"  Iteration {iter}/{iterations} complete.");
+                    }
                 }
 
                 return false;

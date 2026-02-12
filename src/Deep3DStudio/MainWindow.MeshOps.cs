@@ -20,6 +20,13 @@ namespace Deep3DStudio
 {
     public partial class MainWindow
     {
+        private enum ToolbarMergeMode
+        {
+            Cancel,
+            MergeOnly,
+            AlignThenMerge
+        }
+
         private void OnDecimateClicked(object? sender, EventArgs e)
         {
             var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
@@ -222,6 +229,12 @@ namespace Deep3DStudio
             var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
             var selectedPointClouds = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
 
+            if (selectedMeshes.Count > 0 && selectedPointClouds.Count > 0)
+            {
+                ShowMessage("Mixed Selection Not Supported", "Select only meshes or only point clouds before merging.");
+                return;
+            }
+
             if (selectedMeshes.Count >= 2)
             {
                 var dlg = new NumericInputDialog(this, "Merge Meshes", "Weld Distance:", 0.001f, 0.0f, 1.0f, 0.001f, 6);
@@ -271,10 +284,199 @@ namespace Deep3DStudio
             }
         }
 
+        private void OnMergeMeshesToolbarClicked(object? sender, EventArgs e)
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count < 2)
+            {
+                ShowMessage("Need Mesh Selection", "Select at least 2 meshes to merge.");
+                return;
+            }
+
+            var mode = PromptToolbarMergeMode("Merge Meshes");
+            if (mode == ToolbarMergeMode.Cancel)
+                return;
+
+            int alignIterations = 50;
+            float alignThreshold = 0.0001f;
+            if (mode == ToolbarMergeMode.AlignThenMerge && !TryPromptAlignParameters(out alignIterations, out alignThreshold))
+                return;
+
+            if (!TryPromptMeshWeldDistance(out float weldDistance))
+                return;
+
+            _statusLabel.Text = mode == ToolbarMergeMode.AlignThenMerge ? "Aligning and merging meshes..." : "Merging meshes...";
+            while (Application.EventsPending()) Application.RunIteration();
+
+            Task.Run(() =>
+            {
+                try
+                {
+                    var meshDataList = selectedMeshes.Select(m => m.MeshData.Clone()).ToList();
+                    if (mode == ToolbarMergeMode.AlignThenMerge)
+                    {
+                        var target = meshDataList[0];
+                        for (int i = 1; i < meshDataList.Count; i++)
+                        {
+                            var transform = MeshOperations.AlignICP(meshDataList[i], target, alignIterations, alignThreshold);
+                            meshDataList[i].ApplyTransform(transform);
+                        }
+                    }
+
+                    var merged = MeshOperations.MergeWithWelding(meshDataList, weldDistance);
+                    Application.Invoke((s, args) =>
+                    {
+                        foreach (var mesh in selectedMeshes)
+                            _sceneGraph.RemoveObject(mesh);
+
+                        var mergedObj = new MeshObject("Merged Mesh", merged);
+                        _sceneGraph.AddObject(mergedObj);
+                        _sceneGraph.Select(mergedObj);
+                        _sceneTreeView.RefreshTree();
+                        _viewport.QueueDraw();
+                        _statusLabel.Text = $"Merged {selectedMeshes.Count} mesh(es)";
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Application.Invoke((s, args) => ShowMessage("Mesh Merge Failed", ex.Message));
+                }
+            });
+        }
+
+        private void OnMergePointCloudsToolbarClicked(object? sender, EventArgs e)
+        {
+            var selectedPointClouds = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
+            if (selectedPointClouds.Count < 2)
+            {
+                ShowMessage("Need Point Clouds", "Select at least 2 point clouds to merge.");
+                return;
+            }
+
+            var mode = PromptToolbarMergeMode("Merge Point Clouds");
+            if (mode == ToolbarMergeMode.Cancel)
+                return;
+
+            int alignIterations = 50;
+            float alignThreshold = 0.0001f;
+            if (mode == ToolbarMergeMode.AlignThenMerge && !TryPromptAlignParameters(out alignIterations, out alignThreshold))
+                return;
+
+            _statusLabel.Text = mode == ToolbarMergeMode.AlignThenMerge ? "Aligning and merging point clouds..." : "Merging point clouds...";
+            while (Application.EventsPending()) Application.RunIteration();
+
+            Task.Run(() =>
+            {
+                try
+                {
+                    if (mode == ToolbarMergeMode.AlignThenMerge)
+                    {
+                        var target = selectedPointClouds[0];
+                        var targetPoints = target.Points.Select(p => OpenTK.Mathematics.Vector3.TransformPosition(p, target.GetWorldTransform())).ToList();
+                        for (int i = 1; i < selectedPointClouds.Count; i++)
+                        {
+                            var source = selectedPointClouds[i];
+                            var sourcePoints = source.Points.Select(p => OpenTK.Mathematics.Vector3.TransformPosition(p, source.GetWorldTransform())).ToList();
+                            var transform = MeshOperations.AlignICP(sourcePoints, targetPoints, alignIterations, alignThreshold);
+                            source.ApplyTransform(transform);
+                            source.UpdateBounds();
+                        }
+                    }
+
+                    var merged = MeshOperations.MergePointClouds(selectedPointClouds);
+                    Application.Invoke((s, args) =>
+                    {
+                        foreach (var pc in selectedPointClouds)
+                            _sceneGraph.RemoveObject(pc);
+
+                        _sceneGraph.AddObject(merged);
+                        _sceneGraph.Select(merged);
+                        _sceneTreeView.RefreshTree();
+                        _viewport.QueueDraw();
+                        _statusLabel.Text = $"Merged {selectedPointClouds.Count} point cloud(s)";
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Application.Invoke((s, args) => ShowMessage("Point Cloud Merge Failed", ex.Message));
+                }
+            });
+        }
+
+        private ToolbarMergeMode PromptToolbarMergeMode(string title)
+        {
+            var dialog = new MessageDialog(
+                this,
+                DialogFlags.Modal,
+                MessageType.Question,
+                ButtonsType.None,
+                "Choose operation mode:");
+
+            dialog.Title = title;
+            dialog.SecondaryText = "You can merge directly, or align first and then merge.";
+            dialog.AddButton("Cancel", ResponseType.Cancel);
+            dialog.AddButton("Merge", ResponseType.Yes);
+            dialog.AddButton("Align + Merge", ResponseType.Apply);
+
+            var response = (ResponseType)dialog.Run();
+            dialog.Destroy();
+            return response switch
+            {
+                ResponseType.Yes => ToolbarMergeMode.MergeOnly,
+                ResponseType.Apply => ToolbarMergeMode.AlignThenMerge,
+                _ => ToolbarMergeMode.Cancel
+            };
+        }
+
+        private bool TryPromptAlignParameters(out int iterations, out float threshold)
+        {
+            iterations = 50;
+            threshold = 0.0001f;
+
+            var alignDialog = new AlignDialog(this);
+            try
+            {
+                if (alignDialog.Run() != (int)ResponseType.Ok)
+                    return false;
+
+                iterations = alignDialog.Iterations;
+                threshold = alignDialog.Threshold;
+                return true;
+            }
+            finally
+            {
+                alignDialog.Destroy();
+            }
+        }
+
+        private bool TryPromptMeshWeldDistance(out float weldDistance)
+        {
+            weldDistance = 0.001f;
+            var weldDialog = new NumericInputDialog(this, "Merge Meshes", "Weld Distance:", 0.001f, 0.0f, 1.0f, 0.001f, 6);
+            try
+            {
+                if (weldDialog.Run() != (int)ResponseType.Ok)
+                    return false;
+
+                weldDistance = weldDialog.Value;
+                return true;
+            }
+            finally
+            {
+                weldDialog.Destroy();
+            }
+        }
+
         private void OnAlignClicked(object? sender, EventArgs e)
         {
             var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
             var selectedPointClouds = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
+
+            if (selectedMeshes.Count > 0 && selectedPointClouds.Count > 0)
+            {
+                ShowMessage("Mixed Selection Not Supported", "Select only meshes or only point clouds before alignment.");
+                return;
+            }
 
             if (selectedMeshes.Count >= 2)
             {

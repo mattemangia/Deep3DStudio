@@ -478,6 +478,10 @@ namespace Deep3DStudio
                 OnOptimizeClicked, ConfigureOptimizeOptions);
             toolbar.Insert(optimizeBtn, -1);
 
+            var mergeMeshesBtn = CreateActionButton("merge_meshes", iconSize, "Merge", "Merge selected meshes (Merge / Align+Merge)",
+                OnMergeMeshesToolbarClicked, null);
+            toolbar.Insert(mergeMeshesBtn, -1);
+
             toolbar.Insert(new SeparatorToolItem(), -1);
 
             // Pen/face editing actions
@@ -536,8 +540,8 @@ namespace Deep3DStudio
 
             toolbar.Insert(new SeparatorToolItem(), -1);
 
-            var mergeBtn = CreateActionButton("merge", iconSize, "Merge", "Merge Selected Point Clouds",
-                OnMergeClicked, null);
+            var mergeBtn = CreateActionButton("merge_pointclouds", iconSize, "Merge", "Merge selected point clouds (Merge / Align+Merge)",
+                OnMergePointCloudsToolbarClicked, null);
             toolbar.Insert(mergeBtn, -1);
 
             var alignBtn = CreateActionButton("align", iconSize, "Align", "Align Selected Point Clouds (ICP)",

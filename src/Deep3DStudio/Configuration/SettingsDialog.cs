@@ -18,6 +18,7 @@ namespace Deep3DStudio.Configuration
 
         // NeRF settings
         private SpinButton _nerfIterationsSpin;
+        private CheckButton _nerfUnlimitedCheck;
         private SpinButton _voxelSizeSpin;
         private SpinButton _learningRateSpin;
 
@@ -109,6 +110,16 @@ namespace Deep3DStudio.Configuration
             _nerfIterationsSpin.TooltipText = "Number of training iterations for NeRF refinement (default: 50)";
             iterBox.PackEnd(_nerfIterationsSpin, false, false, 0);
             nerfBox.PackStart(iterBox, false, false, 0);
+
+            _nerfUnlimitedCheck = new CheckButton("Run until user stops (unlimited)");
+            _nerfUnlimitedCheck.Active = IniSettings.Instance.NeRFUnlimited;
+            _nerfUnlimitedCheck.TooltipText = "NeRF will keep iterating until you press Stop in the progress dialog.";
+            _nerfUnlimitedCheck.Toggled += (s, e) =>
+            {
+                _nerfIterationsSpin.Sensitive = !_nerfUnlimitedCheck.Active;
+            };
+            _nerfIterationsSpin.Sensitive = !_nerfUnlimitedCheck.Active;
+            nerfBox.PackStart(_nerfUnlimitedCheck, false, false, 0);
 
             // Voxel Grid Size
             var voxelBox = new Box(Orientation.Horizontal, 10);
@@ -280,6 +291,8 @@ namespace Deep3DStudio.Configuration
             _meshRefineCombo.Active = (int)IniSettings.Instance.MeshRefinement;
 
             _nerfIterationsSpin.Value = IniSettings.Instance.NeRFIterations;
+            _nerfUnlimitedCheck.Active = IniSettings.Instance.NeRFUnlimited;
+            _nerfIterationsSpin.Sensitive = !IniSettings.Instance.NeRFUnlimited;
             _voxelSizeSpin.Value = IniSettings.Instance.VoxelGridSize;
             _learningRateSpin.Value = IniSettings.Instance.NeRFLearningRate;
 
@@ -318,6 +331,7 @@ namespace Deep3DStudio.Configuration
 
             // NeRF settings
             settings.NeRFIterations = (int)_nerfIterationsSpin.Value;
+            settings.NeRFUnlimited = _nerfUnlimitedCheck.Active;
             settings.VoxelGridSize = (int)_voxelSizeSpin.Value;
             settings.NeRFLearningRate = (float)_learningRateSpin.Value;
 

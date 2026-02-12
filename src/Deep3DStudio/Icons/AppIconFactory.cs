@@ -41,6 +41,8 @@ namespace Deep3DStudio.Icons
                         case "smooth": DrawSmoothIcon(cr, size); break;
                         case "optimize": DrawOptimizeIcon(cr, size); break;
                         case "merge": DrawMergeIcon(cr, size); break;
+                        case "merge_meshes": DrawMergeMeshesIcon(cr, size); break;
+                        case "merge_pointclouds": DrawMergePointCloudsIcon(cr, size); break;
                         case "align": DrawAlignIcon(cr, size); break;
                         case "plane": DrawPlaneIcon(cr, size); break;
                         case "cube": DrawCubeIcon(cr, size); break;
@@ -895,6 +897,33 @@ namespace Deep3DStudio.Icons
             cr.MoveTo(size * 0.45, size * 0.5);
             cr.LineTo(size * 0.55, size * 0.5);
             cr.Stroke();
+        }
+
+        private static void DrawMergeMeshesIcon(Context cr, int size)
+        {
+            DrawMergeIcon(cr, size);
+
+            // Overlay a small wireframe triangle to indicate mesh merge.
+            cr.SetSourceRGB(0.95, 0.78, 0.25);
+            cr.MoveTo(size * 0.32, size * 0.68);
+            cr.LineTo(size * 0.5, size * 0.38);
+            cr.LineTo(size * 0.68, size * 0.68);
+            cr.ClosePath();
+            cr.Stroke();
+        }
+
+        private static void DrawMergePointCloudsIcon(Context cr, int size)
+        {
+            DrawMergeIcon(cr, size);
+
+            // Overlay point samples to indicate point-cloud merge.
+            cr.SetSourceRGB(0.45, 0.9, 0.95);
+            cr.Arc(size * 0.3, size * 0.35, size * 0.04, 0, 2 * Math.PI);
+            cr.Fill();
+            cr.Arc(size * 0.5, size * 0.58, size * 0.04, 0, 2 * Math.PI);
+            cr.Fill();
+            cr.Arc(size * 0.7, size * 0.35, size * 0.04, 0, 2 * Math.PI);
+            cr.Fill();
         }
 
         private static void DrawAlignIcon(Context cr, int size)

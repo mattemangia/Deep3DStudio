@@ -134,6 +134,7 @@ namespace Deep3DStudio
         private string _previewImagePath = "";
         private int _previewTexture = -1;
         private bool _previewShowsDepth = false;
+        private const int MaxDepthPreviewTextureSize = 2048;
         private DrawDiagnosticsWindow _diagnosticsWindow = new DrawDiagnosticsWindow();
         private int _logoTexture = -1;
 
@@ -1095,6 +1096,8 @@ namespace Deep3DStudio
             if (_showOptimizeDialog) DrawOptimizeDialog();
             if (_showMergeDialog) DrawMergeDialog();
             if (_showAlignDialog) DrawAlignDialog();
+            if (_showMeshToolbarMergeDialog) DrawMeshToolbarMergeDialog();
+            if (_showPointCloudToolbarMergeDialog) DrawPointCloudToolbarMergeDialog();
             if (_showCleanupDialog) DrawCleanupDialog();
             if (_showBakeDialog) DrawBakeDialog();
             if (_showTransformDialog) DrawTransformDialog();
@@ -1546,6 +1549,12 @@ namespace Deep3DStudio
                     OpenPenInsetOptionsDialog);
                 ImGui.SameLine();
                 DrawToolbarButton("##PenBridge", IconType.Bridge, false, ApplyPenBridge, "Bridge two selected triangles", size);
+
+                ImGui.SameLine();
+                ImGui.Text("|");
+                ImGui.SameLine();
+                DrawToolbarButton("##MeshMergeToolbar", IconType.MergeMeshes, false, OpenMeshToolbarMergeDialog,
+                    "Merge selected meshes (Merge / Align+Merge)", size);
             }
             EndStyledToolbarWindow();
         }
@@ -1579,6 +1588,12 @@ namespace Deep3DStudio
                 ImGui.SameLine();
                 DrawToolbarButton("##PcDense", IconType.DenseCloud, false, () => ApplyPointCloudDenseCloud(), "Point Cloud to Dense Cloud", size,
                     OpenPointCloudDenseOptionsDialog);
+
+                ImGui.SameLine();
+                ImGui.Text("|");
+                ImGui.SameLine();
+                DrawToolbarButton("##PcMergeToolbar", IconType.MergePointClouds, false, OpenPointCloudToolbarMergeDialog,
+                    "Merge selected point clouds (Merge / Align+Merge)", size);
             }
             EndStyledToolbarWindow();
         }
@@ -2154,12 +2169,10 @@ namespace Deep3DStudio
 
             if (_previewShowsDepth && depthMap != null)
             {
-                using var depthBitmap = ImageUtils.ColorizeDepthMap(depthMap);
-                if (depthBitmap != null && depthBitmap.Width > 0 && depthBitmap.Height > 0 && depthBitmap.GetPixels() != IntPtr.Zero)
-                {
-                    _previewTexture = TextureLoader.CreateTextureFromBitmap(depthBitmap);
-                }
-                else
+                int maxTextureSize = GetSafePreviewTextureLimit();
+                using var depthBitmap = CreateDepthPreviewBitmap(depthMap, maxTextureSize);
+                _previewTexture = depthBitmap != null ? TextureLoader.CreateTextureFromBitmap(depthBitmap) : -1;
+                if (_previewTexture <= 0)
                 {
                     Logger.Warn($"Depth preview unavailable for {Path.GetFileName(path)}. Falling back to RGB.");
                     _previewShowsDepth = false;
@@ -2170,6 +2183,52 @@ namespace Deep3DStudio
             {
                 _previewTexture = TextureLoader.LoadTextureFromFile(path);
             }
+        }
+
+        private static int GetSafePreviewTextureLimit()
+        {
+            int glMax = MaxDepthPreviewTextureSize;
+            try
+            {
+                GL.GetInteger(GetPName.MaxTextureSize, out int queriedMax);
+                if (queriedMax > 0)
+                {
+                    glMax = Math.Min(queriedMax, MaxDepthPreviewTextureSize);
+                }
+            }
+            catch
+            {
+                // Ignore and keep fallback limit.
+            }
+
+            return Math.Clamp(glMax, 256, MaxDepthPreviewTextureSize);
+        }
+
+        private static SKBitmap? CreateDepthPreviewBitmap(float[,] depthMap, int maxTextureSize)
+        {
+            var colorized = ImageUtils.ColorizeDepthMap(depthMap);
+            if (colorized == null || colorized.Width <= 0 || colorized.Height <= 0 || colorized.GetPixels() == IntPtr.Zero)
+            {
+                colorized?.Dispose();
+                return null;
+            }
+
+            if (colorized.Width <= maxTextureSize && colorized.Height <= maxTextureSize)
+            {
+                return colorized;
+            }
+
+            float scale = Math.Min((float)maxTextureSize / colorized.Width, (float)maxTextureSize / colorized.Height);
+            int targetWidth = Math.Max(1, (int)(colorized.Width * scale));
+            int targetHeight = Math.Max(1, (int)(colorized.Height * scale));
+            var resizedInfo = new SKImageInfo(targetWidth, targetHeight, SKColorType.Rgba8888, SKAlphaType.Premul);
+            var resized = new SKBitmap(resizedInfo);
+            using var canvas = new SKCanvas(resized);
+            canvas.Clear(SKColors.Transparent);
+            canvas.DrawBitmap(colorized, new SKRect(0, 0, targetWidth, targetHeight));
+            canvas.Flush();
+            colorized.Dispose();
+            return resized;
         }
 
         private static SKBitmap? CreateDepthThumbnailBitmap(float[,] depthMap, int maxSize)
@@ -2240,6 +2299,8 @@ namespace Deep3DStudio
 
         private void DrawColormapLegend(float width, float height, string leftLabel, string rightLabel)
         {
+            width = Math.Max(1.0f, width);
+            height = Math.Max(1.0f, height);
             ImGui.TextDisabled(leftLabel);
             ImGui.SameLine();
             var p = ImGui.GetCursorScreenPos();
@@ -3350,8 +3411,25 @@ namespace Deep3DStudio
 
                         if (ImGui.CollapsingHeader("NeRF (Legacy)"))
                         {
+                            bool unlimited = s.NeRFUnlimited;
+                            if (ImGui.Checkbox("Unlimited (Stop to finish)", ref unlimited))
+                            {
+                                s.NeRFUnlimited = unlimited;
+                            }
+
                             int iter = s.NeRFIterations;
-                            if (ImGui.InputInt("Iterations", ref iter)) s.NeRFIterations = iter;
+                            if (s.NeRFUnlimited)
+                            {
+                                ImGui.BeginDisabled();
+                            }
+                            if (ImGui.InputInt("Iterations", ref iter))
+                            {
+                                s.NeRFIterations = Math.Clamp(iter, 1, 500);
+                            }
+                            if (s.NeRFUnlimited)
+                            {
+                                ImGui.EndDisabled();
+                            }
 
                             int grid = s.VoxelGridSize;
                             if (ImGui.InputInt("Voxel Grid Size", ref grid)) s.VoxelGridSize = grid;
@@ -3468,13 +3546,14 @@ namespace Deep3DStudio
                     if (_previewShowsDepth)
                     {
                         float legendHeight = 28.0f;
-                        var imageSize = new System.Numerics.Vector2(avail.X, Math.Max(10.0f, avail.Y - legendHeight));
+                        var imageSize = new System.Numerics.Vector2(Math.Max(10.0f, avail.X), Math.Max(10.0f, avail.Y - legendHeight));
                         ImGui.Image((IntPtr)_previewTexture, imageSize);
-                        DrawColormapLegend(Math.Min(220.0f, ImGui.GetContentRegionAvail().X - 70.0f), 12.0f, "Near", "Far");
+                        float legendWidth = Math.Max(80.0f, Math.Min(220.0f, ImGui.GetContentRegionAvail().X - 70.0f));
+                        DrawColormapLegend(legendWidth, 12.0f, "Near", "Far");
                     }
                     else
                     {
-                        ImGui.Image((IntPtr)_previewTexture, avail);
+                        ImGui.Image((IntPtr)_previewTexture, new System.Numerics.Vector2(Math.Max(10.0f, avail.X), Math.Max(10.0f, avail.Y)));
                     }
                 }
                 else
@@ -5041,6 +5120,8 @@ namespace Deep3DStudio
         }
 
         private bool _showMergeDialog = false;
+        private bool _showMeshToolbarMergeDialog = false;
+        private bool _showPointCloudToolbarMergeDialog = false;
         private float _mergeDist = 0.001f;
 
         private void OnMerge()
@@ -5049,19 +5130,37 @@ namespace Deep3DStudio
             _popupToOpen = "Merge Objects";
         }
 
+        private void OpenMeshToolbarMergeDialog()
+        {
+            _showMeshToolbarMergeDialog = true;
+            _popupToOpen = "Merge Meshes";
+        }
+
+        private void OpenPointCloudToolbarMergeDialog()
+        {
+            _showPointCloudToolbarMergeDialog = true;
+            _popupToOpen = "Merge Point Clouds";
+        }
+
         private void DrawMergeDialog()
         {
             if (!_showMergeDialog) return;
             if (ImGui.BeginPopup("Merge Objects", ImGuiWindowFlags.AlwaysAutoResize))
             {
-                bool canMerge = _sceneGraph.SelectedObjects.Count >= 2;
+                int meshCount = _sceneGraph.SelectedObjects.OfType<MeshObject>().Count();
+                int pointCloudCount = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().Count();
+                bool mixedSelection = meshCount > 0 && pointCloudCount > 0;
+                bool canMerge = !mixedSelection && (meshCount >= 2 || pointCloudCount >= 2);
 
                 ImGui.InputFloat("Weld Distance", ref _mergeDist, 0.0001f, 0.001f, "%.5f");
                 ImGui.Separator();
 
                 if (!canMerge)
                 {
-                    ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1), "Select at least 2 objects");
+                    string msg = mixedSelection
+                        ? "Mixed selection not supported. Select only meshes or only point clouds."
+                        : "Select at least 2 meshes or 2 point clouds.";
+                    ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1), msg);
                     ImGui.BeginDisabled();
                 }
 
@@ -5087,6 +5186,12 @@ namespace Deep3DStudio
              var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
              var pcs = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
              float dist = _mergeDist;
+
+             if (meshes.Count > 0 && pcs.Count > 0)
+             {
+                 _logBuffer += "Merge aborted: mixed selection (mesh + point cloud) is not supported.\n";
+                 return;
+             }
 
              ProgressDialog.Instance.Start("Merging...", OperationType.Processing);
              Task.Run(() => {
@@ -5131,7 +5236,10 @@ namespace Deep3DStudio
             if (!_showAlignDialog) return;
             if (ImGui.BeginPopup("Align Objects", ImGuiWindowFlags.AlwaysAutoResize))
             {
-                bool canAlign = _sceneGraph.SelectedObjects.Count >= 2;
+                int meshCount = _sceneGraph.SelectedObjects.OfType<MeshObject>().Count();
+                int pointCloudCount = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().Count();
+                bool mixedSelection = meshCount > 0 && pointCloudCount > 0;
+                bool canAlign = !mixedSelection && (meshCount >= 2 || pointCloudCount >= 2);
 
                 ImGui.InputInt("Max Iterations", ref _alignIter);
                 ImGui.InputFloat("Convergence Threshold", ref _alignThreshold, 0.00001f, 0.0001f, "%.6f");
@@ -5139,7 +5247,10 @@ namespace Deep3DStudio
 
                 if (!canAlign)
                 {
-                    ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1), "Select at least 2 objects");
+                    string msg = mixedSelection
+                        ? "Mixed selection not supported. Select only meshes or only point clouds."
+                        : "Select at least 2 meshes or 2 point clouds.";
+                    ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1), msg);
                     ImGui.BeginDisabled();
                 }
 
@@ -5165,6 +5276,12 @@ namespace Deep3DStudio
              var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
              var pcs = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
              int iter = _alignIter; float thresh = _alignThreshold;
+
+             if (meshes.Count > 0 && pcs.Count > 0)
+             {
+                 _logBuffer += "Align aborted: mixed selection (mesh + point cloud) is not supported.\n";
+                 return;
+             }
 
              ProgressDialog.Instance.Start("Aligning...", OperationType.Processing);
              Task.Run(() => {
@@ -5201,6 +5318,195 @@ namespace Deep3DStudio
                      EnqueueAction(() => ProgressDialog.Instance.Fail(ex));
                  }
              });
+        }
+
+        private void DrawMeshToolbarMergeDialog()
+        {
+            if (!_showMeshToolbarMergeDialog) return;
+            if (ImGui.BeginPopup("Merge Meshes", ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                int meshCount = _sceneGraph.SelectedObjects.OfType<MeshObject>().Count();
+                int pointCloudCount = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().Count();
+                bool canMerge = meshCount >= 2 && pointCloudCount == 0;
+
+                ImGui.InputFloat("Weld Distance", ref _mergeDist, 0.0001f, 0.001f, "%.5f");
+                ImGui.InputInt("Align Iterations", ref _alignIter);
+                ImGui.InputFloat("Align Threshold", ref _alignThreshold, 0.00001f, 0.0001f, "%.6f");
+                ImGui.Separator();
+
+                if (!canMerge)
+                {
+                    ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1),
+                        pointCloudCount > 0
+                            ? "Select only meshes for this command."
+                            : "Select at least 2 meshes.");
+                    ImGui.BeginDisabled();
+                }
+
+                if (ImGui.Button("Merge", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showMeshToolbarMergeDialog = false;
+                    PerformMeshToolbarMerge(alignFirst: false);
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Align + Merge", new System.Numerics.Vector2(140, 0)))
+                {
+                    _showMeshToolbarMergeDialog = false;
+                    PerformMeshToolbarMerge(alignFirst: true);
+                }
+
+                if (!canMerge)
+                {
+                    ImGui.EndDisabled();
+                }
+
+                ImGui.SameLine();
+                if (ImGui.Button("Cancel", new System.Numerics.Vector2(100, 0))) _showMeshToolbarMergeDialog = false;
+                ImGui.EndPopup();
+            }
+        }
+
+        private void DrawPointCloudToolbarMergeDialog()
+        {
+            if (!_showPointCloudToolbarMergeDialog) return;
+            if (ImGui.BeginPopup("Merge Point Clouds", ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                int meshCount = _sceneGraph.SelectedObjects.OfType<MeshObject>().Count();
+                int pointCloudCount = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().Count();
+                bool canMerge = pointCloudCount >= 2 && meshCount == 0;
+
+                ImGui.InputInt("Align Iterations", ref _alignIter);
+                ImGui.InputFloat("Align Threshold", ref _alignThreshold, 0.00001f, 0.0001f, "%.6f");
+                ImGui.Separator();
+
+                if (!canMerge)
+                {
+                    ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1),
+                        meshCount > 0
+                            ? "Select only point clouds for this command."
+                            : "Select at least 2 point clouds.");
+                    ImGui.BeginDisabled();
+                }
+
+                if (ImGui.Button("Merge", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showPointCloudToolbarMergeDialog = false;
+                    PerformPointCloudToolbarMerge(alignFirst: false);
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Align + Merge", new System.Numerics.Vector2(140, 0)))
+                {
+                    _showPointCloudToolbarMergeDialog = false;
+                    PerformPointCloudToolbarMerge(alignFirst: true);
+                }
+
+                if (!canMerge)
+                {
+                    ImGui.EndDisabled();
+                }
+
+                ImGui.SameLine();
+                if (ImGui.Button("Cancel", new System.Numerics.Vector2(100, 0))) _showPointCloudToolbarMergeDialog = false;
+                ImGui.EndPopup();
+            }
+        }
+
+        private void PerformMeshToolbarMerge(bool alignFirst)
+        {
+            var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            var pointClouds = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
+            if (pointClouds.Count > 0 || meshes.Count < 2)
+            {
+                ShowError("Invalid Selection", "Select only meshes and at least two items to merge.");
+                return;
+            }
+
+            int iter = Math.Max(1, _alignIter);
+            float thresh = Math.Max(1e-6f, _alignThreshold);
+            float dist = Math.Max(0.0f, _mergeDist);
+
+            ProgressDialog.Instance.Start(alignFirst ? "Aligning and merging meshes..." : "Merging meshes...", OperationType.Processing);
+            Task.Run(() =>
+            {
+                try
+                {
+                    var mergeInputs = meshes.Select(m => m.MeshData.Clone()).ToList();
+                    if (alignFirst)
+                    {
+                        var target = mergeInputs[0];
+                        for (int i = 1; i < mergeInputs.Count; i++)
+                        {
+                            var transform = MeshOperations.AlignICP(mergeInputs[i], target, iter, thresh);
+                            mergeInputs[i].ApplyTransform(transform);
+                        }
+                    }
+
+                    var merged = MeshOperations.MergeWithWelding(mergeInputs, dist);
+                    EnqueueAction(() =>
+                    {
+                        foreach (var m in meshes) _sceneGraph.RemoveObject(m);
+                        var newObj = new MeshObject("Merged Mesh", merged);
+                        _sceneGraph.AddObject(newObj);
+                        _sceneGraph.Select(newObj);
+                        _viewport.FocusOnSelection();
+                        ProgressDialog.Instance.Log(alignFirst ? "Aligned and merged meshes." : "Merged meshes.");
+                        ProgressDialog.Instance.Complete();
+                    });
+                }
+                catch (Exception ex)
+                {
+                    EnqueueAction(() => ProgressDialog.Instance.Fail(ex));
+                }
+            });
+        }
+
+        private void PerformPointCloudToolbarMerge(bool alignFirst)
+        {
+            var pcs = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
+            var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (meshes.Count > 0 || pcs.Count < 2)
+            {
+                ShowError("Invalid Selection", "Select only point clouds and at least two items to merge.");
+                return;
+            }
+
+            int iter = Math.Max(1, _alignIter);
+            float thresh = Math.Max(1e-6f, _alignThreshold);
+
+            ProgressDialog.Instance.Start(alignFirst ? "Aligning and merging point clouds..." : "Merging point clouds...", OperationType.Processing);
+            Task.Run(() =>
+            {
+                try
+                {
+                    if (alignFirst)
+                    {
+                        var target = pcs[0];
+                        var tPoints = target.Points.Select(p => Vector3.TransformPosition(p, target.GetWorldTransform())).ToList();
+                        for (int i = 1; i < pcs.Count; i++)
+                        {
+                            var sPoints = pcs[i].Points.Select(p => Vector3.TransformPosition(p, pcs[i].GetWorldTransform())).ToList();
+                            var transform = MeshOperations.AlignICP(sPoints, tPoints, iter, thresh);
+                            pcs[i].ApplyTransform(transform);
+                            pcs[i].UpdateBounds();
+                        }
+                    }
+
+                    var merged = MeshOperations.MergePointClouds(pcs);
+                    EnqueueAction(() =>
+                    {
+                        foreach (var pc in pcs) _sceneGraph.RemoveObject(pc);
+                        _sceneGraph.AddObject(merged);
+                        _sceneGraph.Select(merged);
+                        _viewport.FocusOnSelection();
+                        ProgressDialog.Instance.Log(alignFirst ? "Aligned and merged point clouds." : "Merged point clouds.");
+                        ProgressDialog.Instance.Complete();
+                    });
+                }
+                catch (Exception ex)
+                {
+                    EnqueueAction(() => ProgressDialog.Instance.Fail(ex));
+                }
+            });
         }
 
         private bool _showCleanupDialog = false;

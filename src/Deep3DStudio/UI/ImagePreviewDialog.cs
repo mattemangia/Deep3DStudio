@@ -231,17 +231,21 @@ namespace Deep3DStudio.UI
                     srcY = Math.Clamp(srcY, 0, origHeight - 1);
 
                     float d = depthMap[srcX, srcY];
-                    float t = (d - minDepth) / range;
-                    t = Math.Clamp(t, 0f, 1f);
-
-                    // Turbo colormap
-                    var (r, g, b) = ImageUtils.TurboColormap(t);
+                    float r = 0f, g = 0f, b = 0f;
+                    byte a = 0;
+                    if (float.IsFinite(d) && d > 0)
+                    {
+                        float t = (d - minDepth) / range;
+                        t = Math.Clamp(t, 0f, 1f);
+                        (r, g, b) = ImageUtils.TurboColormap(t);
+                        a = 255;
+                    }
 
                     int idx = (y * displayWidth + x) * 4;
                     pixels[idx] = (byte)(r * 255);
                     pixels[idx + 1] = (byte)(g * 255);
                     pixels[idx + 2] = (byte)(b * 255);
-                    pixels[idx + 3] = 255;
+                    pixels[idx + 3] = a;
                 }
             }
 

@@ -132,6 +132,7 @@ namespace Deep3DStudio.Configuration
 
         // NeRF Workflow Settings
         public int NeRFIterations { get; set; } = 50;
+        public bool NeRFUnlimited { get; set; } = false;
         public int VoxelGridSize { get; set; } = 128;
         public float NeRFLearningRate { get; set; } = 0.1f;
 
@@ -394,6 +395,7 @@ namespace Deep3DStudio.Configuration
                     // [NeRF] section
                     writer.WriteLine("[NeRF]");
                     writer.WriteLine($"Iterations={NeRFIterations}");
+                    writer.WriteLine($"Unlimited={NeRFUnlimited}");
                     writer.WriteLine($"VoxelGridSize={VoxelGridSize}");
                     writer.WriteLine($"LearningRate={NeRFLearningRate.ToString("F3", CultureInfo.InvariantCulture)}");
                     writer.WriteLine();
@@ -563,6 +565,8 @@ namespace Deep3DStudio.Configuration
             // [NeRF]
             if (TryGetValue("NeRF", "Iterations", out string? itStr) && int.TryParse(itStr, out var it))
                 NeRFIterations = Math.Clamp(it, 1, 500);
+            if (TryGetValue("NeRF", "Unlimited", out string? unlStr) && bool.TryParse(unlStr, out var unl))
+                NeRFUnlimited = unl;
             if (TryGetValue("NeRF", "VoxelGridSize", out string? vgsStr) && int.TryParse(vgsStr, out var vgs))
                 VoxelGridSize = Math.Clamp(vgs, 32, 512);
             if (TryGetValue("NeRF", "LearningRate", out string? lrStr) && float.TryParse(lrStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var lr))
@@ -779,6 +783,7 @@ namespace Deep3DStudio.Configuration
             ShowPointCloudToolbar = false;
             ShowGeoreferenceToolbar = false;
             NeRFIterations = 50;
+            NeRFUnlimited = false;
             VoxelGridSize = 128;
             NeRFLearningRate = 0.1f;
             LastWindowWidth = 1400;

@@ -1,14 +1,16 @@
 {
-  "timestampUtc": "2026-02-12T10:48:38.581208Z",
-  "status": "FAILED_NO_GEOMETRY",
-  "message": "no meshes with vertices",
-  "pipeline": "mast3r",
+  "timestampUtc": "2026-02-12T13:50:17.353189Z",
+  "status": "SUCCESS",
+  "message": "Geometry reconstructed",
+  "pipeline": "dust3r",
   "fallbackPipeline": "dust3r",
   "inputs": [
     "/Users/user/RiderProjects/Deep3DStudio/src/Deep3DStudio/Croco_Examples/Chateau1.png",
     "/Users/user/RiderProjects/Deep3DStudio/src/Deep3DStudio/Croco_Examples/Chateau2.png"
   ],
-  "vertexCount": 0,
+  "vertexCount": 245789,
   "triangleCount": 0,
-  "outputs": []
+  "outputs": [
+    "/Users/user/RiderProjects/Deep3DStudio/src/Deep3DStudio/Croco_Examples/dust3r_reconstruction.ply"
+  ]
 }

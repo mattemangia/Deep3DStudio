@@ -69,6 +69,8 @@ namespace Deep3DStudio.Viewport
         Extrude,
         Inset,
         Bridge,
+        MergeMeshes,
+        MergePointClouds,
         VoxelFilter,
         OutlierFilter,
         DuplicateFilter,
@@ -849,6 +851,33 @@ namespace Deep3DStudio.Viewport
                 canvas.DrawRect(w * 0.12f, h * 0.3f, w * 0.22f, h * 0.4f, p);
                 canvas.DrawRect(w * 0.66f, h * 0.3f, w * 0.22f, h * 0.4f, p);
                 canvas.DrawLine(w * 0.34f, h * 0.5f, w * 0.66f, h * 0.5f, p);
+            });
+
+            _icons[IconType.MergeMeshes] = CreateIcon(SKColors.SteelBlue, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawRect(w * 0.12f, h * 0.22f, w * 0.28f, h * 0.56f, p);
+                canvas.DrawRect(w * 0.6f, h * 0.22f, w * 0.28f, h * 0.56f, p);
+                canvas.DrawLine(w * 0.4f, h * 0.5f, w * 0.6f, h * 0.5f, p);
+
+                var tri = new SKPath();
+                tri.MoveTo(w * 0.5f, h * 0.28f);
+                tri.LineTo(w * 0.38f, h * 0.6f);
+                tri.LineTo(w * 0.62f, h * 0.6f);
+                tri.Close();
+                canvas.DrawPath(tri, new SKPaint { Color = SKColors.Gold, StrokeWidth = 1.5f, Style = SKPaintStyle.Stroke });
+            });
+
+            _icons[IconType.MergePointClouds] = CreateIcon(SKColors.Teal, (canvas, w, h) => {
+                var p = new SKPaint { Color = SKColors.White, StrokeWidth = 2, Style = SKPaintStyle.Stroke };
+                canvas.DrawRect(w * 0.12f, h * 0.22f, w * 0.28f, h * 0.56f, p);
+                canvas.DrawRect(w * 0.6f, h * 0.22f, w * 0.28f, h * 0.56f, p);
+                canvas.DrawLine(w * 0.4f, h * 0.5f, w * 0.6f, h * 0.5f, p);
+
+                var dot = new SKPaint { Color = SKColors.DeepSkyBlue, Style = SKPaintStyle.Fill };
+                canvas.DrawCircle(w * 0.3f, h * 0.36f, 3, dot);
+                canvas.DrawCircle(w * 0.5f, h * 0.5f, 3, dot);
+                canvas.DrawCircle(w * 0.7f, h * 0.36f, 3, dot);
+                canvas.DrawCircle(w * 0.5f, h * 0.64f, 3, dot);
             });
 
             _icons[IconType.VoxelFilter] = CreateIcon(SKColors.CadetBlue, (canvas, w, h) => {

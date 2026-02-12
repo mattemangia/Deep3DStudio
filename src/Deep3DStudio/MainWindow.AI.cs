@@ -508,6 +508,8 @@ namespace Deep3DStudio
                 return;
             }
 
+            SceneResult? workflowInput = _lastSceneResult;
+
             // Validate prerequisites for each step
             switch (step)
             {
@@ -533,6 +535,19 @@ namespace Deep3DStudio
                     break;
 
                 case AIModels.WorkflowStep.NeRFRefinement:
+                    workflowInput = BuildNeRFInputSceneResult();
+                    if (workflowInput == null || workflowInput.Meshes.Count == 0)
+                    {
+                        ShowMessage("No Geometry", "Please select at least one mesh/point cloud or generate geometry first.");
+                        return;
+                    }
+                    if (workflowInput.Poses.Count == 0)
+                    {
+                        ShowMessage("No Camera Poses", "NeRF refinement requires camera poses. Run a reconstruction first or add camera objects.");
+                        return;
+                    }
+                    break;
+
                 case AIModels.WorkflowStep.DeepMeshPriorRefinement:
                 case AIModels.WorkflowStep.TripoSFRefinement:
                 case AIModels.WorkflowStep.GaussianSDFRefinement:
@@ -571,7 +586,7 @@ namespace Deep3DStudio
                 var result = await manager.ExecuteWorkflowAsync(
                     pipeline,
                     _imagePaths,
-                    _lastSceneResult,
+                    workflowInput,
                     (message, progress) => Application.Invoke((s, e) => {
                         _statusLabel.Text = message;
                         if (UI.ProgressDialog.Instance.IsVisible)
@@ -657,6 +672,57 @@ namespace Deep3DStudio
                 // Final event processing to ensure all UI updates are applied
                 while (Application.EventsPending()) Application.RunIteration();
             }
+        }
+
+        private SceneResult? BuildNeRFInputSceneResult()
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            var selectedPointClouds = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
+            bool hasSelection = selectedMeshes.Count > 0 || selectedPointClouds.Count > 0;
+
+            var scenePoses = _sceneGraph.GetObjectsOfType<CameraObject>()
+                .Select(c => c.Pose)
+                .Where(p => p != null)
+                .Select(p => p!)
+                .ToList();
+
+            if (hasSelection)
+            {
+                var selectedResult = new SceneResult();
+
+                foreach (var mesh in selectedMeshes)
+                {
+                    selectedResult.Meshes.Add(mesh.MeshData);
+                }
+
+                foreach (var pointCloud in selectedPointClouds)
+                {
+                    var meshData = ToMeshData(pointCloud, visibleOnly: true);
+                    if (meshData.Vertices.Count > 0)
+                    {
+                        selectedResult.Meshes.Add(meshData);
+                    }
+                }
+
+                selectedResult.Poses.AddRange(scenePoses);
+                return selectedResult;
+            }
+
+            if (_lastSceneResult == null || _lastSceneResult.Meshes.Count == 0)
+            {
+                return null;
+            }
+
+            if (_lastSceneResult.Poses.Count > 0)
+            {
+                return _lastSceneResult;
+            }
+
+            var fallbackResult = new SceneResult();
+            fallbackResult.Meshes.AddRange(_lastSceneResult.Meshes);
+            fallbackResult.Poses.AddRange(scenePoses);
+            fallbackResult.RigResult = _lastSceneResult.RigResult;
+            return fallbackResult;
         }
 
         /// <summary>
