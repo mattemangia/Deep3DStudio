@@ -23,17 +23,18 @@ namespace Deep3DStudio
         private int _shaderFontTextureLocation;
         private int _shaderProjectionMatrixLocation;
 
-        private int _windowWidth;
-        private int _windowHeight;
+        private int _displayWidth;
+        private int _displayHeight;
+        private int _framebufferWidth;
+        private int _framebufferHeight;
         private System.Numerics.Vector2 _scaleFactor = System.Numerics.Vector2.One;
 
         // Static cached keys to avoid Enum.GetValues allocation every frame
         private static readonly Keys[] _allKeys = (Keys[])Enum.GetValues(typeof(Keys));
 
-        public ImGuiController(int width, int height)
+        public ImGuiController(int displayWidth, int displayHeight, int framebufferWidth, int framebufferHeight)
         {
-            _windowWidth = width;
-            _windowHeight = height;
+            UpdateDisplayMetrics(displayWidth, displayHeight, framebufferWidth, framebufferHeight);
 
             IntPtr context = ImGui.CreateContext();
             ImGui.SetCurrentContext(context);
@@ -52,8 +53,21 @@ namespace Deep3DStudio
 
         public void WindowResized(int width, int height)
         {
-            _windowWidth = width;
-            _windowHeight = height;
+            UpdateDisplayMetrics(width, height, width, height);
+        }
+
+        public void UpdateDisplayMetrics(int displayWidth, int displayHeight, int framebufferWidth, int framebufferHeight)
+        {
+            _displayWidth = Math.Max(1, displayWidth);
+            _displayHeight = Math.Max(1, displayHeight);
+            _framebufferWidth = Math.Max(1, framebufferWidth);
+            _framebufferHeight = Math.Max(1, framebufferHeight);
+
+            float sx = _displayWidth > 0 ? (float)_framebufferWidth / _displayWidth : 1.0f;
+            float sy = _displayHeight > 0 ? (float)_framebufferHeight / _displayHeight : 1.0f;
+            if (sx <= 0.0f) sx = 1.0f;
+            if (sy <= 0.0f) sy = 1.0f;
+            _scaleFactor = new System.Numerics.Vector2(sx, sy);
         }
 
         public void DestroyDeviceObjects()
@@ -158,7 +172,7 @@ void main()
         private void SetPerFrameImGuiData(float dt)
         {
             ImGuiIOPtr io = ImGui.GetIO();
-            io.DisplaySize = new System.Numerics.Vector2(_windowWidth, _windowHeight);
+            io.DisplaySize = new System.Numerics.Vector2(_displayWidth, _displayHeight);
             io.DisplayFramebufferScale = _scaleFactor;
             io.DeltaTime = dt;
         }
@@ -334,7 +348,7 @@ void main()
             if (draw_data.CmdListsCount == 0) return;
             if (!_shaderValid) return;
 
-            GL.Viewport(0, 0, _windowWidth, _windowHeight);
+            GL.Viewport(0, 0, _framebufferWidth, _framebufferHeight);
 
             GL.Enable(EnableCap.Blend);
             GL.Enable(EnableCap.ScissorTest);
@@ -384,7 +398,30 @@ void main()
                             GL.BindTexture(TextureTarget.Texture2D, (int)pcmd.TextureId);
                         }
 
-                        GL.Scissor((int)pcmd.ClipRect.X, _windowHeight - (int)pcmd.ClipRect.W, (int)(pcmd.ClipRect.Z - pcmd.ClipRect.X), (int)(pcmd.ClipRect.W - pcmd.ClipRect.Y));
+                        // Clip rect is in logical coordinates; convert to framebuffer pixels for scissor.
+                        var clipRect = pcmd.ClipRect;
+                        float clipMinX = (clipRect.X - draw_data.DisplayPos.X) * draw_data.FramebufferScale.X;
+                        float clipMinY = (clipRect.Y - draw_data.DisplayPos.Y) * draw_data.FramebufferScale.Y;
+                        float clipMaxX = (clipRect.Z - draw_data.DisplayPos.X) * draw_data.FramebufferScale.X;
+                        float clipMaxY = (clipRect.W - draw_data.DisplayPos.Y) * draw_data.FramebufferScale.Y;
+
+                        clipMinX = Math.Clamp(clipMinX, 0.0f, _framebufferWidth);
+                        clipMinY = Math.Clamp(clipMinY, 0.0f, _framebufferHeight);
+                        clipMaxX = Math.Clamp(clipMaxX, 0.0f, _framebufferWidth);
+                        clipMaxY = Math.Clamp(clipMaxY, 0.0f, _framebufferHeight);
+
+                        if (clipMaxX <= clipMinX || clipMaxY <= clipMinY)
+                        {
+                            idx_offset += (int)pcmd.ElemCount;
+                            continue;
+                        }
+
+                        int scissorX = (int)MathF.Floor(clipMinX);
+                        int scissorY = (int)MathF.Floor(_framebufferHeight - clipMaxY);
+                        int scissorW = Math.Max(1, (int)MathF.Ceiling(clipMaxX - clipMinX));
+                        int scissorH = Math.Max(1, (int)MathF.Ceiling(clipMaxY - clipMinY));
+
+                        GL.Scissor(scissorX, scissorY, scissorW, scissorH);
 
                         GL.DrawElements(BeginMode.Triangles, (int)pcmd.ElemCount, DrawElementsType.UnsignedShort, idx_offset * 2);
                         CheckError("ImGui DrawElements");

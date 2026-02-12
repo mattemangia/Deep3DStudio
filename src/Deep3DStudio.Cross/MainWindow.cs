@@ -239,6 +239,13 @@ namespace Deep3DStudio
 
         // Threading
         private readonly System.Collections.Concurrent.ConcurrentQueue<Action> _pendingActions = new System.Collections.Concurrent.ConcurrentQueue<Action>();
+        // Display metrics (logical client points vs framebuffer pixels)
+        private int _clientWidth = 1;
+        private int _clientHeight = 1;
+        private int _framebufferWidth = 1;
+        private int _framebufferHeight = 1;
+        private float _framebufferScaleX = 1.0f;
+        private float _framebufferScaleY = 1.0f;
 
         public MainWindow(GameWindowSettings gameWindowSettings, NativeWindowSettings nativeWindowSettings)
             : base(gameWindowSettings, nativeWindowSettings)
@@ -261,7 +268,8 @@ namespace Deep3DStudio
             Title += ": OpenGL Version: " + GL.GetString(StringName.Version);
             UpdateTitle();
 
-            _controller = new ImGuiController(ClientSize.X, ClientSize.Y);
+            RefreshDisplayMetrics();
+            _controller = new ImGuiController(_clientWidth, _clientHeight, _framebufferWidth, _framebufferHeight);
 
             // Configure ImGui style
             ConfigureImGuiStyle();
@@ -481,8 +489,21 @@ namespace Deep3DStudio
         protected override void OnResize(ResizeEventArgs e)
         {
             base.OnResize(e);
-            GL.Viewport(0, 0, ClientSize.X, ClientSize.Y);
-            _controller.WindowResized(ClientSize.X, ClientSize.Y);
+            _clientWidth = Math.Max(1, e.Width);
+            _clientHeight = Math.Max(1, e.Height);
+            UpdateFramebufferScale();
+            GL.Viewport(0, 0, _framebufferWidth, _framebufferHeight);
+            _controller?.UpdateDisplayMetrics(_clientWidth, _clientHeight, _framebufferWidth, _framebufferHeight);
+        }
+
+        protected override void OnFramebufferResize(FramebufferResizeEventArgs e)
+        {
+            base.OnFramebufferResize(e);
+            _framebufferWidth = Math.Max(1, e.Width);
+            _framebufferHeight = Math.Max(1, e.Height);
+            UpdateFramebufferScale();
+            GL.Viewport(0, 0, _framebufferWidth, _framebufferHeight);
+            _controller?.UpdateDisplayMetrics(_clientWidth, _clientHeight, _framebufferWidth, _framebufferHeight);
         }
 
         protected override void OnTextInput(TextInputEventArgs e)
@@ -704,14 +725,14 @@ namespace Deep3DStudio
                 {
                     var mouseState = MouseState;
                     var keyboardState = KeyboardState;
-                    _viewport.UpdateInput(mouseState, keyboardState, (float)e.Time, ClientSize.X, ClientSize.Y);
+                    _viewport.UpdateInput(mouseState, keyboardState, (float)e.Time, _clientWidth, _clientHeight);
                 }
 
                 // Render Viewport
                 float vpX = _showVerticalToolbar ? _verticalToolbarWidth : 0;
                 float vpY = GetTopUiHeight();
-                float vpW = ClientSize.X - vpX - (_showRightPanel ? _rightPanelWidth : 0);
-                float vpH = ClientSize.Y - vpY - (_showLogPanel ? _logPanelHeight : 0);
+                float vpW = _clientWidth - vpX - (_showRightPanel ? _rightPanelWidth : 0);
+                float vpH = _clientHeight - vpY - (_showLogPanel ? _logPanelHeight : 0);
 
                 if (_showLeftPanel)
                 {
@@ -719,7 +740,22 @@ namespace Deep3DStudio
                     vpW -= _leftPanelWidth;
                 }
 
-                _viewport.Render((int)vpX, (int)vpY, (int)vpW, (int)vpH, ClientSize.X, ClientSize.Y);
+                int logicalVpX = Math.Max(0, (int)MathF.Round(vpX));
+                int logicalVpY = Math.Max(0, (int)MathF.Round(vpY));
+                int logicalVpW = Math.Max(1, (int)MathF.Round(vpW));
+                int logicalVpH = Math.Max(1, (int)MathF.Round(vpH));
+
+                int fbVpX = LogicalToFramebufferX(vpX);
+                int fbVpY = LogicalToFramebufferY(vpY);
+                int fbVpRight = LogicalToFramebufferX(vpX + vpW);
+                int fbVpBottom = LogicalToFramebufferY(vpY + vpH);
+                int fbVpW = Math.Max(1, fbVpRight - fbVpX);
+                int fbVpH = Math.Max(1, fbVpBottom - fbVpY);
+
+                _viewport.Render(
+                    logicalVpX, logicalVpY, logicalVpW, logicalVpH,
+                    fbVpX, fbVpY, fbVpW, fbVpH,
+                    _framebufferWidth, _framebufferHeight);
                 CheckError("After Viewport");
 
                 // Render UI
@@ -748,6 +784,34 @@ namespace Deep3DStudio
             if (_showGeoreferenceToolbar)
                 height += _auxToolbarHeight;
             return height;
+        }
+
+        private void RefreshDisplayMetrics()
+        {
+            _clientWidth = Math.Max(1, ClientSize.X);
+            _clientHeight = Math.Max(1, ClientSize.Y);
+            _framebufferWidth = Math.Max(1, FramebufferSize.X);
+            _framebufferHeight = Math.Max(1, FramebufferSize.Y);
+            UpdateFramebufferScale();
+        }
+
+        private void UpdateFramebufferScale()
+        {
+            _framebufferScaleX = _clientWidth > 0 ? (float)_framebufferWidth / _clientWidth : 1.0f;
+            _framebufferScaleY = _clientHeight > 0 ? (float)_framebufferHeight / _clientHeight : 1.0f;
+
+            if (_framebufferScaleX <= 0.0f) _framebufferScaleX = 1.0f;
+            if (_framebufferScaleY <= 0.0f) _framebufferScaleY = 1.0f;
+        }
+
+        private int LogicalToFramebufferX(float logicalX)
+        {
+            return Math.Clamp((int)MathF.Round(logicalX * _framebufferScaleX), 0, _framebufferWidth);
+        }
+
+        private int LogicalToFramebufferY(float logicalY)
+        {
+            return Math.Clamp((int)MathF.Round(logicalY * _framebufferScaleY), 0, _framebufferHeight);
         }
 
         // Error tracking to avoid spamming console

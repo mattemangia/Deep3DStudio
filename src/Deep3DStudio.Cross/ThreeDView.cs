@@ -474,17 +474,27 @@ namespace Deep3DStudio.Viewport
         /// <summary>
         /// Render with specified viewport region
         /// </summary>
-        public void Render(int vpX, int vpY, int vpW, int vpH, int windowWidth, int windowHeight)
+        public void Render(
+            int vpX, int vpY, int vpW, int vpH,
+            int fbVpX, int fbVpY, int fbVpW, int fbVpH,
+            int framebufferWidth, int framebufferHeight)
         {
-            // Store viewport dimensions for ray casting
+            // Store logical viewport dimensions for ray casting / picking.
             _viewportX = vpX;
             _viewportY = vpY;
-            _viewportWidth = vpW;
-            _viewportHeight = vpH;
+            _viewportWidth = Math.Max(1, vpW);
+            _viewportHeight = Math.Max(1, vpH);
+
+            int safeFbVpX = Math.Max(0, fbVpX);
+            int safeFbVpY = Math.Max(0, fbVpY);
+            int safeFbVpW = Math.Max(1, fbVpW);
+            int safeFbVpH = Math.Max(1, fbVpH);
+            int safeFbWindowWidth = Math.Max(1, framebufferWidth);
+            int safeFbWindowHeight = Math.Max(1, framebufferHeight);
 
             // Set viewport for the 3D view area
-            GL.Viewport(vpX, windowHeight - vpY - vpH, vpW, vpH);
-            GL.Scissor(vpX, windowHeight - vpY - vpH, vpW, vpH);
+            GL.Viewport(safeFbVpX, safeFbWindowHeight - safeFbVpY - safeFbVpH, safeFbVpW, safeFbVpH);
+            GL.Scissor(safeFbVpX, safeFbWindowHeight - safeFbVpY - safeFbVpH, safeFbVpW, safeFbVpH);
             GL.Enable(EnableCap.ScissorTest);
 
             // Clear just this region using background color from settings
@@ -492,12 +502,12 @@ namespace Deep3DStudio.Viewport
             GL.ClearColor(settings.ViewportBgR, settings.ViewportBgG, settings.ViewportBgB, 1.0f);
             GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
-            Render(vpW, vpH);
+            Render(safeFbVpW, safeFbVpH);
 
             GL.Disable(EnableCap.ScissorTest);
 
             // Reset viewport to full window for ImGui
-            GL.Viewport(0, 0, windowWidth, windowHeight);
+            GL.Viewport(0, 0, safeFbWindowWidth, safeFbWindowHeight);
         }
 
         /// <summary>
