@@ -48,8 +48,9 @@ namespace Deep3DStudio.UI
 
             _depthBtn = new ToggleButton("Depth View");
             _depthBtn.Active = false;
-            _depthBtn.Sensitive = entry.DepthMap != null;
-            _depthBtn.TooltipText = entry.DepthMap != null
+            bool hasDepth = entry.DepthMap != null && entry.DepthMap.GetLength(0) > 0 && entry.DepthMap.GetLength(1) > 0;
+            _depthBtn.Sensitive = hasDepth;
+            _depthBtn.TooltipText = hasDepth
                 ? "View depth map with colormap"
                 : "Depth data not available (run reconstruction first)";
             _depthBtn.Toggled += OnDepthToggled;
@@ -115,7 +116,7 @@ namespace Deep3DStudio.UI
             }
 
             // Create depth image if available
-            if (_entry.DepthMap != null)
+            if (_entry.DepthMap != null && _entry.DepthMap.GetLength(0) > 0 && _entry.DepthMap.GetLength(1) > 0)
             {
                 _fullDepth = CreateDepthImage(_entry.DepthMap, MaxDisplaySize);
             }
@@ -181,6 +182,11 @@ namespace Deep3DStudio.UI
         {
             int origWidth = depthMap.GetLength(0);
             int origHeight = depthMap.GetLength(1);
+            if (origWidth <= 0 || origHeight <= 0)
+            {
+                byte[] fallback = { 0, 0, 0, 0 };
+                return new Pixbuf(fallback, Colorspace.Rgb, true, 8, 1, 1, 4);
+            }
 
             // Find min/max for normalization
             float minDepth = float.MaxValue;

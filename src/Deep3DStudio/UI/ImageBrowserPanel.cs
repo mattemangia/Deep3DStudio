@@ -177,6 +177,7 @@ namespace Deep3DStudio.UI
         public void SetDepthData(int index, float[,] depthMap)
         {
             if (index < 0 || index >= _images.Count) return;
+            if (depthMap == null || depthMap.GetLength(0) <= 0 || depthMap.GetLength(1) <= 0) return;
 
             var entry = _images[index];
             entry.DepthMap = depthMap;
@@ -324,6 +325,11 @@ namespace Deep3DStudio.UI
         {
             int origWidth = depthMap.GetLength(0);
             int origHeight = depthMap.GetLength(1);
+            if (origWidth <= 0 || origHeight <= 0)
+            {
+                byte[] fallback = { 0, 0, 0, 0 };
+                return new Pixbuf(fallback, Colorspace.Rgb, true, 8, 1, 1, 4);
+            }
 
             // Find min/max for normalization
             float minDepth = float.MaxValue;

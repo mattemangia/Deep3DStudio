@@ -1866,7 +1866,7 @@ namespace Deep3DStudio
             }
 
             ImGui.SameLine();
-            bool hasAnyDepth = _loadedImages.Any(i => i.DepthMap != null);
+            bool hasAnyDepth = _loadedImages.Any(i => HasRenderableDepthMap(i.DepthMap));
             bool rgbMode = _imagePanelMode == ImagePanelMode.RGB;
             bool depthMode = _imagePanelMode == ImagePanelMode.DepthMap;
 
@@ -1931,7 +1931,7 @@ namespace Deep3DStudio
 
                 // Draw thumbnail or placeholder
                 int thumbTex = -1;
-                bool hasDepth = pImg.DepthMap != null;
+                bool hasDepth = HasRenderableDepthMap(pImg.DepthMap);
                 if (_imagePanelMode == ImagePanelMode.DepthMap && hasDepth)
                 {
                     lock (_imageDepthThumbnails)
@@ -2076,9 +2076,35 @@ namespace Deep3DStudio
             ImGui.EndChild();
         }
 
+        private static bool HasRenderableDepthMap(float[,]? depthMap)
+        {
+            return depthMap != null && depthMap.GetLength(0) > 0 && depthMap.GetLength(1) > 0;
+        }
+
+        private static bool TryResolvePoseImageSize(CameraPose pose, out int width, out int height)
+        {
+            width = pose.Width;
+            height = pose.Height;
+            if (width > 0 && height > 0)
+            {
+                return true;
+            }
+
+            if (ImageUtils.TryGetImageDimensions(pose.ImagePath, out width, out height))
+            {
+                pose.Width = width;
+                pose.Height = height;
+                return true;
+            }
+
+            width = 0;
+            height = 0;
+            return false;
+        }
+
         private int EnsureDepthThumbnail(string path, float[,]? depthMap, int maxSize)
         {
-            if (depthMap == null)
+            if (!HasRenderableDepthMap(depthMap))
                 return -1;
 
             int existing = -1;
@@ -2088,36 +2114,37 @@ namespace Deep3DStudio
                     return existing;
             }
 
-            using var depthBitmap = ImageUtils.ColorizeDepthMap(depthMap);
-            float scale = Math.Min((float)maxSize / depthBitmap.Width, (float)maxSize / depthBitmap.Height);
-            int thumbWidth = Math.Max(1, (int)MathF.Round(depthBitmap.Width * scale));
-            int thumbHeight = Math.Max(1, (int)MathF.Round(depthBitmap.Height * scale));
-
-            var info = new SKImageInfo(thumbWidth, thumbHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
-            using var thumb = new SKBitmap(info);
-            using (var canvas = new SKCanvas(thumb))
+            try
             {
-                canvas.Clear(SKColors.Transparent);
-                canvas.DrawBitmap(depthBitmap, new SKRect(0, 0, thumbWidth, thumbHeight), new SKPaint { FilterQuality = SKFilterQuality.Medium });
-                canvas.Flush();
-            }
-
-            int tex = TextureLoader.CreateTextureFromBitmap(thumb);
-            if (tex > 0)
-            {
-                lock (_imageDepthThumbnails)
+                using var thumb = CreateDepthThumbnailBitmap(depthMap, maxSize);
+                if (thumb == null || thumb.Width <= 0 || thumb.Height <= 0 || thumb.GetPixels() == IntPtr.Zero)
                 {
-                    _imageDepthThumbnails[path] = tex;
+                    Logger.Warn($"Depth thumbnail skipped for {Path.GetFileName(path)}: invalid thumbnail bitmap.");
+                    return -1;
                 }
+
+                int tex = TextureLoader.CreateTextureFromBitmap(thumb);
+                if (tex > 0)
+                {
+                    lock (_imageDepthThumbnails)
+                    {
+                        _imageDepthThumbnails[path] = tex;
+                    }
+                }
+                return tex;
             }
-            return tex;
+            catch (Exception ex)
+            {
+                Logger.Exception(ex, $"Failed to create depth thumbnail for {path}");
+                return -1;
+            }
         }
 
         private void OpenImagePreview(string path, float[,]? depthMap, bool showDepth)
         {
             _previewImagePath = path;
             _showImagePreview = true;
-            _previewShowsDepth = showDepth && depthMap != null;
+            _previewShowsDepth = showDepth && HasRenderableDepthMap(depthMap);
 
             if (_previewTexture > 0)
             {
@@ -2128,12 +2155,87 @@ namespace Deep3DStudio
             if (_previewShowsDepth && depthMap != null)
             {
                 using var depthBitmap = ImageUtils.ColorizeDepthMap(depthMap);
-                _previewTexture = TextureLoader.CreateTextureFromBitmap(depthBitmap);
+                if (depthBitmap != null && depthBitmap.Width > 0 && depthBitmap.Height > 0 && depthBitmap.GetPixels() != IntPtr.Zero)
+                {
+                    _previewTexture = TextureLoader.CreateTextureFromBitmap(depthBitmap);
+                }
+                else
+                {
+                    Logger.Warn($"Depth preview unavailable for {Path.GetFileName(path)}. Falling back to RGB.");
+                    _previewShowsDepth = false;
+                    _previewTexture = TextureLoader.LoadTextureFromFile(path);
+                }
             }
             else
             {
                 _previewTexture = TextureLoader.LoadTextureFromFile(path);
             }
+        }
+
+        private static SKBitmap? CreateDepthThumbnailBitmap(float[,] depthMap, int maxSize)
+        {
+            int srcWidth = depthMap.GetLength(0);
+            int srcHeight = depthMap.GetLength(1);
+            if (srcWidth <= 0 || srcHeight <= 0 || maxSize <= 0)
+                return null;
+
+            float minDepth = float.MaxValue;
+            float maxDepth = float.MinValue;
+            bool hasValidDepth = false;
+
+            for (int y = 0; y < srcHeight; y++)
+            {
+                for (int x = 0; x < srcWidth; x++)
+                {
+                    float d = depthMap[x, y];
+                    if (float.IsFinite(d) && d > 0.0f)
+                    {
+                        hasValidDepth = true;
+                        if (d < minDepth) minDepth = d;
+                        if (d > maxDepth) maxDepth = d;
+                    }
+                }
+            }
+
+            if (!hasValidDepth)
+                return null;
+
+            float range = maxDepth - minDepth;
+            if (!float.IsFinite(range) || range < 0.0001f)
+                range = 1.0f;
+
+            float scale = Math.Min((float)maxSize / srcWidth, (float)maxSize / srcHeight);
+            int width = Math.Max(1, (int)MathF.Round(srcWidth * scale));
+            int height = Math.Max(1, (int)MathF.Round(srcHeight * scale));
+
+            var bitmap = new SKBitmap(new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Premul));
+            if (bitmap.GetPixels() == IntPtr.Zero)
+            {
+                bitmap.Dispose();
+                return null;
+            }
+
+            for (int y = 0; y < height; y++)
+            {
+                int srcY = Math.Clamp((int)(y * (float)srcHeight / height), 0, srcHeight - 1);
+                for (int x = 0; x < width; x++)
+                {
+                    int srcX = Math.Clamp((int)(x * (float)srcWidth / width), 0, srcWidth - 1);
+                    float d = depthMap[srcX, srcY];
+                    if (!float.IsFinite(d) || d <= 0.0f)
+                    {
+                        bitmap.SetPixel(x, y, new SKColor(0, 0, 0, 0));
+                        continue;
+                    }
+
+                    float t = (d - minDepth) / range;
+                    t = Math.Clamp(t, 0.0f, 1.0f);
+                    var (r, g, b) = ImageUtils.TurboColormap(t);
+                    bitmap.SetPixel(x, y, new SKColor((byte)(r * 255), (byte)(g * 255), (byte)(b * 255), 255));
+                }
+            }
+
+            return bitmap;
         }
 
         private void DrawColormapLegend(float width, float height, string leftLabel, string rightLabel)
@@ -6360,12 +6462,22 @@ namespace Deep3DStudio
             {
                 try
                 {
+                    if (!TryResolvePoseImageSize(pose, out int poseWidth, out int poseHeight))
+                    {
+                        Logger.Warn($"Skipping depth map for {Path.GetFileName(pose.ImagePath)}: invalid image dimensions.");
+                        return;
+                    }
+
                     // Find corresponding ProjectImage
                     var pImg = _loadedImages.FirstOrDefault(i => Path.GetFullPath(i.FilePath) == Path.GetFullPath(pose.ImagePath));
                     if (pImg != null)
                     {
                         float focal = pose.GetEffectiveFocalLength();
-                        pImg.DepthMap = ExtractDepthMap(combinedMesh, pose.Width, pose.Height, pose.WorldToCamera, focal);
+                        var depthMap = ExtractDepthMap(combinedMesh, poseWidth, poseHeight, pose.WorldToCamera, focal);
+                        if (HasRenderableDepthMap(depthMap))
+                        {
+                            pImg.DepthMap = depthMap;
+                        }
                     }
                 }
                 catch (Exception ex)
@@ -6377,6 +6489,11 @@ namespace Deep3DStudio
 
         private float[,] ExtractDepthMap(MeshData mesh, int width, int height, Matrix4 worldToCamera, float focalLength = 0)
         {
+            if (width <= 0 || height <= 0)
+            {
+                return new float[0, 0];
+            }
+
             float[,] depthMap = new float[width, height];
 
             for (int y = 0; y < height; y++)

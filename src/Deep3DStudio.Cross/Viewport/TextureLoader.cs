@@ -112,6 +112,22 @@ namespace Deep3DStudio.Viewport
         /// </summary>
         public static int CreateTextureFromBitmap(SKBitmap bitmap)
         {
+            if (bitmap == null)
+            {
+                Logger.Warn("CreateTextureFromBitmap called with null bitmap.");
+                return -1;
+            }
+            if (bitmap.Width <= 0 || bitmap.Height <= 0)
+            {
+                Logger.Warn($"CreateTextureFromBitmap called with invalid size: {bitmap.Width}x{bitmap.Height}");
+                return -1;
+            }
+            if (bitmap.GetPixels() == IntPtr.Zero)
+            {
+                Logger.Warn($"CreateTextureFromBitmap called with empty pixel buffer: {bitmap.Width}x{bitmap.Height}");
+                return -1;
+            }
+
             _textureCreateCount++;
             int callId = _textureCreateCount;
 

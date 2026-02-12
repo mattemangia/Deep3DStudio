@@ -149,12 +149,22 @@ namespace Deep3DStudio.Model
 
                 var imagesBytes = new List<byte[]>();
                 var validImagePaths = new List<string>();
+                var validImageSizes = new List<(int Width, int Height)>();
 
                 foreach (var path in imagePaths)
                 {
                     if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) continue;
                     imagesBytes.Add(File.ReadAllBytes(path));
                     validImagePaths.Add(path);
+                    if (ImageUtils.TryGetImageDimensions(path, out int width, out int height))
+                    {
+                        validImageSizes.Add((width, height));
+                    }
+                    else
+                    {
+                        validImageSizes.Add((0, 0));
+                        Log($"[Must3r] Warning: Could not read image size for {Path.GetFileName(path)}");
+                    }
                 }
 
                 if (imagesBytes.Count == 0)
@@ -186,6 +196,11 @@ namespace Deep3DStudio.Model
                             ImageIndex = i,
                             ImagePath = validImagePaths[i]
                         };
+                        if (i < validImageSizes.Count)
+                        {
+                            pose.Width = validImageSizes[i].Width;
+                            pose.Height = validImageSizes[i].Height;
+                        }
 
                         if (mesh.Pose is Matrix4 poseMatrix)
                         {

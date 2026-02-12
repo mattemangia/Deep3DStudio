@@ -46,8 +46,44 @@ namespace Deep3DStudio.Model
 
         public static (int width, int height) GetImageDimensions(string filePath)
         {
+            if (TryGetImageDimensions(filePath, out int width, out int height))
+            {
+                return (width, height);
+            }
+
+            // Fallback: decode fully so callers preserving previous behavior still work.
             using var decoded = ImageDecoder.DecodeBitmap(filePath);
             return (decoded.Width, decoded.Height);
+        }
+
+        public static bool TryGetImageDimensions(string filePath, out int width, out int height)
+        {
+            width = 0;
+            height = 0;
+
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+            {
+                return false;
+            }
+
+            try
+            {
+                using var stream = File.OpenRead(filePath);
+                using var codec = SKCodec.Create(stream);
+                if (codec == null)
+                {
+                    return false;
+                }
+
+                var info = codec.Info;
+                width = info.Width;
+                height = info.Height;
+                return width > 0 && height > 0;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public static SKColor[] ExtractColors(string filePath, int width, int height)
@@ -114,16 +150,19 @@ namespace Deep3DStudio.Model
 
             int width = depthMap.GetLength(0);
             int height = depthMap.GetLength(1);
+            if (width <= 0 || height <= 0) return null;
 
             float minDepth = float.MaxValue;
             float maxDepth = float.MinValue;
+            bool hasValidDepth = false;
             for (int y = 0; y < height; y++)
             {
                 for (int x = 0; x < width; x++)
                 {
                     float d = depthMap[x, y];
-                    if (d > 0)
+                    if (float.IsFinite(d) && d > 0)
                     {
+                        hasValidDepth = true;
                         if (d < minDepth) minDepth = d;
                         if (d > maxDepth) maxDepth = d;
                     }
@@ -131,16 +170,17 @@ namespace Deep3DStudio.Model
             }
 
             float range = maxDepth - minDepth;
-            if (range < 0.0001f) range = 1.0f;
+            if (!hasValidDepth || !float.IsFinite(range) || range < 0.0001f) range = 1.0f;
 
             var bitmap = new SKBitmap(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
+            if (bitmap.GetPixels() == IntPtr.Zero) return null;
 
             for (int y = 0; y < height; y++)
             {
                 for (int x = 0; x < width; x++)
                 {
                     float d = depthMap[x, y];
-                    if (d <= 0)
+                    if (!float.IsFinite(d) || d <= 0)
                     {
                         // Transparent background
                         bitmap.SetPixel(x, y, new SKColor(0, 0, 0, 0));

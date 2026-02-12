@@ -69,9 +69,17 @@ namespace Deep3DStudio
             for (int i = 0; i < result.Poses.Count; i++)
             {
                 var pose = result.Poses[i];
+                if (!TryResolvePoseImageSize(pose, out int poseWidth, out int poseHeight))
+                {
+                    Console.WriteLine($"  Warning: skipping depth map for {System.IO.Path.GetFileName(pose.ImagePath)} due to invalid dimensions.");
+                    continue;
+                }
                 // Pass camera-specific focal length for accurate depth projection
-                var depthMap = ExtractDepthMap(combinedMesh, pose.Width, pose.Height, pose.WorldToCamera, pose.GetEffectiveFocalLength());
-                _imageBrowser.SetDepthData(i, depthMap);
+                var depthMap = ExtractDepthMap(combinedMesh, poseWidth, poseHeight, pose.WorldToCamera, pose.GetEffectiveFocalLength());
+                if (depthMap.GetLength(0) > 0 && depthMap.GetLength(1) > 0)
+                {
+                    _imageBrowser.SetDepthData(i, depthMap);
+                }
             }
 
             _imageBrowser.QueueDraw();
@@ -98,6 +106,11 @@ namespace Deep3DStudio
 
         private float[,] ExtractDepthMap(MeshData mesh, int width, int height, OpenTK.Mathematics.Matrix4 worldToCamera, float focalLength = 0)
         {
+            if (width <= 0 || height <= 0)
+            {
+                return new float[0, 0];
+            }
+
             float[,] depthMap = new float[width, height];
 
             for (int y = 0; y < height; y++)
@@ -195,6 +208,11 @@ namespace Deep3DStudio
         /// </summary>
         private float[,] ExtractDepthMapNoFill(MeshData mesh, int width, int height, OpenTK.Mathematics.Matrix4 worldToCamera, float focalLength = 0)
         {
+            if (width <= 0 || height <= 0)
+            {
+                return new float[0, 0];
+            }
+
             float[,] depthMap = new float[width, height];
 
             for (int y = 0; y < height; y++)
@@ -405,9 +423,14 @@ namespace Deep3DStudio
 
             Parallel.ForEach(result.Poses, pose =>
             {
+                if (!TryResolvePoseImageSize(pose, out int poseWidth, out int poseHeight))
+                    return;
+
                 // 1. Generate depth map from sparse points (NO gap filling - we want only real geometry)
                 float focal = pose.GetEffectiveFocalLength();
-                var depthMap = ExtractDepthMapNoFill(sparseMesh, pose.Width, pose.Height, pose.WorldToCamera, focal);
+                var depthMap = ExtractDepthMapNoFill(sparseMesh, poseWidth, poseHeight, pose.WorldToCamera, focal);
+                if (depthMap.GetLength(0) <= 0 || depthMap.GetLength(1) <= 0)
+                    return;
 
                 // 2. Load Image for Colors
                 if (!System.IO.File.Exists(pose.ImagePath)) return;
@@ -415,12 +438,12 @@ namespace Deep3DStudio
                 using var img = SkiaSharp.SKBitmap.Decode(pose.ImagePath);
                 if (img == null) return;
 
-                float scaleX = (float)img.Width / pose.Width;
-                float scaleY = (float)img.Height / pose.Height;
+                float scaleX = (float)img.Width / poseWidth;
+                float scaleY = (float)img.Height / poseHeight;
 
                 // 3. Back-project only pixels with valid depth (no interpolated/filled values)
-                float cx = pose.Width / 2.0f;
-                float cy = pose.Height / 2.0f;
+                float cx = poseWidth / 2.0f;
+                float cy = poseHeight / 2.0f;
 
                 var localVerts = new List<OpenTK.Mathematics.Vector3>();
                 var localColors = new List<OpenTK.Mathematics.Vector3>();
@@ -428,9 +451,9 @@ namespace Deep3DStudio
                 // Use smaller stride for denser output where we have valid depth
                 int stride = 2;
 
-                for (int y = 0; y < pose.Height; y += stride)
+                for (int y = 0; y < poseHeight; y += stride)
                 {
-                    for (int x = 0; x < pose.Width; x += stride)
+                    for (int x = 0; x < poseWidth; x += stride)
                     {
                         float d = depthMap[x, y];
                         if (d <= 0) continue; // No valid depth at this pixel
@@ -489,6 +512,27 @@ namespace Deep3DStudio
             }
 
             return denseMesh;
+        }
+
+        private static bool TryResolvePoseImageSize(CameraPose pose, out int width, out int height)
+        {
+            width = pose.Width;
+            height = pose.Height;
+            if (width > 0 && height > 0)
+            {
+                return true;
+            }
+
+            if (ImageUtils.TryGetImageDimensions(pose.ImagePath, out width, out height))
+            {
+                pose.Width = width;
+                pose.Height = height;
+                return true;
+            }
+
+            width = 0;
+            height = 0;
+            return false;
         }
 
         private (float[,,], OpenTK.Mathematics.Vector3, float) VoxelizePoints(List<MeshData> meshes, int maxRes = 200)
