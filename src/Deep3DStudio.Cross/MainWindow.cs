@@ -57,6 +57,9 @@ namespace Deep3DStudio
         // State
         private int _selectedWorkflow = 0;
         private int _selectedQuality = 1;
+        private bool _ctrlModifierDown;
+        private bool _shiftModifierDown;
+        private bool _superModifierDown;
         // Dynamic workflow names - first entry uses Settings reconstruction method
         private string[] _workflowsBase = {
             "Multi-View (Settings)", // Uses IniSettings.ReconstructionMethod
@@ -655,6 +658,7 @@ namespace Deep3DStudio
         protected override void OnKeyDown(KeyboardKeyEventArgs e)
         {
             base.OnKeyDown(e);
+            UpdateModifierState(e);
 
             if (!ImGui.GetIO().WantCaptureKeyboard)
             {
@@ -707,6 +711,24 @@ namespace Deep3DStudio
                     }
                 }
             }
+        }
+
+        protected override void OnKeyUp(KeyboardKeyEventArgs e)
+        {
+            base.OnKeyUp(e);
+            UpdateModifierState(e);
+        }
+
+        private void UpdateModifierState(KeyboardKeyEventArgs e)
+        {
+            _ctrlModifierDown = e.Control ||
+                                e.Key == Keys.LeftControl || e.Key == Keys.RightControl ||
+                                KeyboardState.IsKeyDown(Keys.LeftControl) || KeyboardState.IsKeyDown(Keys.RightControl);
+            _shiftModifierDown = e.Shift ||
+                                 e.Key == Keys.LeftShift || e.Key == Keys.RightShift ||
+                                 KeyboardState.IsKeyDown(Keys.LeftShift) || KeyboardState.IsKeyDown(Keys.RightShift);
+            _superModifierDown = e.Key == Keys.LeftSuper || e.Key == Keys.RightSuper ||
+                                 KeyboardState.IsKeyDown(Keys.LeftSuper) || KeyboardState.IsKeyDown(Keys.RightSuper);
         }
 
         protected override void OnRenderFrame(FrameEventArgs e)
@@ -2445,8 +2467,10 @@ namespace Deep3DStudio
                         {
                             if (!obj.Selected)
                             {
-                                _sceneGraph.ClearSelection();
-                                _sceneGraph.Select(obj, false);
+                                bool addToSelection = IsMultiSelectModifierDown();
+                                if (!addToSelection)
+                                    _sceneGraph.ClearSelection();
+                                _sceneGraph.Select(obj, addToSelection);
                             }
 
                             if (ImGui.MenuItem("Rename"))
@@ -2534,7 +2558,15 @@ namespace Deep3DStudio
         private bool IsMultiSelectModifierDown()
         {
             var io = ImGui.GetIO();
+            if (ImGui.IsKeyDown(ImGuiKey.LeftCtrl) || ImGui.IsKeyDown(ImGuiKey.RightCtrl) ||
+                ImGui.IsKeyDown(ImGuiKey.LeftShift) || ImGui.IsKeyDown(ImGuiKey.RightShift) ||
+                ImGui.IsKeyDown(ImGuiKey.LeftSuper) || ImGui.IsKeyDown(ImGuiKey.RightSuper))
+                return true;
+
             if (io.KeyCtrl || io.KeyShift || io.KeySuper)
+                return true;
+
+            if (_ctrlModifierDown || _shiftModifierDown || _superModifierDown)
                 return true;
 
             var keyboard = KeyboardState;
