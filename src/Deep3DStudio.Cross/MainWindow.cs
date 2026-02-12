@@ -2428,7 +2428,7 @@ namespace Deep3DStudio
 
                         if (ImGui.Selectable($"{displayName}##sel", selected))
                         {
-                            bool addToSelection = ImGui.GetIO().KeyCtrl;
+                            bool addToSelection = ImGui.GetIO().KeyCtrl || ImGui.GetIO().KeyShift;
                             if (!addToSelection)
                                 _sceneGraph.ClearSelection();
 
@@ -2816,7 +2816,8 @@ namespace Deep3DStudio
                 bool isSelected = joint.IsSelected;
                 if (ImGui.Selectable($"{joint.Name}##rigJoint{joint.Id}", isSelected))
                 {
-                    skeleton.SelectJoint(joint, ImGui.GetIO().KeyCtrl);
+                    bool addToSelection = ImGui.GetIO().KeyCtrl || ImGui.GetIO().KeyShift;
+                    skeleton.SelectJoint(joint, addToSelection);
                     _sceneGraph.ClearSelection();
                     _sceneGraph.Select(_activeSkeletonObject, false);
                     _isDirty = true;
