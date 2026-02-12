@@ -500,13 +500,14 @@ namespace Deep3DStudio.Model.AIModels
                                         }
                                     }
 
-                                    if (currentResult.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
+                                    if (HasGeometry(currentResult))
                                     {
                                         Report($"MASt3R reconstruction complete. {currentResult.Meshes[0].Vertices.Count} points.", 1.0f);
                                     }
                                     else
                                     {
-                                        Report("MASt3R reconstruction failed - no points generated.", 0.9f);
+                                        Report("MASt3R reconstruction failed - no points generated. Falling back to Feature Matching SfM...", 0.75f);
+                                        currentResult = RunSfmFallback(imagePaths, Report, "MASt3R");
                                     }
                                 }
                                 catch (OperationCanceledException)
@@ -517,6 +518,7 @@ namespace Deep3DStudio.Model.AIModels
                                 catch (Exception ex)
                                 {
                                     Report($"MASt3R failed: {ex.Message}", 0.9f);
+                                    currentResult = RunSfmFallback(imagePaths, Report, "MASt3R");
                                 }
                             }
                             else
@@ -547,13 +549,14 @@ namespace Deep3DStudio.Model.AIModels
                                         }
                                     }
 
-                                    if (currentResult.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
+                                    if (HasGeometry(currentResult))
                                     {
                                         Report($"MUSt3R reconstruction complete. {currentResult.Meshes[0].Vertices.Count} points.", 1.0f);
                                     }
                                     else
                                     {
-                                        Report("MUSt3R reconstruction failed - no points generated.", 0.9f);
+                                        Report("MUSt3R reconstruction failed - no points generated. Falling back to Feature Matching SfM...", 0.75f);
+                                        currentResult = RunSfmFallback(imagePaths, Report, "MUSt3R");
                                     }
                                 }
                                 catch (OperationCanceledException)
@@ -564,6 +567,7 @@ namespace Deep3DStudio.Model.AIModels
                                 catch (Exception ex)
                                 {
                                     Report($"MUSt3R failed: {ex.Message}", 0.9f);
+                                    currentResult = RunSfmFallback(imagePaths, Report, "MUSt3R");
                                 }
                             }
                             else
@@ -948,6 +952,65 @@ namespace Deep3DStudio.Model.AIModels
                     _workflowSemaphore.Release();
                 }
             }
+        }
+
+        private static bool HasGeometry(SceneResult? result)
+        {
+            return result != null &&
+                   result.Meshes.Count > 0 &&
+                   result.Meshes.Any(m => m.Vertices.Count > 0);
+        }
+
+        private static SceneResult RunSfmFallback(List<string> imagePaths, Action<string, float> report, string sourceStep)
+        {
+            var fallbackResult = new SceneResult();
+            try
+            {
+                var validImagePaths = new List<string>();
+                foreach (var path in imagePaths)
+                {
+                    if (File.Exists(path))
+                    {
+                        validImagePaths.Add(path);
+                        report($"[SfM] Image verified: {Path.GetFileName(path)}", 0.8f);
+                    }
+                    else
+                    {
+                        report($"[SfM] Warning: Image not found: {path}", 0.8f);
+                    }
+                }
+
+                if (validImagePaths.Count < 2)
+                {
+                    report($"SfM fallback after {sourceStep} requires at least 2 valid images. Found: {validImagePaths.Count}", 0.9f);
+                    return fallbackResult;
+                }
+
+                using (var sfm = new SfMInference())
+                {
+                    sfm.LogCallback = msg => report(msg, 0.9f);
+                    fallbackResult = sfm.ReconstructScene(validImagePaths);
+                }
+
+                if (HasGeometry(fallbackResult))
+                {
+                    report($"SfM fallback complete. {fallbackResult.Meshes[0].Vertices.Count} points.", 1.0f);
+                }
+                else
+                {
+                    report("SfM fallback failed - no points generated.", 0.95f);
+                }
+            }
+            catch (TypeInitializationException ex)
+            {
+                report($"SfM fallback unavailable (OpenCV native libraries not found): {ex.InnerException?.Message ?? ex.Message}", 0.95f);
+            }
+            catch (Exception ex)
+            {
+                report($"SfM fallback failed: {ex.Message}", 0.95f);
+            }
+
+            return fallbackResult;
         }
 
         private static (float[,,]? grid, Vector3 origin, float voxelSize) VoxelizePointClouds(List<MeshData> meshes, int maxRes)

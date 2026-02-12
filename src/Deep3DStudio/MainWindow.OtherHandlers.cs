@@ -217,33 +217,7 @@ namespace Deep3DStudio
                         break;
 
                     case ReconstructionMethod.FeatureMatching:
-                        _statusLabel.Text = "Estimating Geometry (Feature Matching SfM)...";
-                        var sfm = new Deep3DStudio.Model.SfM.SfMInference();
-                        result = await Task.Run(() => sfm.ReconstructScene(_imagePaths));
-
-                        // Densify the sparse SfM point cloud
-                        if (result.Meshes.Count > 0)
-                        {
-                            var sparseMesh = result.Meshes[0];
-                            Console.WriteLine($"Sparse SfM cloud: {sparseMesh.Vertices.Count} points, {sparseMesh.Colors.Count} colors");
-
-                            _statusLabel.Text = "Densifying Point Cloud...";
-                            while (Application.EventsPending()) Application.RunIteration();
-
-                            var denseMesh = await Task.Run(() => GenerateDensePointCloud(result));
-
-                            // Replace sparse with dense if we got significantly more points
-                            if (denseMesh.Vertices.Count > sparseMesh.Vertices.Count * 1.5)
-                            {
-                                Console.WriteLine($"Densification: Using dense cloud ({denseMesh.Vertices.Count} pts) over sparse ({sparseMesh.Vertices.Count} pts)");
-                                result.Meshes.Clear();
-                                result.Meshes.Add(denseMesh);
-                            }
-                            else
-                            {
-                                Console.WriteLine($"Densification: Keeping sparse cloud ({sparseMesh.Vertices.Count} pts) - dense only has {denseMesh.Vertices.Count} pts");
-                            }
-                        }
+                        result = await RunFeatureMatchingSfmFallback("Feature Matching");
                         break;
 
                     case ReconstructionMethod.TripoSR:
@@ -288,6 +262,11 @@ namespace Deep3DStudio
                         GC.Collect();
                         GC.WaitForPendingFinalizers();
                         while (Application.EventsPending()) Application.RunIteration();
+                        if (result.Meshes.Count == 0 || !result.Meshes.Any(m => m.Vertices.Count > 0))
+                        {
+                            Console.WriteLine("[MASt3R] No geometry generated, falling back to Feature Matching SfM.");
+                            result = await RunFeatureMatchingSfmFallback("MASt3R");
+                        }
                         break;
 
                     case ReconstructionMethod.Must3r:
@@ -308,6 +287,11 @@ namespace Deep3DStudio
                         GC.Collect();
                         GC.WaitForPendingFinalizers();
                         while (Application.EventsPending()) Application.RunIteration();
+                        if (result.Meshes.Count == 0 || !result.Meshes.Any(m => m.Vertices.Count > 0))
+                        {
+                            Console.WriteLine("[MUSt3R] No geometry generated, falling back to Feature Matching SfM.");
+                            result = await RunFeatureMatchingSfmFallback("MUSt3R");
+                        }
                         break;
                 }
 
@@ -328,6 +312,41 @@ namespace Deep3DStudio
                 Console.WriteLine(ex);
                 return false;
             }
+        }
+
+        private async Task<SceneResult> RunFeatureMatchingSfmFallback(string sourceName)
+        {
+            _statusLabel.Text = sourceName == "Feature Matching"
+                ? "Estimating Geometry (Feature Matching SfM)..."
+                : $"{sourceName} failed, trying Feature Matching (SfM)...";
+
+            var sfm = new Deep3DStudio.Model.SfM.SfMInference();
+            var result = await Task.Run(() => sfm.ReconstructScene(_imagePaths));
+
+            if (result.Meshes.Count > 0)
+            {
+                var sparseMesh = result.Meshes[0];
+                Console.WriteLine($"Sparse SfM cloud: {sparseMesh.Vertices.Count} points, {sparseMesh.Colors.Count} colors");
+
+                _statusLabel.Text = "Densifying Point Cloud...";
+                while (Application.EventsPending()) Application.RunIteration();
+
+                var denseMesh = await Task.Run(() => GenerateDensePointCloud(result));
+
+                // Replace sparse with dense if we got significantly more points
+                if (denseMesh.Vertices.Count > sparseMesh.Vertices.Count * 1.5)
+                {
+                    Console.WriteLine($"Densification: Using dense cloud ({denseMesh.Vertices.Count} pts) over sparse ({sparseMesh.Vertices.Count} pts)");
+                    result.Meshes.Clear();
+                    result.Meshes.Add(denseMesh);
+                }
+                else
+                {
+                    Console.WriteLine($"Densification: Keeping sparse cloud ({sparseMesh.Vertices.Count} pts) - dense only has {denseMesh.Vertices.Count} pts");
+                }
+            }
+
+            return result;
         }
 
         private void ApplyPointCloudResultToScene(SceneResult result)

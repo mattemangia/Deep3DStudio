@@ -32,6 +32,8 @@ namespace Deep3DStudio.Python
         private string? _weightsPath;
         private string _device = "auto";
         private bool _isLoaded = false;
+        public bool LastOpenMpShmError { get; private set; }
+        public string? LastErrorMessage { get; private set; }
         private bool _disposed = false;
         private Process? _persistentProcess;
         private readonly object _processLock = new object();
@@ -272,27 +274,61 @@ namespace Deep3DStudio.Python
 
         private (int exitCode, string stdout, string stderr) RunPythonCommand(string arguments, int timeoutMs = 300000, CancellationToken cancellationToken = default)
         {
+            LastOpenMpShmError = false;
+            LastErrorMessage = null;
+
             var firstTry = RunPythonCommandInternal(arguments, timeoutMs, cancellationToken, safeOpenMpMode: false);
             if (!ShouldRetryWithSafeOpenMp(firstTry.exitCode, firstTry.stderr))
+            {
+                if (firstTry.exitCode != 0)
+                {
+                    LastOpenMpShmError = IsOpenMpShmError(firstTry.exitCode, firstTry.stderr);
+                    LastErrorMessage = BuildErrorMessage(firstTry.exitCode, firstTry.stderr);
+                }
                 return firstTry;
+            }
 
             Log("Detected OpenMP shared-memory crash on macOS (exit 134). Retrying with safe OpenMP settings...");
             var retry = RunPythonCommandInternal(arguments, timeoutMs, cancellationToken, safeOpenMpMode: true);
             if (retry.exitCode == 0)
             {
                 Log("Retry succeeded with safe OpenMP settings.");
+                LastOpenMpShmError = false;
+                LastErrorMessage = null;
+            }
+            else
+            {
+                LastOpenMpShmError = IsOpenMpShmError(retry.exitCode, retry.stderr);
+                LastErrorMessage = BuildErrorMessage(retry.exitCode, retry.stderr);
             }
             return retry;
         }
 
         private static bool ShouldRetryWithSafeOpenMp(int exitCode, string stderr)
         {
-            if (!OperatingSystem.IsMacOS() || exitCode != 134 || string.IsNullOrWhiteSpace(stderr))
+            if (!OperatingSystem.IsMacOS())
+                return false;
+
+            return IsOpenMpShmError(exitCode, stderr);
+        }
+
+        private static bool IsOpenMpShmError(int exitCode, string stderr)
+        {
+            if (exitCode != 134 || string.IsNullOrWhiteSpace(stderr))
                 return false;
 
             return stderr.Contains("OMP: Error #179", StringComparison.OrdinalIgnoreCase)
                 || stderr.Contains("Can't open SHM2", StringComparison.OrdinalIgnoreCase)
                 || stderr.Contains("OMP: System error #2", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string BuildErrorMessage(int exitCode, string stderr)
+        {
+            if (IsOpenMpShmError(exitCode, stderr))
+            {
+                return "OpenMP shared-memory initialization failed on macOS (OMP #179 / SHM2).";
+            }
+            return $"Python subprocess failed with exit code {exitCode}.";
         }
 
         private static void ApplySafeOpenMpSettings(ProcessStartInfo psi)

@@ -113,7 +113,9 @@ namespace Deep3DStudio.Model
                 }
                 else
                 {
-                    _lastError = "Failed to load DUSt3R model";
+                    _lastError = _inference.LastOpenMpShmError
+                        ? "Failed to load DUSt3R model due to OpenMP shared-memory initialization on macOS (OMP #179)."
+                        : (_inference.LastErrorMessage ?? "Failed to load DUSt3R model");
                     Log($"[Dust3r] {_lastError}");
                 }
             }
