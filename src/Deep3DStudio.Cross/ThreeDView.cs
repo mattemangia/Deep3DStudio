@@ -233,6 +233,16 @@ namespace Deep3DStudio.Viewport
 
         public void UpdateInput(MouseState mouse, KeyboardState keyboard, float dt, int width, int height)
         {
+             bool pointerInViewport =
+                 mouse.X >= _viewportX && mouse.X < (_viewportX + _viewportWidth) &&
+                 mouse.Y >= _viewportY && mouse.Y < (_viewportY + _viewportHeight);
+
+             bool keepCurrentInteraction = _isDragging || _isDraggingGizmo || _isPanning;
+             if (!pointerInViewport && !keepCurrentInteraction)
+             {
+                 return;
+             }
+
              // Gizmo Interaction or Camera Interaction
              if (mouse.IsButtonDown(MouseButton.Left))
              {
@@ -272,7 +282,8 @@ namespace Deep3DStudio.Viewport
                      if (_gizmoMode == GizmoMode.Select)
                      {
                          var picked = PickObject((int)mouse.X, (int)mouse.Y, width, height);
-                         bool multi = keyboard.IsKeyDown(Keys.LeftShift) || keyboard.IsKeyDown(Keys.LeftControl);
+                         bool multi = keyboard.IsKeyDown(Keys.LeftShift) || keyboard.IsKeyDown(Keys.RightShift) ||
+                                      keyboard.IsKeyDown(Keys.LeftControl) || keyboard.IsKeyDown(Keys.RightControl);
 
                          if (picked != null)
                          {
@@ -317,7 +328,8 @@ namespace Deep3DStudio.Viewport
                  _activeGizmoAxis = -1;
              }
 
-             if (mouse.IsButtonDown(MouseButton.Middle) || (mouse.IsButtonDown(MouseButton.Left) && keyboard.IsKeyDown(Keys.LeftShift)))
+             bool shiftDown = keyboard.IsKeyDown(Keys.LeftShift) || keyboard.IsKeyDown(Keys.RightShift);
+             if (mouse.IsButtonDown(MouseButton.Middle) || (mouse.IsButtonDown(MouseButton.Left) && shiftDown))
              {
                  if (!_isPanning)
                  {
@@ -368,7 +380,8 @@ namespace Deep3DStudio.Viewport
             // Perform triangle picking
             var (pickedMesh, triangleIndex, distance) = _meshEditingTool.PickTriangle(rayOrigin, rayDir, meshObjects);
 
-            bool addToSelection = keyboard.IsKeyDown(Keys.LeftShift) || keyboard.IsKeyDown(Keys.LeftControl);
+            bool addToSelection = keyboard.IsKeyDown(Keys.LeftShift) || keyboard.IsKeyDown(Keys.RightShift) ||
+                                  keyboard.IsKeyDown(Keys.LeftControl) || keyboard.IsKeyDown(Keys.RightControl);
 
             if (pickedMesh != null && triangleIndex >= 0)
             {

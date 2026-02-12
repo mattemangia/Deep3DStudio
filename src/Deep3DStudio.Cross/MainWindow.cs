@@ -2428,7 +2428,7 @@ namespace Deep3DStudio
 
                         if (ImGui.Selectable($"{displayName}##sel", selected))
                         {
-                            bool addToSelection = ImGui.GetIO().KeyCtrl || ImGui.GetIO().KeyShift;
+                            bool addToSelection = IsMultiSelectModifierDown();
                             if (!addToSelection)
                                 _sceneGraph.ClearSelection();
 
@@ -2529,6 +2529,18 @@ namespace Deep3DStudio
             }
 
             ImGui.EndChild();
+        }
+
+        private bool IsMultiSelectModifierDown()
+        {
+            var io = ImGui.GetIO();
+            if (io.KeyCtrl || io.KeyShift || io.KeySuper)
+                return true;
+
+            var keyboard = KeyboardState;
+            return keyboard.IsKeyDown(Keys.LeftControl) || keyboard.IsKeyDown(Keys.RightControl) ||
+                   keyboard.IsKeyDown(Keys.LeftShift) || keyboard.IsKeyDown(Keys.RightShift) ||
+                   keyboard.IsKeyDown(Keys.LeftSuper) || keyboard.IsKeyDown(Keys.RightSuper);
         }
 
         private static bool DrawRenderModeMenuItem(SceneObject obj, string label, ObjectRenderMode mode)
@@ -2816,7 +2828,7 @@ namespace Deep3DStudio
                 bool isSelected = joint.IsSelected;
                 if (ImGui.Selectable($"{joint.Name}##rigJoint{joint.Id}", isSelected))
                 {
-                    bool addToSelection = ImGui.GetIO().KeyCtrl || ImGui.GetIO().KeyShift;
+                    bool addToSelection = IsMultiSelectModifierDown();
                     skeleton.SelectJoint(joint, addToSelection);
                     _sceneGraph.ClearSelection();
                     _sceneGraph.Select(_activeSkeletonObject, false);
