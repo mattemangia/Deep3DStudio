@@ -1015,68 +1015,7 @@ namespace Deep3DStudio.Model.AIModels
 
         private static (float[,,]? grid, Vector3 origin, float voxelSize) VoxelizePointClouds(List<MeshData> meshes, int maxRes)
         {
-            var min = new Vector3(float.MaxValue);
-            var max = new Vector3(float.MinValue);
-            bool hasPoint = false;
-
-            foreach (var mesh in meshes)
-            {
-                foreach (var v in mesh.Vertices)
-                {
-                    hasPoint = true;
-                    min = Vector3.ComponentMin(min, v);
-                    max = Vector3.ComponentMax(max, v);
-                }
-            }
-
-            var settings = IniSettings.Instance;
-            float voxelSize = Math.Max(0.001f, settings.MergerVoxelSize);
-            if (!hasPoint)
-                return (null, Vector3.Zero, voxelSize);
-
-            int w = (int)((max.X - min.X) / voxelSize) + 5;
-            int h = (int)((max.Y - min.Y) / voxelSize) + 5;
-            int d = (int)((max.Z - min.Z) / voxelSize) + 5;
-
-            if (w > maxRes)
-            {
-                voxelSize *= (w / (float)maxRes);
-                w = maxRes;
-                h = (int)((max.Y - min.Y) / voxelSize) + 5;
-                d = (int)((max.Z - min.Z) / voxelSize) + 5;
-            }
-
-            float[,,] grid = new float[w, h, d];
-
-            foreach (var mesh in meshes)
-            {
-                foreach (var v in mesh.Vertices)
-                {
-                    int x = (int)((v.X - min.X) / voxelSize);
-                    int y = (int)((v.Y - min.Y) / voxelSize);
-                    int z = (int)((v.Z - min.Z) / voxelSize);
-                    if (x >= 0 && x < w && y >= 0 && y < h && z >= 0 && z < d)
-                    {
-                        grid[x, y, z] = 1.0f;
-                    }
-                }
-            }
-
-            float[,,] smooth = new float[w, h, d];
-            for (int x = 1; x < w - 1; x++)
-                for (int y = 1; y < h - 1; y++)
-                    for (int z = 1; z < d - 1; z++)
-                    {
-                        if (grid[x, y, z] > 0)
-                        {
-                            smooth[x, y, z] = 1;
-                            smooth[x + 1, y, z] = 1; smooth[x - 1, y, z] = 1;
-                            smooth[x, y + 1, z] = 1; smooth[x, y - 1, z] = 1;
-                            smooth[x, y, z + 1] = 1; smooth[x, y, z - 1] = 1;
-                        }
-                    }
-
-            return (smooth, min, voxelSize);
+            return Meshing.VoxelizationUtils.Voxelize(meshes, maxRes);
         }
 
         public async Task<SceneResult?> RefineSfMResultAsync(SceneResult sfmResult, Action<string>? statusCallback = null)
