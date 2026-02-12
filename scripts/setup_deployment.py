@@ -486,6 +486,11 @@ def setup_python_embed(target_dir, target_platform):
         git_packages.append(("torchmcubes", "git+https://github.com/tatsy/torchmcubes.git"))
 
     xformers_req = "xformers" if has_xformers else None
+    if xformers_req and "osx" in target_platform:
+        # Apple clang does not support -fopenmp by default, and xformers often falls back to source builds.
+        # Keep deployment resilient on macOS by skipping xformers and relying on existing xformers-disabled paths.
+        print("NOTE: Skipping xformers install on macOS (unsupported OpenMP toolchain for source build).")
+        xformers_req = None
 
     if is_compatible:
         # Native installation
@@ -606,9 +611,10 @@ def setup_python_embed(target_dir, target_platform):
                 xformers_proc.wait()
                 print("-" * 60)
                 if xformers_proc.returncode != 0:
-                    print(f"  xformers install failed with return code {xformers_proc.returncode}")
-                    return False
-                print("  xformers installation completed!")
+                    print(f"  WARNING: xformers install failed with return code {xformers_proc.returncode}")
+                    print("  Continuing without xformers (runtime will use fallback attention paths).")
+                else:
+                    print("  xformers installation completed!")
 
             # Install git-based packages (e.g., torchmcubes)
             if git_packages:
