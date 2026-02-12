@@ -13,6 +13,7 @@ namespace Deep3DStudio.Model
         public List<Vector3> Vertices { get; set; } = new List<Vector3>();
         public List<Vector3> Normals { get; set; } = new List<Vector3>();
         public List<Vector3> Colors { get; set; } = new List<Vector3>();
+        public List<float> Confidence { get; set; } = new List<float>();
         public List<Vector2> UVs { get; set; } = new List<Vector2>();
         public List<int> Indices { get; set; } = new List<int>();
 
@@ -39,12 +40,14 @@ namespace Deep3DStudio.Model
             clone.Vertices = new List<Vector3>(Vertices);
             clone.Normals = new List<Vector3>(Normals);
             clone.Colors = new List<Vector3>(Colors);
+            clone.Confidence = new List<float>(Confidence);
             clone.UVs = new List<Vector2>(UVs);
             clone.Indices = new List<int>(Indices);
             clone.Texture = Texture;
             clone.TextureId = TextureId;
             if (PixelToVertexIndex != null)
                 clone.PixelToVertexIndex = (int[])PixelToVertexIndex.Clone();
+            clone.Pose = Pose;
             return clone;
         }
 

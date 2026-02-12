@@ -256,16 +256,9 @@ namespace Deep3DStudio
             _rgbColorToggle.TooltipText = "Show original RGB colors";
             _rgbColorToggle.Active = IniSettings.Instance.PointCloudColor == PointCloudColorMode.RGB;
             _rgbColorToggle.Toggled += (s, e) => {
-                if (_rgbColorToggle.Active)
-                {
-                    IniSettings.Instance.PointCloudColor = PointCloudColorMode.RGB;
-                    _depthColorToggle.Active = false;
-                    _viewport.QueueDraw();
-                }
-                else if (!_depthColorToggle.Active)
-                {
-                    _rgbColorToggle.Active = true;
-                }
+                if (_updatingPointCloudColorToggles) return;
+                if (_rgbColorToggle.Active) SetPointCloudColorMode(PointCloudColorMode.RGB);
+                else SyncPointCloudColorToggles();
             };
             toolbar.Insert(_rgbColorToggle, -1);
 
@@ -275,18 +268,24 @@ namespace Deep3DStudio
             _depthColorToggle.TooltipText = "Show distance map with colormap";
             _depthColorToggle.Active = IniSettings.Instance.PointCloudColor == PointCloudColorMode.DistanceMap;
             _depthColorToggle.Toggled += (s, e) => {
-                if (_depthColorToggle.Active)
-                {
-                    IniSettings.Instance.PointCloudColor = PointCloudColorMode.DistanceMap;
-                    _rgbColorToggle.Active = false;
-                    _viewport.QueueDraw();
-                }
-                else if (!_rgbColorToggle.Active)
-                {
-                    _depthColorToggle.Active = true;
-                }
+                if (_updatingPointCloudColorToggles) return;
+                if (_depthColorToggle.Active) SetPointCloudColorMode(PointCloudColorMode.DistanceMap);
+                else SyncPointCloudColorToggles();
             };
             toolbar.Insert(_depthColorToggle, -1);
+
+            _confidenceColorToggle = new ToggleToolButton();
+            _confidenceColorToggle.IconWidget = AppIconFactory.GenerateIcon("confidence", iconSize);
+            _confidenceColorToggle.Label = "Conf";
+            _confidenceColorToggle.TooltipText = "Show confidence map with colormap";
+            _confidenceColorToggle.Active = IniSettings.Instance.PointCloudColor == PointCloudColorMode.Confidence;
+            _confidenceColorToggle.Toggled += (s, e) => {
+                if (_updatingPointCloudColorToggles) return;
+                if (_confidenceColorToggle.Active) SetPointCloudColorMode(PointCloudColorMode.Confidence);
+                else SyncPointCloudColorToggles();
+            };
+            toolbar.Insert(_confidenceColorToggle, -1);
+            SyncPointCloudColorToggles();
 
             toolbar.Insert(new SeparatorToolItem(), -1);
 

@@ -26,6 +26,7 @@ namespace Deep3DStudio.Icons
                         case "wireframe": DrawWireframeIcon(cr, size); break;
                         case "rgb": DrawRgbIcon(cr, size); break;
                         case "depthmap": DrawDepthMapIcon(cr, size); break;
+                        case "confidence": DrawConfidenceIcon(cr, size); break;
                         case "select": DrawSelectIcon(cr, size); break;
                         case "texture": DrawTextureIcon(cr, size); break;
                         case "camera": DrawCameraIcon(cr, size); break;
@@ -207,6 +208,38 @@ namespace Deep3DStudio.Icons
             cr.SetSourceRGB(0.3, 0.3, 0.3);
             cr.LineWidth = 1;
             cr.Rectangle(startX, startY, barWidth, barHeight);
+            cr.Stroke();
+        }
+
+        private static void DrawConfidenceIcon(Context cr, int size)
+        {
+            // Vertical confidence gauge with turbo gradient and check marker.
+            double barWidth = size * 0.28;
+            double barHeight = size * 0.66;
+            double x = size * 0.2;
+            double y = size * 0.17;
+
+            int steps = 10;
+            double stepHeight = barHeight / steps;
+            for (int i = 0; i < steps; i++)
+            {
+                double t = (double)i / (steps - 1);
+                var (r, g, b) = Model.ImageUtils.TurboColormap((float)(1.0 - t));
+                cr.SetSourceRGB(r, g, b);
+                cr.Rectangle(x, y + i * stepHeight, barWidth, stepHeight + 1);
+                cr.Fill();
+            }
+
+            cr.SetSourceRGB(0.25, 0.25, 0.25);
+            cr.LineWidth = 1;
+            cr.Rectangle(x, y, barWidth, barHeight);
+            cr.Stroke();
+
+            cr.SetSourceRGB(0.95, 0.95, 0.95);
+            cr.LineWidth = 2;
+            cr.MoveTo(size * 0.55, size * 0.55);
+            cr.LineTo(size * 0.68, size * 0.68);
+            cr.LineTo(size * 0.84, size * 0.36);
             cr.Stroke();
         }
 

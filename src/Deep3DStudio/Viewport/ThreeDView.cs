@@ -88,7 +88,20 @@ namespace Deep3DStudio.Viewport
         private bool _legacyWarningLogged = false;
 
         // Point cloud modern GL buffers (key = object Id)
-        private Dictionary<int, (int vao, int vbo, int count)> _pointCloudBuffers = new Dictionary<int, (int, int, int)>();
+        private Dictionary<int, (int vao, int vbo, int count, PointCloudColorMode colorMode)> _pointCloudBuffers
+            = new Dictionary<int, (int, int, int, PointCloudColorMode)>();
+
+        private enum ColorLegendMode
+        {
+            None,
+            Depth,
+            Confidence,
+            ConfidenceDepthFallback
+        }
+
+        private ColorLegendMode _colorLegendMode = ColorLegendMode.None;
+        private float _colorLegendMin = 0.0f;
+        private float _colorLegendMax = 1.0f;
 
         // Display Options
         public bool ShowGrid { get; set; } = true;
@@ -614,6 +627,10 @@ namespace Deep3DStudio.Viewport
             }
 
             // Draw scene elements using modern GL when available
+            _colorLegendMode = ColorLegendMode.None;
+            _colorLegendMin = 0.0f;
+            _colorLegendMax = 1.0f;
+
             if (_useModernGL && _shader != null)
             {
                 _shader.Use();
@@ -963,64 +980,100 @@ namespace Deep3DStudio.Viewport
             var settings = IniSettings.Instance;
             GL.PointSize(isSelected ? 6.0f : 4.0f);
 
-            if (settings.PointCloudColor == PointCloudColorMode.DistanceMap)
+            switch (settings.PointCloudColor)
             {
-                DrawPointCloudDepthMap(mesh);
-            }
-            else
-            {
-                bool hasColors = mesh.Colors.Count >= mesh.Vertices.Count;
-
-                GL.Begin(PrimitiveType.Points);
-                for (int i = 0; i < mesh.Vertices.Count; i++)
-                {
-                    Vector3 c = hasColors ? mesh.Colors[i] : new Vector3(1, 1, 1);
-                    if (isSelected)
+                case PointCloudColorMode.DistanceMap:
+                    DrawMappedPointCloud(mesh.Vertices, mesh.Confidence, PointCloudColorMode.DistanceMap);
+                    break;
+                case PointCloudColorMode.Confidence:
+                    DrawMappedPointCloud(mesh.Vertices, mesh.Confidence, PointCloudColorMode.Confidence);
+                    break;
+                default:
+                    bool hasColors = mesh.Colors.Count >= mesh.Vertices.Count;
+                    GL.Begin(PrimitiveType.Points);
+                    for (int i = 0; i < mesh.Vertices.Count; i++)
                     {
-                        GL.Color3(Math.Min(1f, c.X + 0.3f), Math.Min(1f, c.Y + 0.3f), c.Z);
+                        Vector3 c = hasColors ? mesh.Colors[i] : new Vector3(1, 1, 1);
+                        if (isSelected)
+                        {
+                            GL.Color3(Math.Min(1f, c.X + 0.3f), Math.Min(1f, c.Y + 0.3f), c.Z);
+                        }
+                        else
+                        {
+                            GL.Color3(c.X, c.Y, c.Z);
+                        }
+                        GL.Vertex3(mesh.Vertices[i]);
                     }
-                    else
-                    {
-                        GL.Color3(c.X, c.Y, c.Z);
-                    }
-                    GL.Vertex3(mesh.Vertices[i]);
-                }
-                GL.End();
+                    GL.End();
+                    break;
             }
         }
 
-        private void DrawPointCloudDepthMap(MeshData mesh)
+        private void DrawMappedPointCloud(IReadOnlyList<Vector3> points, IReadOnlyList<float> confidence, PointCloudColorMode mode)
         {
             if (!_legacySupported)
             {
-                EnsureLegacySupport("mesh point cloud depth map");
+                EnsureLegacySupport("mapped point cloud");
                 return;
             }
 
-            if (mesh.Vertices.Count == 0) return;
+            if (points.Count == 0) return;
 
-            float minDist = float.MaxValue;
-            float maxDist = float.MinValue;
+            bool useDepth = mode == PointCloudColorMode.DistanceMap || confidence.Count < points.Count;
+            float minValue = float.MaxValue;
+            float maxValue = float.MinValue;
 
-            foreach (var v in mesh.Vertices)
+            if (useDepth)
             {
-                float dist = v.Length;
-                if (dist < minDist) minDist = dist;
-                if (dist > maxDist) maxDist = dist;
+                foreach (var p in points)
+                {
+                    float dist = p.Length;
+                    if (dist < minValue) minValue = dist;
+                    if (dist > maxValue) maxValue = dist;
+                }
+                UpdateColorLegend(
+                    mode == PointCloudColorMode.Confidence ? ColorLegendMode.ConfidenceDepthFallback : ColorLegendMode.Depth,
+                    minValue,
+                    maxValue);
+            }
+            else
+            {
+                for (int i = 0; i < points.Count; i++)
+                {
+                    float c = confidence[i];
+                    if (float.IsNaN(c) || float.IsInfinity(c))
+                        continue;
+                    if (c < minValue) minValue = c;
+                    if (c > maxValue) maxValue = c;
+                }
+                if (minValue == float.MaxValue || maxValue == float.MinValue)
+                {
+                    useDepth = true;
+                    foreach (var p in points)
+                    {
+                        float dist = p.Length;
+                        if (dist < minValue) minValue = dist;
+                        if (dist > maxValue) maxValue = dist;
+                    }
+                    UpdateColorLegend(ColorLegendMode.ConfidenceDepthFallback, minValue, maxValue);
+                }
+                else
+                {
+                    UpdateColorLegend(ColorLegendMode.Confidence, minValue, maxValue);
+                }
             }
 
-            float range = maxDist - minDist;
+            float range = maxValue - minValue;
             if (range < 0.0001f) range = 1.0f;
 
             GL.Begin(PrimitiveType.Points);
-            for (int i = 0; i < mesh.Vertices.Count; i++)
+            for (int i = 0; i < points.Count; i++)
             {
-                var v = mesh.Vertices[i];
-                float dist = v.Length;
-                float t = (dist - minDist) / range;
+                float value = useDepth ? points[i].Length : confidence[i];
+                float t = (value - minValue) / range;
                 Vector3 color = TurboColormap(t);
                 GL.Color3(color.X, color.Y, color.Z);
-                GL.Vertex3(v);
+                GL.Vertex3(points[i]);
             }
             GL.End();
         }
@@ -1031,6 +1084,7 @@ namespace Deep3DStudio.Viewport
             if (visibleCount == 0) return;
 
             GL.PointSize(pc.PointSize);
+            var colorMode = IniSettings.Instance.PointCloudColor;
 
             // Use modern GL path if available (for Core profile compatibility)
             if (_useModernGL && _shader != null)
@@ -1045,6 +1099,55 @@ namespace Deep3DStudio.Viewport
             GL.Begin(PrimitiveType.Points);
 
             bool hasColors = pc.Colors.Count >= pc.Points.Count;
+            bool useDepthMap = colorMode == PointCloudColorMode.DistanceMap;
+            bool useConfidence = colorMode == PointCloudColorMode.Confidence;
+            bool confidenceFallbackDepth = useConfidence && pc.Confidence.Count < pc.Points.Count;
+
+            float minValue = 0.0f;
+            float range = 1.0f;
+            if (useDepthMap || confidenceFallbackDepth)
+            {
+                float minDist = float.MaxValue;
+                float maxDist = float.MinValue;
+                for (int i = 0; i < visibleCount; i++)
+                {
+                    int sourceIndex = pc.GetSourcePointIndex(i, visibleCount);
+                    if (sourceIndex < 0 || sourceIndex >= pc.Points.Count) continue;
+                    float d = pc.Points[sourceIndex].Length;
+                    if (d < minDist) minDist = d;
+                    if (d > maxDist) maxDist = d;
+                }
+                minValue = minDist;
+                range = maxDist - minDist;
+                if (range < 0.0001f) range = 1.0f;
+                UpdateColorLegend(
+                    confidenceFallbackDepth ? ColorLegendMode.ConfidenceDepthFallback : ColorLegendMode.Depth,
+                    minDist,
+                    maxDist);
+            }
+            else if (useConfidence)
+            {
+                float minConf = float.MaxValue;
+                float maxConf = float.MinValue;
+                for (int i = 0; i < visibleCount; i++)
+                {
+                    int sourceIndex = pc.GetSourcePointIndex(i, visibleCount);
+                    if (sourceIndex < 0 || sourceIndex >= pc.Points.Count || sourceIndex >= pc.Confidence.Count) continue;
+                    float c = pc.Confidence[sourceIndex];
+                    if (float.IsNaN(c) || float.IsInfinity(c)) continue;
+                    if (c < minConf) minConf = c;
+                    if (c > maxConf) maxConf = c;
+                }
+                if (minConf == float.MaxValue || maxConf == float.MinValue)
+                {
+                    minConf = 0.0f;
+                    maxConf = 1.0f;
+                }
+                minValue = minConf;
+                range = maxConf - minConf;
+                if (range < 0.0001f) range = 1.0f;
+                UpdateColorLegend(ColorLegendMode.Confidence, minConf, maxConf);
+            }
 
             for (int i = 0; i < visibleCount; i++)
             {
@@ -1052,7 +1155,16 @@ namespace Deep3DStudio.Viewport
                 if (sourceIndex < 0 || sourceIndex >= pc.Points.Count)
                     continue;
 
-                if (hasColors)
+                if (useDepthMap || confidenceFallbackDepth || useConfidence)
+                {
+                    float value = useConfidence && !confidenceFallbackDepth && sourceIndex < pc.Confidence.Count
+                        ? pc.Confidence[sourceIndex]
+                        : pc.Points[sourceIndex].Length;
+                    float t = (value - minValue) / range;
+                    var col = TurboColormap(t);
+                    GL.Color3(col.X, col.Y, col.Z);
+                }
+                else if (hasColors)
                 {
                     var c = pc.Colors[sourceIndex];
                     GL.Color3(c.X, c.Y, c.Z);
@@ -1074,8 +1186,61 @@ namespace Deep3DStudio.Viewport
             if (visibleCount == 0)
                 return;
 
+            var colorMode = IniSettings.Instance.PointCloudColor;
+            bool useDepthMap = colorMode == PointCloudColorMode.DistanceMap;
+            bool useConfidence = colorMode == PointCloudColorMode.Confidence;
+            bool confidenceFallbackDepth = useConfidence && pc.Confidence.Count < pc.Points.Count;
+
+            float minValue = 0.0f;
+            float range = 1.0f;
+            if (useDepthMap || confidenceFallbackDepth)
+            {
+                float minDist = float.MaxValue;
+                float maxDist = float.MinValue;
+                for (int i = 0; i < visibleCount; i++)
+                {
+                    int sourceIndex = pc.GetSourcePointIndex(i, visibleCount);
+                    if (sourceIndex < 0 || sourceIndex >= pc.Points.Count) continue;
+                    float d = pc.Points[sourceIndex].Length;
+                    if (d < minDist) minDist = d;
+                    if (d > maxDist) maxDist = d;
+                }
+                minValue = minDist;
+                range = maxDist - minDist;
+                if (range < 0.0001f) range = 1.0f;
+                UpdateColorLegend(
+                    confidenceFallbackDepth ? ColorLegendMode.ConfidenceDepthFallback : ColorLegendMode.Depth,
+                    minDist,
+                    maxDist);
+            }
+            else if (useConfidence)
+            {
+                float minConf = float.MaxValue;
+                float maxConf = float.MinValue;
+                for (int i = 0; i < visibleCount; i++)
+                {
+                    int sourceIndex = pc.GetSourcePointIndex(i, visibleCount);
+                    if (sourceIndex < 0 || sourceIndex >= pc.Points.Count || sourceIndex >= pc.Confidence.Count) continue;
+                    float c = pc.Confidence[sourceIndex];
+                    if (float.IsNaN(c) || float.IsInfinity(c)) continue;
+                    if (c < minConf) minConf = c;
+                    if (c > maxConf) maxConf = c;
+                }
+                if (minConf == float.MaxValue || maxConf == float.MinValue)
+                {
+                    minConf = 0.0f;
+                    maxConf = 1.0f;
+                }
+                minValue = minConf;
+                range = maxConf - minConf;
+                if (range < 0.0001f) range = 1.0f;
+                UpdateColorLegend(ColorLegendMode.Confidence, minConf, maxConf);
+            }
+
             // Create or update VAO/VBO for this point cloud
-            if (!_pointCloudBuffers.TryGetValue(pc.Id, out var buffers) || buffers.count != visibleCount)
+            if (!_pointCloudBuffers.TryGetValue(pc.Id, out var buffers)
+                || buffers.count != visibleCount
+                || buffers.colorMode != colorMode)
             {
                 // Delete old buffers if they exist
                 if (buffers.vao != 0)
@@ -1099,7 +1264,18 @@ namespace Deep3DStudio.Viewport
                     data[i * 6 + 1] = p.Y;
                     data[i * 6 + 2] = p.Z;
 
-                    if (hasColors)
+                    if (useDepthMap || confidenceFallbackDepth || useConfidence)
+                    {
+                        float value = useConfidence && !confidenceFallbackDepth && sourceIndex < pc.Confidence.Count
+                            ? pc.Confidence[sourceIndex]
+                            : p.Length;
+                        float t = (value - minValue) / range;
+                        var c = TurboColormap(t);
+                        data[i * 6 + 3] = c.X;
+                        data[i * 6 + 4] = c.Y;
+                        data[i * 6 + 5] = c.Z;
+                    }
+                    else if (hasColors)
                     {
                         var c = pc.Colors[sourceIndex];
                         data[i * 6 + 3] = c.X;
@@ -1131,8 +1307,8 @@ namespace Deep3DStudio.Viewport
 
                 GL.BindVertexArray(0);
 
-                _pointCloudBuffers[pc.Id] = (vao, vbo, visibleCount);
-                buffers = (vao, vbo, visibleCount);
+                _pointCloudBuffers[pc.Id] = (vao, vbo, visibleCount, colorMode);
+                buffers = (vao, vbo, visibleCount, colorMode);
 
                 // Log sample data for debugging
                 Console.WriteLine($"Created modern GL buffers for point cloud {pc.Id}: {visibleCount}/{pc.Points.Count} visible points");
@@ -1300,6 +1476,13 @@ namespace Deep3DStudio.Viewport
         {
             var (r, g, b) = ImageUtils.TurboColormap(t);
             return new Vector3(r, g, b);
+        }
+
+        private void UpdateColorLegend(ColorLegendMode mode, float minValue, float maxValue)
+        {
+            _colorLegendMode = mode;
+            _colorLegendMin = minValue;
+            _colorLegendMax = maxValue;
         }
 
         private static bool ShouldDrawMeshSurface(MeshObject meshObj, IniSettings settings)
@@ -1984,13 +2167,16 @@ namespace Deep3DStudio.Viewport
 
             GL.Disable(EnableCap.DepthTest);
 
+            bool showLegend = _colorLegendMode != ColorLegendMode.None;
+            float panelHeight = showLegend ? 118.0f : 80.0f;
+
             // Draw info background
             GL.Color4(0.0f, 0.0f, 0.0f, 0.5f);
             GL.Begin(PrimitiveType.Quads);
             GL.Vertex2(5, 5);
             GL.Vertex2(200, 5);
-            GL.Vertex2(200, 80);
-            GL.Vertex2(5, 80);
+            GL.Vertex2(200, panelHeight);
+            GL.Vertex2(5, panelHeight);
             GL.End();
 
             // FPS indicator bar
@@ -2024,6 +2210,53 @@ namespace Deep3DStudio.Viewport
                 GL.Vertex2(10 + Math.Min(selCount * 20, 100), 55);
                 GL.Vertex2(10 + Math.Min(selCount * 20, 100), 65);
                 GL.Vertex2(10, 65);
+                GL.End();
+            }
+
+            if (showLegend)
+            {
+                float x0 = 14.0f;
+                float x1 = 190.0f;
+                float y0 = 86.0f;
+                float y1 = 102.0f;
+                int steps = 36;
+
+                GL.Begin(PrimitiveType.Quads);
+                for (int i = 0; i < steps; i++)
+                {
+                    float t0 = (float)i / steps;
+                    float t1 = (float)(i + 1) / steps;
+                    var c0 = TurboColormap(t0);
+                    var c1 = TurboColormap(t1);
+                    float sx0 = x0 + (x1 - x0) * t0;
+                    float sx1 = x0 + (x1 - x0) * t1;
+
+                    GL.Color3(c0.X, c0.Y, c0.Z);
+                    GL.Vertex2(sx0, y0);
+                    GL.Vertex2(sx0, y1);
+                    GL.Color3(c1.X, c1.Y, c1.Z);
+                    GL.Vertex2(sx1, y1);
+                    GL.Vertex2(sx1, y0);
+                }
+                GL.End();
+
+                // Border and ticks
+                GL.Color3(0.2f, 0.2f, 0.2f);
+                GL.LineWidth(1.0f);
+                GL.Begin(PrimitiveType.LineLoop);
+                GL.Vertex2(x0, y0);
+                GL.Vertex2(x1, y0);
+                GL.Vertex2(x1, y1);
+                GL.Vertex2(x0, y1);
+                GL.End();
+
+                GL.Begin(PrimitiveType.Lines);
+                GL.Vertex2(x0, y1 + 1);
+                GL.Vertex2(x0, y1 + 8);
+                GL.Vertex2((x0 + x1) * 0.5f, y1 + 1);
+                GL.Vertex2((x0 + x1) * 0.5f, y1 + 6);
+                GL.Vertex2(x1, y1 + 1);
+                GL.Vertex2(x1, y1 + 8);
                 GL.End();
             }
 

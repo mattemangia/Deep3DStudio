@@ -90,6 +90,7 @@ namespace Deep3DStudio.Model
         public List<float> Points { get; set; } = new List<float>(); // Flattened [x,y,z, x,y,z...]
         public List<float> Colors { get; set; } = new List<float>();
         public List<float> Normals { get; set; } = new List<float>();
+        public List<float> Confidence { get; set; } = new List<float>();
         public float PointSize { get; set; }
         public float VisibleFraction { get; set; } = 1.0f;
     }
@@ -122,6 +123,7 @@ namespace Deep3DStudio.Model
         public List<float> Vertices { get; set; } = new List<float>(); // Flattened
         public List<float> Normals { get; set; } = new List<float>();  // Flattened
         public List<float> Colors { get; set; } = new List<float>();
+        public List<float> Confidence { get; set; } = new List<float>();
         public List<float> UVs { get; set; } = new List<float>();      // Flattened [u,v, u,v...]
         public List<int> Indices { get; set; } = new List<int>();
         public string? TexturePngBase64 { get; set; }

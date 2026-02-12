@@ -33,6 +33,9 @@ namespace Deep3DStudio.IO
 
             pc.Points = points;
             pc.Colors = colors;
+            pc.Confidence = new List<float>(points.Count);
+            for (int i = 0; i < points.Count; i++)
+                pc.Confidence.Add(1.0f);
             pc.UpdateBounds();
             return pc;
         }

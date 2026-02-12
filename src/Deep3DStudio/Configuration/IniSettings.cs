@@ -91,7 +91,8 @@ namespace Deep3DStudio.Configuration
         RGB,
         Height,
         Normal,
-        DistanceMap
+        DistanceMap,
+        Confidence
     }
 
     /// <summary>

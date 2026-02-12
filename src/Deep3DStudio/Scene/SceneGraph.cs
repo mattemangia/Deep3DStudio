@@ -319,9 +319,15 @@ namespace Deep3DStudio.Scene
             var clonedMesh = new MeshData
             {
                 Vertices = new List<Vector3>(MeshData.Vertices),
+                Normals = new List<Vector3>(MeshData.Normals),
                 Colors = new List<Vector3>(MeshData.Colors),
+                Confidence = new List<float>(MeshData.Confidence),
+                UVs = new List<Vector2>(MeshData.UVs),
                 Indices = new List<int>(MeshData.Indices),
-                PixelToVertexIndex = MeshData.PixelToVertexIndex
+                PixelToVertexIndex = MeshData.PixelToVertexIndex != null ? (int[])MeshData.PixelToVertexIndex.Clone() : null,
+                Pose = MeshData.Pose,
+                Texture = MeshData.Texture,
+                TextureId = MeshData.TextureId
             };
 
             return new MeshObject(Name + " (Copy)", clonedMesh)
@@ -348,6 +354,7 @@ namespace Deep3DStudio.Scene
         public List<Vector3> Points { get; set; } = new List<Vector3>();
         public List<Vector3> Colors { get; set; } = new List<Vector3>();
         public List<Vector3> Normals { get; set; } = new List<Vector3>();
+        public List<float> Confidence { get; set; } = new List<float>();
         public float PointSize { get; set; } = 8.0f;
         public float VisibleFraction
         {
@@ -369,6 +376,7 @@ namespace Deep3DStudio.Scene
             Points = new List<Vector3>(mesh.Vertices);
             Colors = new List<Vector3>(mesh.Colors);
             Normals = new List<Vector3>(mesh.Normals);
+            Confidence = new List<float>(mesh.Confidence);
             UpdateBounds();
             Console.WriteLine($"PointCloudObject '{name}' created: {Points.Count} points, bounds: ({BoundsMin.X:F2},{BoundsMin.Y:F2},{BoundsMin.Z:F2}) to ({BoundsMax.X:F2},{BoundsMax.Y:F2},{BoundsMax.Z:F2})");
         }
@@ -398,6 +406,7 @@ namespace Deep3DStudio.Scene
                 Points = new List<Vector3>(Points),
                 Colors = new List<Vector3>(Colors),
                 Normals = new List<Vector3>(Normals),
+                Confidence = new List<float>(Confidence),
                 PointSize = PointSize,
                 VisibleFraction = VisibleFraction,
                 Position = Position,

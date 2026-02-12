@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using OpenTK.Graphics.OpenGL;
 using SkiaSharp;
 using ImGuiNET;
+using Deep3DStudio.Model;
 
 namespace Deep3DStudio.Viewport
 {
@@ -25,6 +26,9 @@ namespace Deep3DStudio.Viewport
         Texture,
         Grid,
         Wireframe,
+        Rgb,
+        DepthMap,
+        Confidence,
         Focus,
         Pen,
         Skeleton,
@@ -282,6 +286,58 @@ namespace Deep3DStudio.Viewport
                  canvas.DrawLine(w,0, w*0.7f, h*0.3f, p);
                  canvas.DrawLine(0,h, w*0.3f, h*0.7f, p);
                  canvas.DrawLine(w,h, w*0.7f, h*0.7f, p);
+            });
+
+            _icons[IconType.Rgb] = CreateIcon(SKColors.IndianRed, (canvas, w, h) => {
+                float r = w * 0.22f;
+                var fill = new SKPaint { Style = SKPaintStyle.Fill, IsAntialias = true };
+                fill.Color = new SKColor(240, 70, 70, 210);
+                canvas.DrawCircle(w * 0.38f, h * 0.40f, r, fill);
+                fill.Color = new SKColor(70, 220, 90, 210);
+                canvas.DrawCircle(w * 0.62f, h * 0.40f, r, fill);
+                fill.Color = new SKColor(80, 110, 240, 210);
+                canvas.DrawCircle(w * 0.50f, h * 0.62f, r, fill);
+            });
+
+            _icons[IconType.DepthMap] = CreateIcon(SKColors.SteelBlue, (canvas, w, h) => {
+                int steps = 12;
+                float x0 = w * 0.18f;
+                float y0 = h * 0.26f;
+                float bw = w * 0.64f;
+                float bh = h * 0.48f;
+                float sw = bw / steps;
+                var p = new SKPaint { Style = SKPaintStyle.Fill, IsAntialias = true };
+                for (int i = 0; i < steps; i++)
+                {
+                    float t = (float)i / (steps - 1);
+                    var (r, g, b) = ImageUtils.TurboColormap(t);
+                    p.Color = new SKColor((byte)(r * 255), (byte)(g * 255), (byte)(b * 255));
+                    canvas.DrawRect(x0 + i * sw, y0, sw + 1, bh, p);
+                }
+                var border = new SKPaint { Color = SKColors.White.WithAlpha(210), StrokeWidth = 2, Style = SKPaintStyle.Stroke, IsAntialias = true };
+                canvas.DrawRect(x0, y0, bw, bh, border);
+            });
+
+            _icons[IconType.Confidence] = CreateIcon(SKColors.SeaGreen, (canvas, w, h) => {
+                float x = w * 0.24f;
+                float y = h * 0.18f;
+                float bw = w * 0.24f;
+                float bh = h * 0.64f;
+                int steps = 10;
+                float sh = bh / steps;
+                var p = new SKPaint { Style = SKPaintStyle.Fill, IsAntialias = true };
+                for (int i = 0; i < steps; i++)
+                {
+                    float t = (float)i / (steps - 1);
+                    var (r, g, b) = ImageUtils.TurboColormap(1.0f - t);
+                    p.Color = new SKColor((byte)(r * 255), (byte)(g * 255), (byte)(b * 255));
+                    canvas.DrawRect(x, y + i * sh, bw, sh + 1, p);
+                }
+                var border = new SKPaint { Color = SKColors.White.WithAlpha(210), StrokeWidth = 2, Style = SKPaintStyle.Stroke, IsAntialias = true };
+                canvas.DrawRect(x, y, bw, bh, border);
+                var check = new SKPaint { Color = SKColors.White, StrokeWidth = 4, Style = SKPaintStyle.Stroke, IsAntialias = true };
+                canvas.DrawLine(w * 0.56f, h * 0.60f, w * 0.68f, h * 0.72f, check);
+                canvas.DrawLine(w * 0.68f, h * 0.72f, w * 0.86f, h * 0.36f, check);
             });
 
             _icons[IconType.Focus] = CreateIcon(SKColors.LightBlue, (canvas, w, h) => {

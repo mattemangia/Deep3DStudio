@@ -46,8 +46,7 @@ namespace Deep3DStudio
             if (_textureToggle != null) _textureToggle.Active = s.ShowTexture;
             if (_meshToggle != null) _meshToggle.Active = s.ShowMesh;
             if (_camerasToggle != null) _camerasToggle.Active = s.ShowCameras;
-            if (_rgbColorToggle != null) _rgbColorToggle.Active = s.PointCloudColor == PointCloudColorMode.RGB;
-            if (_depthColorToggle != null) _depthColorToggle.Active = s.PointCloudColor == PointCloudColorMode.DistanceMap;
+            SyncPointCloudColorToggles();
             if (_topToolbar != null) _topToolbar.Visible = s.ShowTopToolbar;
             if (_verticalToolbar != null) _verticalToolbar.Visible = s.ShowVerticalToolbar;
             if (_meshEditorToolbar != null) _meshEditorToolbar.Visible = s.ShowMeshEditorToolbar;
@@ -57,6 +56,29 @@ namespace Deep3DStudio
             if (_showMeshEditorToolbarMenuItem != null) _showMeshEditorToolbarMenuItem.Active = s.ShowMeshEditorToolbar;
             if (_showPointCloudToolbarMenuItem != null) _showPointCloudToolbarMenuItem.Active = s.ShowPointCloudToolbar;
             _viewport.QueueDraw();
+        }
+
+        private void SetPointCloudColorMode(PointCloudColorMode mode)
+        {
+            IniSettings.Instance.PointCloudColor = mode;
+            SyncPointCloudColorToggles();
+            _viewport.QueueDraw();
+        }
+
+        private void SyncPointCloudColorToggles()
+        {
+            var mode = IniSettings.Instance.PointCloudColor;
+            _updatingPointCloudColorToggles = true;
+            try
+            {
+                if (_rgbColorToggle != null) _rgbColorToggle.Active = mode == PointCloudColorMode.RGB;
+                if (_depthColorToggle != null) _depthColorToggle.Active = mode == PointCloudColorMode.DistanceMap;
+                if (_confidenceColorToggle != null) _confidenceColorToggle.Active = mode == PointCloudColorMode.Confidence;
+            }
+            finally
+            {
+                _updatingPointCloudColorToggles = false;
+            }
         }
 
         private void OnAddImages(object? sender, EventArgs e)

@@ -419,8 +419,7 @@ namespace Deep3DStudio
             rgbColorItem.Toggled += (s, e) => {
                 if (rgbColorItem.Active)
                 {
-                    IniSettings.Instance.PointCloudColor = PointCloudColorMode.RGB;
-                    _viewport.QueueDraw();
+                    SetPointCloudColorMode(PointCloudColorMode.RGB);
                 }
             };
             viewMenu.Append(rgbColorItem);
@@ -430,11 +429,20 @@ namespace Deep3DStudio
             depthColorItem.Toggled += (s, e) => {
                 if (depthColorItem.Active)
                 {
-                    IniSettings.Instance.PointCloudColor = PointCloudColorMode.DistanceMap;
-                    _viewport.QueueDraw();
+                    SetPointCloudColorMode(PointCloudColorMode.DistanceMap);
                 }
             };
             viewMenu.Append(depthColorItem);
+
+            var confidenceColorItem = new RadioMenuItem(rgbColorItem, "_Confidence Colors");
+            confidenceColorItem.Active = IniSettings.Instance.PointCloudColor == PointCloudColorMode.Confidence;
+            confidenceColorItem.Toggled += (s, e) => {
+                if (confidenceColorItem.Active)
+                {
+                    SetPointCloudColorMode(PointCloudColorMode.Confidence);
+                }
+            };
+            viewMenu.Append(confidenceColorItem);
 
             viewMenu.Append(new SeparatorMenuItem());
 

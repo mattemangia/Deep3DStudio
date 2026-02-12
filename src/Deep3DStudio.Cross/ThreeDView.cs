@@ -76,8 +76,22 @@ namespace Deep3DStudio.Viewport
         private int _frameCount = 0;
         private float _fps = 0;
         private DateTime _lastFpsUpdate = DateTime.Now;
+        private bool _hasPointCloudLegend = false;
+        private PointCloudColorMode _legendMode = PointCloudColorMode.RGB;
+        private float _legendMin = 0.0f;
+        private float _legendMax = 1.0f;
+        private bool _legendUsesDepthFallback = false;
 
         public float FPS => _fps;
+
+        public bool TryGetPointCloudLegend(out PointCloudColorMode mode, out float minValue, out float maxValue, out bool depthFallback)
+        {
+            mode = _legendMode;
+            minValue = _legendMin;
+            maxValue = _legendMax;
+            depthFallback = _legendUsesDepthFallback;
+            return _hasPointCloudLegend;
+        }
 
         public ThreeDView(SceneGraph sceneGraph)
         {
@@ -165,6 +179,7 @@ namespace Deep3DStudio.Viewport
             if (s.ShowGrid) DrawGrid();
             if (s.ShowAxes) DrawAxes();
 
+            ResetPointCloudLegend();
             DrawScene();
             CheckError("DrawScene");
 
@@ -645,7 +660,7 @@ namespace Deep3DStudio.Viewport
 
                     if (!bboxOnly && ShouldDrawMeshAsPointCloud(mesh, s) && mesh.MeshData != null && mesh.MeshData.Vertices.Count > 0)
                     {
-                        DrawPointCloud(mesh.MeshData.Vertices, mesh.MeshData.Colors, mesh.PointSize);
+                        DrawPointCloud(mesh.MeshData.Vertices, mesh.MeshData.Colors, mesh.MeshData.Confidence, mesh.PointSize);
                     }
 
                     if (ResolveWireframe(mesh, s)) GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Line);
@@ -760,54 +775,179 @@ namespace Deep3DStudio.Viewport
             };
         }
 
-        private static void DrawPointCloud(IReadOnlyList<Vector3> points, IReadOnlyList<Vector3> colors, float pointSize)
+        private void ResetPointCloudLegend()
+        {
+            _hasPointCloudLegend = false;
+            _legendMode = PointCloudColorMode.RGB;
+            _legendMin = 0.0f;
+            _legendMax = 1.0f;
+            _legendUsesDepthFallback = false;
+        }
+
+        private void UpdatePointCloudLegend(PointCloudColorMode mode, float minValue, float maxValue, bool depthFallback)
+        {
+            _hasPointCloudLegend = true;
+            _legendMode = mode;
+            _legendMin = minValue;
+            _legendMax = maxValue;
+            _legendUsesDepthFallback = depthFallback;
+        }
+
+        private static bool TryComputeValueRange(
+            IReadOnlyList<Vector3> points,
+            IReadOnlyList<float> confidence,
+            PointCloudColorMode mode,
+            Func<int, int> indexAt,
+            int count,
+            out float minValue,
+            out float maxValue,
+            out bool depthFallback)
+        {
+            minValue = float.MaxValue;
+            maxValue = float.MinValue;
+            depthFallback = false;
+
+            bool useDepth = mode == PointCloudColorMode.DistanceMap;
+            bool useConfidence = mode == PointCloudColorMode.Confidence && confidence.Count >= points.Count;
+            if (mode == PointCloudColorMode.Confidence && !useConfidence)
+            {
+                useDepth = true;
+                depthFallback = true;
+            }
+
+            for (int i = 0; i < count; i++)
+            {
+                int source = indexAt(i);
+                if (source < 0 || source >= points.Count)
+                    continue;
+
+                float value = useDepth ? points[source].Length : confidence[source];
+                if (float.IsNaN(value) || float.IsInfinity(value))
+                    continue;
+
+                if (value < minValue) minValue = value;
+                if (value > maxValue) maxValue = value;
+            }
+
+            if (minValue == float.MaxValue || maxValue == float.MinValue)
+            {
+                minValue = 0.0f;
+                maxValue = 1.0f;
+                return false;
+            }
+
+            return true;
+        }
+
+        private static Vector3 GetPointColor(
+            int sourceIndex,
+            IReadOnlyList<Vector3> points,
+            IReadOnlyList<Vector3> colors,
+            IReadOnlyList<float> confidence,
+            PointCloudColorMode mode,
+            float minValue,
+            float range,
+            bool depthFallback)
+        {
+            if (mode == PointCloudColorMode.DistanceMap || depthFallback)
+            {
+                float t = (points[sourceIndex].Length - minValue) / range;
+                var (r, g, b) = ImageUtils.TurboColormap(t);
+                return new Vector3(r, g, b);
+            }
+
+            if (mode == PointCloudColorMode.Confidence)
+            {
+                float value = sourceIndex < confidence.Count ? confidence[sourceIndex] : 0.0f;
+                float t = (value - minValue) / range;
+                var (r, g, b) = ImageUtils.TurboColormap(t);
+                return new Vector3(r, g, b);
+            }
+
+            if (sourceIndex < colors.Count)
+                return colors[sourceIndex];
+            return new Vector3(1.0f, 1.0f, 1.0f);
+        }
+
+        private void DrawPointCloud(
+            IReadOnlyList<Vector3> points,
+            IReadOnlyList<Vector3> colors,
+            IReadOnlyList<float> confidence,
+            float pointSize)
         {
             if (points.Count == 0) return;
 
+            var colorMode = IniSettings.Instance.PointCloudColor;
+            bool useLegend = colorMode == PointCloudColorMode.DistanceMap || colorMode == PointCloudColorMode.Confidence;
+            float minValue = 0.0f;
+            float range = 1.0f;
+            bool depthFallback = false;
+
+            if (useLegend && TryComputeValueRange(points, confidence, colorMode, i => i, points.Count, out float min, out float max, out depthFallback))
+            {
+                minValue = min;
+                range = max - min;
+                if (range < 0.0001f) range = 1.0f;
+                UpdatePointCloudLegend(colorMode, min, max, depthFallback);
+            }
+
             GL.PointSize(pointSize);
             GL.Begin(PrimitiveType.Points);
-            bool hasColors = colors.Count >= points.Count;
             for (int i = 0; i < points.Count; i++)
             {
-                if (hasColors)
-                {
-                    var c = colors[i];
-                    GL.Color3(c.X, c.Y, c.Z);
-                }
-                else
-                {
-                    GL.Color3(1.0f, 1.0f, 1.0f);
-                }
+                var c = GetPointColor(i, points, colors, confidence, colorMode, minValue, range, depthFallback);
+                GL.Color3(c.X, c.Y, c.Z);
                 GL.Vertex3(points[i]);
             }
             GL.End();
         }
 
-        private static void DrawPointCloud(PointCloudObject pointCloud)
+        private void DrawPointCloud(PointCloudObject pointCloud)
         {
             int totalPoints = pointCloud.Points.Count;
             int visibleCount = pointCloud.GetVisiblePointCount();
             if (totalPoints == 0 || visibleCount == 0) return;
 
+            var colorMode = IniSettings.Instance.PointCloudColor;
+            bool useLegend = colorMode == PointCloudColorMode.DistanceMap || colorMode == PointCloudColorMode.Confidence;
+            float minValue = 0.0f;
+            float range = 1.0f;
+            bool depthFallback = false;
+
+            if (useLegend && TryComputeValueRange(
+                    pointCloud.Points,
+                    pointCloud.Confidence,
+                    colorMode,
+                    i => pointCloud.GetSourcePointIndex(i, visibleCount),
+                    visibleCount,
+                    out float min,
+                    out float max,
+                    out depthFallback))
+            {
+                minValue = min;
+                range = max - min;
+                if (range < 0.0001f) range = 1.0f;
+                UpdatePointCloudLegend(colorMode, min, max, depthFallback);
+            }
+
             GL.PointSize(pointCloud.PointSize);
             GL.Begin(PrimitiveType.Points);
-
-            bool hasColors = pointCloud.Colors.Count >= totalPoints;
             for (int i = 0; i < visibleCount; i++)
             {
                 int sourceIndex = pointCloud.GetSourcePointIndex(i, visibleCount);
                 if (sourceIndex < 0 || sourceIndex >= totalPoints)
                     continue;
 
-                if (hasColors)
-                {
-                    var c = pointCloud.Colors[sourceIndex];
-                    GL.Color3(c.X, c.Y, c.Z);
-                }
-                else
-                {
-                    GL.Color3(1.0f, 1.0f, 1.0f);
-                }
+                var c = GetPointColor(
+                    sourceIndex,
+                    pointCloud.Points,
+                    pointCloud.Colors,
+                    pointCloud.Confidence,
+                    colorMode,
+                    minValue,
+                    range,
+                    depthFallback);
+                GL.Color3(c.X, c.Y, c.Z);
 
                 GL.Vertex3(pointCloud.Points[sourceIndex]);
             }

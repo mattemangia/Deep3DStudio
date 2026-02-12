@@ -25,6 +25,7 @@ namespace Deep3DStudio.Python
         {
             NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
         };
+        private static readonly string[] ConfidenceJsonKeys = { "confidence", "confidences", "confidence_scores" };
         private readonly string _pythonPath;
         private readonly string _scriptPath;
         private readonly string _modelName;
@@ -271,7 +272,52 @@ namespace Deep3DStudio.Python
 
         private (int exitCode, string stdout, string stderr) RunPythonCommand(string arguments, int timeoutMs = 300000, CancellationToken cancellationToken = default)
         {
+            var firstTry = RunPythonCommandInternal(arguments, timeoutMs, cancellationToken, safeOpenMpMode: false);
+            if (!ShouldRetryWithSafeOpenMp(firstTry.exitCode, firstTry.stderr))
+                return firstTry;
+
+            Log("Detected OpenMP shared-memory crash on macOS (exit 134). Retrying with safe OpenMP settings...");
+            var retry = RunPythonCommandInternal(arguments, timeoutMs, cancellationToken, safeOpenMpMode: true);
+            if (retry.exitCode == 0)
+            {
+                Log("Retry succeeded with safe OpenMP settings.");
+            }
+            return retry;
+        }
+
+        private static bool ShouldRetryWithSafeOpenMp(int exitCode, string stderr)
+        {
+            if (!OperatingSystem.IsMacOS() || exitCode != 134 || string.IsNullOrWhiteSpace(stderr))
+                return false;
+
+            return stderr.Contains("OMP: Error #179", StringComparison.OrdinalIgnoreCase)
+                || stderr.Contains("Can't open SHM2", StringComparison.OrdinalIgnoreCase)
+                || stderr.Contains("OMP: System error #2", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static void ApplySafeOpenMpSettings(ProcessStartInfo psi)
+        {
+            psi.Environment["KMP_USE_SHM"] = "0";
+            psi.Environment["OMP_NUM_THREADS"] = "1";
+            psi.Environment["MKL_NUM_THREADS"] = "1";
+            psi.Environment["OPENBLAS_NUM_THREADS"] = "1";
+            psi.Environment["NUMEXPR_NUM_THREADS"] = "1";
+            psi.Environment["VECLIB_MAXIMUM_THREADS"] = "1";
+            psi.Environment["OMP_WAIT_POLICY"] = "PASSIVE";
+            psi.Environment["KMP_INIT_AT_FORK"] = "FALSE";
+        }
+
+        private (int exitCode, string stdout, string stderr) RunPythonCommandInternal(
+            string arguments,
+            int timeoutMs = 300000,
+            CancellationToken cancellationToken = default,
+            bool safeOpenMpMode = false)
+        {
             Log($"Running: {_pythonPath} {_scriptPath} {arguments}");
+            if (safeOpenMpMode)
+            {
+                Log("Applying safe OpenMP environment for this run");
+            }
 
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -317,6 +363,10 @@ namespace Deep3DStudio.Python
             if (_modelName.Equals("triposf", StringComparison.OrdinalIgnoreCase))
             {
                 psi.Environment["DEEP3D_TRIPOSF_SKIP_MC"] = "1";
+            }
+            if (safeOpenMpMode)
+            {
+                ApplySafeOpenMpSettings(psi);
             }
 
             using var process = new Process { StartInfo = psi };
@@ -373,6 +423,39 @@ namespace Deep3DStudio.Python
             cancellationToken.ThrowIfCancellationRequested();
 
             return (process.ExitCode, stdout.ToString().Trim(), stderr.ToString().Trim());
+        }
+
+        private static void ParseConfidenceValues(JsonElement item, MeshData mesh)
+        {
+            foreach (var key in ConfidenceJsonKeys)
+            {
+                if (!item.TryGetProperty(key, out var confidenceProp) || confidenceProp.ValueKind != JsonValueKind.Array)
+                    continue;
+
+                foreach (var c in confidenceProp.EnumerateArray())
+                {
+                    switch (c.ValueKind)
+                    {
+                        case JsonValueKind.Number:
+                            mesh.Confidence.Add((float)c.GetDouble());
+                            break;
+                        case JsonValueKind.Array:
+                        {
+                            foreach (var sub in c.EnumerateArray())
+                            {
+                                if (sub.ValueKind == JsonValueKind.Number)
+                                {
+                                    mesh.Confidence.Add((float)sub.GetDouble());
+                                    break;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                return;
+            }
         }
 
         public bool Load(string weightsPath, string device = "auto")
@@ -553,6 +636,8 @@ namespace Deep3DStudio.Python
                                     }
                                 }
 
+                                ParseConfidenceValues(item, mesh);
+
                                 if (item.TryGetProperty("faces", out var facesProp))
                                 {
                                     foreach (var f in facesProp.EnumerateArray())
@@ -703,6 +788,8 @@ namespace Deep3DStudio.Python
                                         }
                                     }
                                 }
+
+                                ParseConfidenceValues(item, mesh);
 
                                 if (item.TryGetProperty("faces", out var facesProp))
                                 {

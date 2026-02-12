@@ -45,6 +45,7 @@ namespace Deep3DStudio.Model
                 PointSize = pcObj.PointSize,
                 Colors = new List<Vector3>(pcObj.Colors),
                 Normals = new List<Vector3>(pcObj.Normals),
+                Confidence = new List<float>(pcObj.Confidence),
                 Points = new List<Vector3>(pcObj.Points.Count)
             };
 

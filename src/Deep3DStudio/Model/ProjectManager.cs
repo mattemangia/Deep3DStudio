@@ -96,6 +96,7 @@ namespace Deep3DStudio.Model
                         Vertices = FlattenVector3(mesh.MeshData.Vertices),
                         Normals = FlattenVector3(mesh.MeshData.Normals),
                         Colors = FlattenVector3(mesh.MeshData.Colors),
+                        Confidence = new List<float>(mesh.MeshData.Confidence),
                         UVs = FlattenVector2(mesh.MeshData.UVs),
                         TexturePngBase64 = EncodeTexture(mesh.MeshData.Texture),
                         PoseMatrix = mesh.MeshData.Pose.HasValue ? FlattenMatrix4(mesh.MeshData.Pose.Value) : null,
@@ -112,7 +113,8 @@ namespace Deep3DStudio.Model
                     VisibleFraction = pc.VisibleFraction,
                     Points = FlattenVector3(pc.Points),
                     Colors = FlattenVector3(pc.Colors),
-                    Normals = FlattenVector3(pc.Normals)
+                    Normals = FlattenVector3(pc.Normals),
+                    Confidence = new List<float>(pc.Confidence)
                 };
                 dto = pcDto;
             }
@@ -185,6 +187,7 @@ namespace Deep3DStudio.Model
                     Vertices = UnflattenVector3(mDto.MeshData.Vertices),
                     Normals = UnflattenVector3(mDto.MeshData.Normals),
                     Colors = UnflattenVector3(mDto.MeshData.Colors),
+                    Confidence = new List<float>(mDto.MeshData.Confidence),
                     UVs = UnflattenVector2(mDto.MeshData.UVs),
                     Indices = mDto.MeshData.Indices
                 };
@@ -205,6 +208,7 @@ namespace Deep3DStudio.Model
                     Points = UnflattenVector3(pcDto.Points),
                     Colors = UnflattenVector3(pcDto.Colors),
                     Normals = UnflattenVector3(pcDto.Normals),
+                    Confidence = new List<float>(pcDto.Confidence),
                     PointSize = pcDto.PointSize,
                     VisibleFraction = pcDto.VisibleFraction
                 };

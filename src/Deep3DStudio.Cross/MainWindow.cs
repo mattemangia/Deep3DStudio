@@ -21,6 +21,7 @@ using System.IO;
 using System.Linq;
 using Deep3DStudio.UI;
 using System.Reflection;
+using SkiaSharp;
 
 namespace Deep3DStudio
 {
@@ -39,6 +40,12 @@ namespace Deep3DStudio
             Move,
             Rotate,
             Scale
+        }
+
+        private enum ImagePanelMode
+        {
+            RGB,
+            DepthMap
         }
 
         private ImGuiController _controller;
@@ -126,6 +133,7 @@ namespace Deep3DStudio
         private bool _showImagePreview = false;
         private string _previewImagePath = "";
         private int _previewTexture = -1;
+        private bool _previewShowsDepth = false;
         private DrawDiagnosticsWindow _diagnosticsWindow = new DrawDiagnosticsWindow();
         private int _logoTexture = -1;
 
@@ -139,7 +147,9 @@ namespace Deep3DStudio
         // Image List with Thumbnails
         private List<ProjectImage> _loadedImages = new List<ProjectImage>();
         private Dictionary<string, int> _imageThumbnails = new Dictionary<string, int>();
+        private Dictionary<string, int> _imageDepthThumbnails = new Dictionary<string, int>();
         private int _selectedImageIndex = -1;
+        private ImagePanelMode _imagePanelMode = ImagePanelMode.RGB;
 
         // Renaming state
         private SceneObject _renamingObject = null;
@@ -865,6 +875,11 @@ namespace Deep3DStudio
                 TextureLoader.DeleteTexture(thumb);
             }
             _imageThumbnails.Clear();
+            foreach (var thumb in _imageDepthThumbnails.Values)
+            {
+                TextureLoader.DeleteTexture(thumb);
+            }
+            _imageDepthThumbnails.Clear();
 
             if (_previewTexture > 0)
                 TextureLoader.DeleteTexture(_previewTexture);
@@ -1233,6 +1248,13 @@ namespace Deep3DStudio
                     bool sg = s.ShowGrid; if (ImGui.MenuItem("Show Grid", "", sg)) s.ShowGrid = !sg;
                     bool sa = s.ShowAxes; if (ImGui.MenuItem("Show Axes", "", sa)) s.ShowAxes = !sa;
                     ImGui.Separator();
+                    if (ImGui.MenuItem("Point Colors: RGB", "", s.PointCloudColor == PointCloudColorMode.RGB))
+                        s.PointCloudColor = PointCloudColorMode.RGB;
+                    if (ImGui.MenuItem("Point Colors: Depth", "", s.PointCloudColor == PointCloudColorMode.DistanceMap))
+                        s.PointCloudColor = PointCloudColorMode.DistanceMap;
+                    if (ImGui.MenuItem("Point Colors: Confidence", "", s.PointCloudColor == PointCloudColorMode.Confidence))
+                        s.PointCloudColor = PointCloudColorMode.Confidence;
+                    ImGui.Separator();
                     if (ImGui.MenuItem("Focus on Selection", "F")) _viewport.FocusOnSelection();
                     if (ImGui.MenuItem("Reset Camera")) _viewport.ResetCamera();
                     ImGui.EndMenu();
@@ -1437,6 +1459,19 @@ namespace Deep3DStudio
                 DrawToggleBtn("##TglCam", IconType.Camera, s.ShowCameras, v => s.ShowCameras = v, "Show/Hide Cameras", size);
                 ImGui.SameLine();
                 DrawToggleBtn("##TglGrid", IconType.Grid, s.ShowGrid, v => s.ShowGrid = v, "Show/Hide Grid", size);
+
+                ImGui.SameLine();
+                ImGui.Text("|");
+                ImGui.SameLine();
+
+                DrawToolbarButton("##PcRgb", IconType.Rgb, s.PointCloudColor == PointCloudColorMode.RGB,
+                    () => s.PointCloudColor = PointCloudColorMode.RGB, "Point colors: RGB", size);
+                ImGui.SameLine();
+                DrawToolbarButton("##PcDepth", IconType.DepthMap, s.PointCloudColor == PointCloudColorMode.DistanceMap,
+                    () => s.PointCloudColor = PointCloudColorMode.DistanceMap, "Point colors: Depth", size);
+                ImGui.SameLine();
+                DrawToolbarButton("##PcConf", IconType.Confidence, s.PointCloudColor == PointCloudColorMode.Confidence,
+                    () => s.PointCloudColor = PointCloudColorMode.Confidence, "Point colors: Confidence", size);
 
                 ImGui.SameLine();
                 ImGui.Text("|");
@@ -1830,7 +1865,53 @@ namespace Deep3DStudio
                 ClearImages();
             }
 
+            ImGui.SameLine();
+            bool hasAnyDepth = _loadedImages.Any(i => i.DepthMap != null);
+            bool rgbMode = _imagePanelMode == ImagePanelMode.RGB;
+            bool depthMode = _imagePanelMode == ImagePanelMode.DepthMap;
+
+            if (rgbMode)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Button, new System.Numerics.Vector4(0.3f, 0.55f, 0.7f, 1f));
+                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new System.Numerics.Vector4(0.35f, 0.6f, 0.75f, 1f));
+            }
+            if (ImGui.ImageButton("##ImgModeRgb", _iconFactory.GetIcon(IconType.Rgb), new System.Numerics.Vector2(20, 20)))
+            {
+                _imagePanelMode = ImagePanelMode.RGB;
+            }
+            if (rgbMode) ImGui.PopStyleColor(2);
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("RGB thumbnails");
+
+            ImGui.SameLine();
+            if (!hasAnyDepth)
+            {
+                ImGui.BeginDisabled();
+            }
+            if (depthMode)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Button, new System.Numerics.Vector4(0.3f, 0.55f, 0.7f, 1f));
+                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new System.Numerics.Vector4(0.35f, 0.6f, 0.75f, 1f));
+            }
+            if (ImGui.ImageButton("##ImgModeDepth", _iconFactory.GetIcon(IconType.DepthMap), new System.Numerics.Vector2(20, 20)))
+            {
+                if (hasAnyDepth)
+                    _imagePanelMode = ImagePanelMode.DepthMap;
+            }
+            if (depthMode) ImGui.PopStyleColor(2);
+            if (!hasAnyDepth)
+            {
+                ImGui.EndDisabled();
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip(hasAnyDepth ? "Depth map thumbnails" : "Depth maps not available");
+
             ImGui.Separator();
+
+            if (_imagePanelMode == ImagePanelMode.DepthMap && hasAnyDepth)
+            {
+                ImGui.TextDisabled("Depth Legend");
+                DrawColormapLegend(180.0f, 12.0f, "Near", "Far");
+                ImGui.Separator();
+            }
 
             // Thumbnail grid
             float thumbSize = 64;
@@ -1850,9 +1931,24 @@ namespace Deep3DStudio
 
                 // Draw thumbnail or placeholder
                 int thumbTex = -1;
-                lock (_imageThumbnails)
+                bool hasDepth = pImg.DepthMap != null;
+                if (_imagePanelMode == ImagePanelMode.DepthMap && hasDepth)
                 {
-                    _imageThumbnails.TryGetValue(path, out thumbTex);
+                    lock (_imageDepthThumbnails)
+                    {
+                        _imageDepthThumbnails.TryGetValue(path, out thumbTex);
+                    }
+                    if (thumbTex <= 0)
+                    {
+                        thumbTex = EnsureDepthThumbnail(path, pImg.DepthMap, (int)thumbSize);
+                    }
+                }
+                else
+                {
+                    lock (_imageThumbnails)
+                    {
+                        _imageThumbnails.TryGetValue(path, out thumbTex);
+                    }
                 }
 
                 bool isSelected = i == _selectedImageIndex;
@@ -1871,7 +1967,11 @@ namespace Deep3DStudio
                 else
                 {
                     // Placeholder button
-                    if (ImGui.Button($"[{displayName.Substring(0, Math.Min(6, displayName.Length))}...]", new System.Numerics.Vector2(thumbSize, thumbSize)))
+                    string shortName = displayName.Length > 6 ? displayName.Substring(0, 6) : displayName;
+                    string label = _imagePanelMode == ImagePanelMode.DepthMap && !hasDepth
+                        ? "[NoDepth]"
+                        : $"[{shortName}...]";
+                    if (ImGui.Button(label, new System.Numerics.Vector2(thumbSize, thumbSize)))
                     {
                         _selectedImageIndex = i;
                     }
@@ -1912,13 +2012,8 @@ namespace Deep3DStudio
                 // Double click to preview
                 if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
                 {
-                    _previewImagePath = path;
-                    _showImagePreview = true;
-                    if (_previewTexture > 0)
-                    {
-                        TextureLoader.DeleteTexture(_previewTexture);
-                    }
-                    _previewTexture = TextureLoader.LoadTextureFromFile(path);
+                    bool showDepth = _imagePanelMode == ImagePanelMode.DepthMap && hasDepth;
+                    OpenImagePreview(path, pImg.DepthMap, showDepth);
                 }
 
                 // Context menu
@@ -1926,37 +2021,13 @@ namespace Deep3DStudio
                 {
                     if (ImGui.MenuItem("Preview"))
                     {
-                        _previewImagePath = path;
-                        _showImagePreview = true;
-                        if (_previewTexture > 0) TextureLoader.DeleteTexture(_previewTexture);
-                        _previewTexture = TextureLoader.LoadTextureFromFile(path);
+                        bool showDepth = _imagePanelMode == ImagePanelMode.DepthMap && hasDepth;
+                        OpenImagePreview(path, pImg.DepthMap, showDepth);
                     }
 
-                    bool hasDepth = pImg.DepthMap != null;
                     if (ImGui.MenuItem("Depth View", "", false, hasDepth))
                     {
-                        _previewImagePath = path;
-                        _showImagePreview = true;
-                        if (_previewTexture > 0) TextureLoader.DeleteTexture(_previewTexture);
-                        // Generate depth visualization
-                        using (var bmp = Deep3DStudio.Model.ImageUtils.ColorizeDepthMap(pImg.DepthMap))
-                        {
-                            string temp = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString() + ".png");
-                            try
-                            {
-                                using (var image = SkiaSharp.SKImage.FromBitmap(bmp))
-                                using (var data = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100))
-                                using (var stream = File.OpenWrite(temp))
-                                {
-                                    data.SaveTo(stream);
-                                }
-                                _previewTexture = TextureLoader.LoadTextureFromFile(temp);
-                            }
-                            finally
-                            {
-                                try { File.Delete(temp); } catch { }
-                            }
-                        }
+                        OpenImagePreview(path, pImg.DepthMap, showDepth: true);
                     }
 
                     if (ImGui.MenuItem("Rename"))
@@ -1973,6 +2044,14 @@ namespace Deep3DStudio
                             {
                                 TextureLoader.DeleteTexture(t);
                                 _imageThumbnails.Remove(path);
+                            }
+                        }
+                        lock (_imageDepthThumbnails)
+                        {
+                            if (_imageDepthThumbnails.TryGetValue(path, out int t))
+                            {
+                                TextureLoader.DeleteTexture(t);
+                                _imageDepthThumbnails.Remove(path);
                             }
                         }
                         _loadedImages.RemoveAt(i);
@@ -1997,6 +2076,98 @@ namespace Deep3DStudio
             ImGui.EndChild();
         }
 
+        private int EnsureDepthThumbnail(string path, float[,]? depthMap, int maxSize)
+        {
+            if (depthMap == null)
+                return -1;
+
+            int existing = -1;
+            lock (_imageDepthThumbnails)
+            {
+                if (_imageDepthThumbnails.TryGetValue(path, out existing) && existing > 0)
+                    return existing;
+            }
+
+            using var depthBitmap = ImageUtils.ColorizeDepthMap(depthMap);
+            float scale = Math.Min((float)maxSize / depthBitmap.Width, (float)maxSize / depthBitmap.Height);
+            int thumbWidth = Math.Max(1, (int)MathF.Round(depthBitmap.Width * scale));
+            int thumbHeight = Math.Max(1, (int)MathF.Round(depthBitmap.Height * scale));
+
+            var info = new SKImageInfo(thumbWidth, thumbHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
+            using var thumb = new SKBitmap(info);
+            using (var canvas = new SKCanvas(thumb))
+            {
+                canvas.Clear(SKColors.Transparent);
+                canvas.DrawBitmap(depthBitmap, new SKRect(0, 0, thumbWidth, thumbHeight), new SKPaint { FilterQuality = SKFilterQuality.Medium });
+                canvas.Flush();
+            }
+
+            int tex = TextureLoader.CreateTextureFromBitmap(thumb);
+            if (tex > 0)
+            {
+                lock (_imageDepthThumbnails)
+                {
+                    _imageDepthThumbnails[path] = tex;
+                }
+            }
+            return tex;
+        }
+
+        private void OpenImagePreview(string path, float[,]? depthMap, bool showDepth)
+        {
+            _previewImagePath = path;
+            _showImagePreview = true;
+            _previewShowsDepth = showDepth && depthMap != null;
+
+            if (_previewTexture > 0)
+            {
+                TextureLoader.DeleteTexture(_previewTexture);
+                _previewTexture = -1;
+            }
+
+            if (_previewShowsDepth && depthMap != null)
+            {
+                using var depthBitmap = ImageUtils.ColorizeDepthMap(depthMap);
+                _previewTexture = TextureLoader.CreateTextureFromBitmap(depthBitmap);
+            }
+            else
+            {
+                _previewTexture = TextureLoader.LoadTextureFromFile(path);
+            }
+        }
+
+        private void DrawColormapLegend(float width, float height, string leftLabel, string rightLabel)
+        {
+            ImGui.TextDisabled(leftLabel);
+            ImGui.SameLine();
+            var p = ImGui.GetCursorScreenPos();
+            var drawList = ImGui.GetWindowDrawList();
+            int steps = 48;
+            float stepWidth = width / steps;
+            for (int i = 0; i < steps; i++)
+            {
+                float t0 = (float)i / steps;
+                float t1 = (float)(i + 1) / steps;
+                var (r0, g0, b0) = ImageUtils.TurboColormap(t0);
+                var (r1, g1, b1) = ImageUtils.TurboColormap(t1);
+                uint c0 = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(r0, g0, b0, 1));
+                uint c1 = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(r1, g1, b1, 1));
+                float x0 = p.X + i * stepWidth;
+                float x1 = p.X + (i + 1) * stepWidth;
+                drawList.AddRectFilledMultiColor(
+                    new System.Numerics.Vector2(x0, p.Y),
+                    new System.Numerics.Vector2(x1, p.Y + height),
+                    c0, c1, c1, c0);
+            }
+            drawList.AddRect(
+                p,
+                new System.Numerics.Vector2(p.X + width, p.Y + height),
+                ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0.2f, 0.2f, 0.2f, 1f)));
+            ImGui.Dummy(new System.Numerics.Vector2(width, height));
+            ImGui.SameLine();
+            ImGui.TextDisabled(rightLabel);
+        }
+
         private void ClearImages()
         {
             foreach (var kv in _imageThumbnails)
@@ -2004,6 +2175,11 @@ namespace Deep3DStudio
                 TextureLoader.DeleteTexture(kv.Value);
             }
             _imageThumbnails.Clear();
+            foreach (var kv in _imageDepthThumbnails)
+            {
+                TextureLoader.DeleteTexture(kv.Value);
+            }
+            _imageDepthThumbnails.Clear();
             _loadedImages.Clear();
             _selectedImageIndex = -1;
         }
@@ -2762,6 +2938,16 @@ namespace Deep3DStudio
                 // Gizmo mode
                 string mode = _viewport.CurrentGizmoMode.ToString();
                 ImGui.TextDisabled($"Mode: {mode}");
+
+                if (_viewport.TryGetPointCloudLegend(out var legendMode, out float minValue, out float maxValue, out bool depthFallback))
+                {
+                    ImGui.Separator();
+                    string modeText = legendMode == PointCloudColorMode.Confidence
+                        ? (depthFallback ? "Point Colors: Confidence (Depth Fallback)" : "Point Colors: Confidence")
+                        : "Point Colors: Depth";
+                    ImGui.TextDisabled(modeText);
+                    DrawColormapLegend(140.0f, 10.0f, $"{minValue:F2}", $"{maxValue:F2}");
+                }
             }
             ImGui.End();
         }
@@ -3177,7 +3363,17 @@ namespace Deep3DStudio
                 if (_previewTexture > 0)
                 {
                     var avail = ImGui.GetContentRegionAvail();
-                    ImGui.Image((IntPtr)_previewTexture, avail);
+                    if (_previewShowsDepth)
+                    {
+                        float legendHeight = 28.0f;
+                        var imageSize = new System.Numerics.Vector2(avail.X, Math.Max(10.0f, avail.Y - legendHeight));
+                        ImGui.Image((IntPtr)_previewTexture, imageSize);
+                        DrawColormapLegend(Math.Min(220.0f, ImGui.GetContentRegionAvail().X - 70.0f), 12.0f, "Near", "Far");
+                    }
+                    else
+                    {
+                        ImGui.Image((IntPtr)_previewTexture, avail);
+                    }
                 }
                 else
                 {
@@ -3190,6 +3386,7 @@ namespace Deep3DStudio
             {
                 TextureLoader.DeleteTexture(_previewTexture);
                 _previewTexture = -1;
+                _previewShowsDepth = false;
             }
         }
 
@@ -6137,6 +6334,13 @@ namespace Deep3DStudio
         private void PopulateDepthData(SceneResult result)
         {
             if (result.Poses.Count == 0 || result.Meshes.Count == 0) return;
+
+            lock (_imageDepthThumbnails)
+            {
+                foreach (var tex in _imageDepthThumbnails.Values)
+                    TextureLoader.DeleteTexture(tex);
+                _imageDepthThumbnails.Clear();
+            }
 
             // Combine meshes if multiple, similar to GTK implementation
             var combinedMesh = result.Meshes[0];

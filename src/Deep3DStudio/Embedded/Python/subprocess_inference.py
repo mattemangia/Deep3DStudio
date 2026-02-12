@@ -1150,16 +1150,25 @@ def infer_must3r(images_data, use_retrieval=True):
                     conf_np = conf.cpu().numpy() if hasattr(conf, 'cpu') else conf
                     mask = _build_confidence_mask(conf_np, pts.shape[:2], default_threshold=1.0, min_points=3000, max_points=120000)
                 else:
+                    conf_np = None
                     mask = np.ones(pts.shape[:2], dtype=bool)
                 mask = _ensure_dense_mask(mask, pts, min_points=3000)
 
                 valid_pts = pts[mask].reshape(-1, 3)
                 valid_colors = img_np[mask].reshape(-1, 3)
+                if conf_np is not None:
+                    valid_conf = np.asarray(conf_np)[mask].reshape(-1)
+                    valid_conf = np.nan_to_num(valid_conf, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+                else:
+                    valid_conf = np.ones(len(valid_pts), dtype=np.float32)
                 valid_pts, valid_colors = _sanitize_points_colors(valid_pts, valid_colors)
+                if len(valid_conf) != len(valid_pts):
+                    valid_conf = np.ones(len(valid_pts), dtype=np.float32)
 
                 res_dict = {
                     'vertices': valid_pts.tolist(),
                     'colors': valid_colors.tolist(),
+                    'confidence': valid_conf.tolist(),
                     'faces': [],
                     'image_index': i
                 }
@@ -1275,15 +1284,25 @@ def infer_stereo_model(model_name, images_data, use_retrieval=True):
 
                 valid_pts = pts_np[mask].reshape(-1, 3)
                 valid_colors = img_np[mask].reshape(-1, 3)
+                if conf_np is not None:
+                    valid_conf = np.asarray(conf_np)[mask].reshape(-1)
+                    valid_conf = np.nan_to_num(valid_conf, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+                else:
+                    valid_conf = None
                 valid_pts, valid_colors = _sanitize_points_colors(valid_pts, valid_colors)
+                if valid_conf is not None and len(valid_conf) != len(valid_pts):
+                    valid_conf = np.ones(len(valid_pts), dtype=np.float32)
 
                 if len(valid_pts) > 0:
-                    fallback_results.append({
+                    item = {
                         'vertices': valid_pts.tolist(),
                         'colors': valid_colors.tolist(),
                         'faces': [],
                         'image_index': 0
-                    })
+                    }
+                    if valid_conf is not None:
+                        item['confidence'] = valid_conf.tolist()
+                    fallback_results.append(item)
                     log(f"Pairwise fallback image 0: {len(valid_pts)} points")
                 else:
                     log("Pairwise fallback produced 0 valid points.")

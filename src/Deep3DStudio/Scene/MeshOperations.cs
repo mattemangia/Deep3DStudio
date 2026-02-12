@@ -530,7 +530,8 @@ namespace Deep3DStudio.Scene
                 {
                     var worldPoint = Vector3.TransformPosition(pc.Points[i], transform);
                     result.Points.Add(worldPoint);
-                    result.Colors.Add(pc.Colors[i]);
+                    result.Colors.Add(i < pc.Colors.Count ? pc.Colors[i] : new Vector3(1f, 1f, 1f));
+                    result.Confidence.Add(i < pc.Confidence.Count ? pc.Confidence[i] : 1.0f);
                 }
             }
 

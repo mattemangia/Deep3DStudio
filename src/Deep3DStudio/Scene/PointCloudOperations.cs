@@ -77,6 +77,7 @@ namespace Deep3DStudio.Scene
             var sourcePoints = pointCloud.Points.ToArray();
             var sourceColors = pointCloud.Colors.Count == sourcePoints.Length ? pointCloud.Colors.ToArray() : null;
             var sourceNormals = pointCloud.Normals.Count == sourcePoints.Length ? pointCloud.Normals.ToArray() : null;
+            var sourceConfidence = pointCloud.Confidence.Count == sourcePoints.Length ? pointCloud.Confidence.ToArray() : null;
 
             // Auto-scale radius to scene size so dense cloud works on large-coordinate reconstructions.
             var min = new Vector3(float.MaxValue);
@@ -117,12 +118,14 @@ namespace Deep3DStudio.Scene
             var outPoints = new List<Vector3>(sourcePoints.Length * (pointsPerSeed + 1));
             var outColors = sourceColors != null ? new List<Vector3>(sourcePoints.Length * (pointsPerSeed + 1)) : null;
             var outNormals = sourceNormals != null ? new List<Vector3>(sourcePoints.Length * (pointsPerSeed + 1)) : null;
+            var outConfidence = new List<float>(sourcePoints.Length * (pointsPerSeed + 1));
 
             for (int i = 0; i < sourcePoints.Length; i++)
             {
                 outPoints.Add(sourcePoints[i]);
                 if (outColors != null && sourceColors != null) outColors.Add(sourceColors[i]);
                 if (outNormals != null && sourceNormals != null) outNormals.Add(sourceNormals[i]);
+                outConfidence.Add(sourceConfidence != null ? sourceConfidence[i] : 1.0f);
             }
 
             int maxAdded = sourcePoints.Length * pointsPerSeed;
@@ -181,6 +184,7 @@ namespace Deep3DStudio.Scene
                             avg.Normalize();
                         outNormals.Add(avg);
                     }
+                    outConfidence.Add(sourceConfidence != null ? (sourceConfidence[i] + sourceConfidence[j]) * 0.5f : 1.0f);
                     added++;
                 }
             }
@@ -205,6 +209,7 @@ namespace Deep3DStudio.Scene
             {
                 pointCloud.Normals = new List<Vector3>();
             }
+            pointCloud.Confidence = outConfidence;
             pointCloud.UpdateBounds();
             return added;
         }
@@ -252,6 +257,15 @@ namespace Deep3DStudio.Scene
                         else mesh.Colors.Add(new Vector3(1f, 1f, 1f));
                     }
                 }
+                if (pointCloud.Confidence.Count >= totalPoints)
+                {
+                    mesh.Confidence.AddRange(pointCloud.Confidence.Take(totalPoints));
+                }
+                else
+                {
+                    for (int i = 0; i < totalPoints; i++)
+                        mesh.Confidence.Add(1.0f);
+                }
 
                 return mesh;
             }
@@ -265,6 +279,8 @@ namespace Deep3DStudio.Scene
                 mesh.Vertices.Add(pointCloud.Points[sourceIndex]);
                 if (sourceIndex < pointCloud.Colors.Count) mesh.Colors.Add(pointCloud.Colors[sourceIndex]);
                 else mesh.Colors.Add(new Vector3(1f, 1f, 1f));
+                if (sourceIndex < pointCloud.Confidence.Count) mesh.Confidence.Add(pointCloud.Confidence[sourceIndex]);
+                else mesh.Confidence.Add(1.0f);
             }
 
             return mesh;
@@ -293,6 +309,9 @@ namespace Deep3DStudio.Scene
             {
                 pointCloud.Normals = new List<Vector3>();
             }
+            pointCloud.Confidence = new List<float>(pointCloud.Points.Count);
+            for (int i = 0; i < pointCloud.Points.Count; i++)
+                pointCloud.Confidence.Add(1.0f);
 
             pointCloud.UpdateBounds();
         }

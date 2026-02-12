@@ -49,7 +49,9 @@ namespace Deep3DStudio
         private ToggleToolButton _camerasToggle = null!;
         private ToggleToolButton _rgbColorToggle = null!;
         private ToggleToolButton _depthColorToggle = null!;
+        private ToggleToolButton _confidenceColorToggle = null!;
         private ToggleToolButton _autoWorkflowToggle = null!;
+        private bool _updatingPointCloudColorToggles = false;
 
         // Auto Workflow Toggle - when enabled, Play button runs the full selected workflow
         // When disabled, user can manually trigger each step (e.g., Dust3R -> then LGM -> then UniRig)
