@@ -97,6 +97,10 @@ namespace Deep3DStudio
         private float _pcRadius = 1.0f;
         private float _pcDenseRadius = 0.03f;
         private int _pcDensePointsPerSeed = 2;
+        private float _pcSkyMinBlue = 0.45f;
+        private float _pcSkyMaxRed = 0.60f;
+        private float _pcSkyMaxGreen = 0.75f;
+        private float _pcSkyBlueDominance = 0.08f;
         private Scale? _pcVisibilityScale;
         private Label? _pcVisibilityLabel;
         private bool _updatingPointCloudVisibilityControls = false;

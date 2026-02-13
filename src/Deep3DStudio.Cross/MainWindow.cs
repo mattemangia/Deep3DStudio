@@ -232,6 +232,10 @@ namespace Deep3DStudio
         private float _pcRadius = 1.0f;
         private float _pcDenseRadius = 0.03f;
         private int _pcDensePointsPerSeed = 2;
+        private float _pcSkyMinBlue = 0.45f;
+        private float _pcSkyMaxRed = 0.60f;
+        private float _pcSkyMaxGreen = 0.75f;
+        private float _pcSkyBlueDominance = 0.08f;
 
         // Rigging state
         private SkeletonObject? _activeSkeletonObject = null;
@@ -247,6 +251,7 @@ namespace Deep3DStudio
         private bool _showPcPassDialog = false;
         private bool _showPcRadiusDialog = false;
         private bool _showPcDenseDialog = false;
+        private bool _showPcSkyBlueDialog = false;
         private bool _showPenMoveDialog = false;
         private bool _showPenExtrudeDialog = false;
         private bool _showPenInsetDialog = false;
@@ -1130,6 +1135,7 @@ namespace Deep3DStudio
             if (_showPcVoxelDialog) DrawPointCloudVoxelDialog();
             if (_showPcOutliersDialog) DrawPointCloudOutliersDialog();
             if (_showPcDuplicatesDialog) DrawPointCloudDuplicatesDialog();
+            if (_showPcSkyBlueDialog) DrawPointCloudSkyBlueDialog();
             if (_showPcNormalsDialog) DrawPointCloudNormalsDialog();
             if (_showPcPassDialog) DrawPointCloudPassDialog();
             if (_showPcRadiusDialog) DrawPointCloudRadiusDialog();
@@ -1241,6 +1247,7 @@ namespace Deep3DStudio
                         if (ImGui.MenuItem("Voxel Downsample", "", false, hasPc)) ApplyPointCloudVoxel();
                         if (ImGui.MenuItem("Remove Outliers", "", false, hasPc)) ApplyPointCloudOutliers();
                         if (ImGui.MenuItem("Remove Duplicates", "", false, hasPc)) ApplyPointCloudDuplicates();
+                        if (ImGui.MenuItem("Remove Sky/Blue", "", false, hasPc)) ApplyPointCloudSkyBlue();
                         if (ImGui.MenuItem("Estimate Normals", "", false, hasPc)) ApplyPointCloudNormals();
                         if (ImGui.MenuItem("Pass-through Axis", "", false, hasPc)) ApplyPointCloudPassThrough();
                         if (ImGui.MenuItem("Radius Crop", "", false, hasPc)) ApplyPointCloudRadiusCrop();
@@ -1599,6 +1606,9 @@ namespace Deep3DStudio
                 ImGui.SameLine();
                 DrawToolbarButton("##PcDup", IconType.DuplicateFilter, false, () => ApplyPointCloudDuplicates(), "Remove Duplicates", size,
                     OpenPointCloudDuplicateOptionsDialog);
+                ImGui.SameLine();
+                DrawToolbarButton("##PcSky", IconType.OutlierFilter, false, () => ApplyPointCloudSkyBlue(), "Remove Sky/Blue", size,
+                    OpenPointCloudSkyBlueOptionsDialog);
                 ImGui.SameLine();
                 DrawToolbarButton("##PcNormals", IconType.Normals, false, () => ApplyPointCloudNormals(), "Estimate Normals", size,
                     OpenPointCloudNormalOptionsDialog);
@@ -2995,6 +3005,17 @@ namespace Deep3DStudio
                     if (ImGui.Button("Remove Duplicates"))
                         ApplyPointCloudDuplicates();
 
+                    ImGui.InputFloat("Sky Min Blue", ref _pcSkyMinBlue, 0.01f, 0.05f, "%.3f");
+                    ImGui.InputFloat("Sky Max Red", ref _pcSkyMaxRed, 0.01f, 0.05f, "%.3f");
+                    ImGui.InputFloat("Sky Max Green", ref _pcSkyMaxGreen, 0.01f, 0.05f, "%.3f");
+                    ImGui.InputFloat("Sky Blue Dominance", ref _pcSkyBlueDominance, 0.01f, 0.05f, "%.3f");
+                    _pcSkyMinBlue = Math.Clamp(_pcSkyMinBlue, 0.0f, 1.0f);
+                    _pcSkyMaxRed = Math.Clamp(_pcSkyMaxRed, 0.0f, 1.0f);
+                    _pcSkyMaxGreen = Math.Clamp(_pcSkyMaxGreen, 0.0f, 1.0f);
+                    _pcSkyBlueDominance = Math.Max(0.0f, _pcSkyBlueDominance);
+                    if (ImGui.Button("Remove Sky/Blue"))
+                        ApplyPointCloudSkyBlue();
+
                     ImGui.InputInt("Normal K", ref _pcNormalK);
                     if (ImGui.Button("Estimate Normals"))
                         ApplyPointCloudNormals();
@@ -3147,6 +3168,14 @@ namespace Deep3DStudio
                 // Gizmo mode
                 string mode = _viewport.CurrentGizmoMode.ToString();
                 ImGui.TextDisabled($"Mode: {mode}");
+
+                if (_viewport.TryGetHoveredSourceCameraDistance(out float sourceDistance, out bool isMeters, out string sourceCameraName))
+                {
+                    ImGui.Separator();
+                    ImGui.TextDisabled($"SrcCam: {sourceCameraName}");
+                    string unit = isMeters ? "m" : "px";
+                    ImGui.TextColored(new System.Numerics.Vector4(1.0f, 0.85f, 0.35f, 1.0f), $"Dist: {sourceDistance:F3} {unit}");
+                }
 
                 if (_viewport.TryGetPointCloudLegend(out var legendMode, out float minValue, out float maxValue, out bool depthFallback))
                 {
@@ -4413,6 +4442,12 @@ namespace Deep3DStudio
             _popupToOpen = "Point Cloud Duplicates";
         }
 
+        private void OpenPointCloudSkyBlueOptionsDialog()
+        {
+            _showPcSkyBlueDialog = true;
+            _popupToOpen = "Point Cloud Sky/Blue";
+        }
+
         private void OpenPointCloudNormalOptionsDialog()
         {
             _showPcNormalsDialog = true;
@@ -4580,6 +4615,29 @@ namespace Deep3DStudio
                 ImGui.SameLine();
                 if (ImGui.Button("Close", new System.Numerics.Vector2(120, 0)))
                     _showPcDuplicatesDialog = false;
+                ImGui.EndPopup();
+            }
+        }
+
+        private void DrawPointCloudSkyBlueDialog()
+        {
+            if (!_showPcSkyBlueDialog) return;
+            if (ImGui.BeginPopup("Point Cloud Sky/Blue", ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                ImGui.SliderFloat("Min Blue", ref _pcSkyMinBlue, 0.0f, 1.0f, "%.3f");
+                ImGui.SliderFloat("Max Red", ref _pcSkyMaxRed, 0.0f, 1.0f, "%.3f");
+                ImGui.SliderFloat("Max Green", ref _pcSkyMaxGreen, 0.0f, 1.0f, "%.3f");
+                ImGui.SliderFloat("Min Blue Dominance", ref _pcSkyBlueDominance, 0.0f, 1.0f, "%.3f");
+                _pcSkyBlueDominance = Math.Max(0.0f, _pcSkyBlueDominance);
+
+                if (ImGui.Button("Apply & Run", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showPcSkyBlueDialog = false;
+                    ApplyPointCloudSkyBlue();
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Close", new System.Numerics.Vector2(120, 0)))
+                    _showPcSkyBlueDialog = false;
                 ImGui.EndPopup();
             }
         }
@@ -4771,6 +4829,32 @@ namespace Deep3DStudio
                 removed += PointCloudOperations.RemoveDuplicates(pc, _pcDuplicateThreshold);
 
             _logBuffer += $"Duplicate removal removed {removed:N0} points.\n";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ApplyPointCloudSkyBlue()
+        {
+            var selected = GetSelectedPointCloudObjects();
+            if (selected.Count == 0)
+            {
+                _logBuffer += "No point cloud selected.\n";
+                return;
+            }
+
+            var options = new PointCloudBlueFilterOptions
+            {
+                MinBlue = _pcSkyMinBlue,
+                MaxRed = _pcSkyMaxRed,
+                MaxGreen = _pcSkyMaxGreen,
+                MinBlueDominance = _pcSkyBlueDominance
+            };
+
+            int removed = 0;
+            foreach (var pc in selected)
+                removed += PointCloudOperations.RemoveBlueDominantPoints(pc, options);
+
+            _logBuffer += $"Sky/blue filter removed {removed:N0} points.\n";
             _isDirty = true;
             UpdateTitle();
         }

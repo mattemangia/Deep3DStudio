@@ -332,6 +332,10 @@ namespace Deep3DStudio
             dupFilterItem.Activated += OnPointCloudRemoveDuplicatesClicked;
             pointCloudFilterMenu.Append(dupFilterItem);
 
+            var skyFilterItem = new MenuItem("Remove _Sky/Blue");
+            skyFilterItem.Activated += OnPointCloudRemoveSkyBlueClicked;
+            pointCloudFilterMenu.Append(skyFilterItem);
+
             var normalsItem = new MenuItem("_Estimate Normals");
             normalsItem.Activated += OnPointCloudEstimateNormalsClicked;
             pointCloudFilterMenu.Append(normalsItem);

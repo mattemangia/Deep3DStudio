@@ -526,6 +526,10 @@ namespace Deep3DStudio.UI
                 duplicatesItem.Activated += (s, e) => ObjectActionRequested?.Invoke(this, (pointCloudObjects.First(), "remove_duplicates"));
                 pcMenu.Append(duplicatesItem);
 
+                var skyBlueItem = new MenuItem("Remove Sky/Blue...");
+                skyBlueItem.Activated += (s, e) => ObjectActionRequested?.Invoke(this, (pointCloudObjects.First(), "remove_sky_blue"));
+                pcMenu.Append(skyBlueItem);
+
                 var normalsItem = new MenuItem("Estimate Normals...");
                 normalsItem.Activated += (s, e) => ObjectActionRequested?.Invoke(this, (pointCloudObjects.First(), "estimate_normals"));
                 pcMenu.Append(normalsItem);

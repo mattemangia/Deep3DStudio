@@ -102,6 +102,15 @@ namespace Deep3DStudio.Viewport
         private ColorLegendMode _colorLegendMode = ColorLegendMode.None;
         private float _colorLegendMin = 0.0f;
         private float _colorLegendMax = 1.0f;
+        private readonly TextRenderer _overlayTextRenderer = new TextRenderer
+        {
+            FontFamily = "Monospace",
+            FontSize = 11
+        };
+        private bool _hasHoveredSourceDistance;
+        private float _hoveredSourceDistance;
+        private bool _hoveredDistanceIsMeters;
+        private string _hoveredSourceCameraName = string.Empty;
 
         // Display Options
         public bool ShowGrid { get; set; } = true;
@@ -212,6 +221,14 @@ namespace Deep3DStudio.Viewport
         }
 
         public GizmoMode GetGizmoMode() => _gizmoMode;
+
+        public bool TryGetHoveredSourceCameraDistance(out float value, out bool isMeters, out string sourceCameraName)
+        {
+            value = _hoveredSourceDistance;
+            isMeters = _hoveredDistanceIsMeters;
+            sourceCameraName = _hoveredSourceCameraName;
+            return _hasHoveredSourceDistance;
+        }
 
         public void ToggleCropBox(bool show)
         {
@@ -546,6 +563,7 @@ namespace Deep3DStudio.Viewport
                 GL.DeleteBuffer(kvp.Value.vbo);
             }
             _pointCloudBuffers.Clear();
+            _overlayTextRenderer.Dispose();
         }
 
         // Track grid vertex count for modern GL
@@ -2169,6 +2187,8 @@ namespace Deep3DStudio.Viewport
 
             bool showLegend = _colorLegendMode != ColorLegendMode.None;
             float panelHeight = showLegend ? 118.0f : 80.0f;
+            if (_hasHoveredSourceDistance)
+                panelHeight += 34.0f;
 
             // Draw info background
             GL.Color4(0.0f, 0.0f, 0.0f, 0.5f);
@@ -2258,6 +2278,16 @@ namespace Deep3DStudio.Viewport
                 GL.Vertex2(x1, y1 + 1);
                 GL.Vertex2(x1, y1 + 8);
                 GL.End();
+            }
+
+            if (_hasHoveredSourceDistance)
+            {
+                string unit = _hoveredDistanceIsMeters ? "m" : "px";
+                string cameraText = $"SrcCam: {_hoveredSourceCameraName}";
+                string distanceText = $"Dist: {_hoveredSourceDistance:F3} {unit}";
+                float textY = showLegend ? 111.0f : 72.0f;
+                _overlayTextRenderer.DrawText(cameraText, 12.0f, textY, (0.95f, 0.95f, 0.95f, 1.0f), (0f, 0f, 0f, 0.6f));
+                _overlayTextRenderer.DrawText(distanceText, 12.0f, textY + 14.0f, (1.0f, 0.88f, 0.45f, 1.0f), (0f, 0f, 0f, 0.6f));
             }
 
             GL.Enable(EnableCap.DepthTest);
@@ -2525,6 +2555,187 @@ namespace Deep3DStudio.Viewport
             return new Vector2(x, y);
         }
 
+        private void ClearHoveredSourceDistance()
+        {
+            bool hadValue = _hasHoveredSourceDistance;
+            _hasHoveredSourceDistance = false;
+            _hoveredSourceDistance = 0.0f;
+            _hoveredDistanceIsMeters = false;
+            _hoveredSourceCameraName = string.Empty;
+            if (hadValue)
+                this.QueueRender();
+        }
+
+        private void UpdateHoveredSourceDistanceFromMouse(int mouseX, int mouseY)
+        {
+            if (_sceneGraph == null)
+            {
+                ClearHoveredSourceDistance();
+                return;
+            }
+
+            int width = this.Allocation.Width;
+            int height = this.Allocation.Height;
+            if (width <= 0 || height <= 0)
+            {
+                ClearHoveredSourceDistance();
+                return;
+            }
+
+            if (!TryPickHoveredPoint(mouseX, mouseY, width, height, out var hoveredPointWorld))
+            {
+                ClearHoveredSourceDistance();
+                return;
+            }
+
+            if (TryComputeSourceCameraDistance(hoveredPointWorld, out float distanceValue, out bool isMeters, out string sourceCamera))
+            {
+                _hasHoveredSourceDistance = true;
+                _hoveredSourceDistance = distanceValue;
+                _hoveredDistanceIsMeters = isMeters;
+                _hoveredSourceCameraName = sourceCamera;
+                this.QueueRender();
+                return;
+            }
+
+            ClearHoveredSourceDistance();
+        }
+
+        private bool TryPickHoveredPoint(int mouseX, int mouseY, int width, int height, out Vector3 pointWorld)
+        {
+            pointWorld = Vector3.Zero;
+            if (_sceneGraph == null)
+                return false;
+
+            Vector2 mouse = new Vector2(mouseX, mouseY);
+            float bestDistPx = 12.0f;
+            bool found = false;
+            const int maxSamplesPerCloud = 20000;
+
+            foreach (var obj in _sceneGraph.GetVisibleObjects())
+            {
+                if (obj is not PointCloudObject pc || pc.Points.Count == 0)
+                    continue;
+
+                int visibleCount = pc.GetVisiblePointCount();
+                if (visibleCount <= 0)
+                    continue;
+
+                int step = Math.Max(1, visibleCount / maxSamplesPerCloud);
+                Matrix4 world = pc.GetWorldTransform();
+
+                for (int i = 0; i < visibleCount; i += step)
+                {
+                    int sourceIdx = pc.GetSourcePointIndex(i, visibleCount);
+                    if (sourceIdx < 0 || sourceIdx >= pc.Points.Count)
+                        continue;
+
+                    Vector3 pWorld = Vector3.TransformPosition(pc.Points[sourceIdx], world);
+                    if (!TryProjectToScreen(pWorld, width, height, out Vector2 screenPos, out _))
+                        continue;
+
+                    float distPx = (screenPos - mouse).Length;
+                    if (distPx < bestDistPx)
+                    {
+                        bestDistPx = distPx;
+                        pointWorld = pWorld;
+                        found = true;
+                    }
+                }
+            }
+
+            return found;
+        }
+
+        private bool TryProjectToScreen(Vector3 pos, int width, int height, out Vector2 screenPos, out float ndcDepth)
+        {
+            screenPos = Vector2.Zero;
+            ndcDepth = 0.0f;
+            if (width <= 0 || height <= 0)
+                return false;
+
+            Vector4 vec = new Vector4(pos, 1.0f);
+            vec = vec * _finalViewMatrix;
+            vec = vec * _projectionMatrix;
+
+            if (Math.Abs(vec.W) < 1e-6f || vec.W <= 0.0f)
+                return false;
+
+            vec /= vec.W;
+            ndcDepth = vec.Z;
+
+            if (ndcDepth < -1.0f || ndcDepth > 1.0f)
+                return false;
+
+            float x = (vec.X + 1.0f) * 0.5f * width;
+            float y = (1.0f - vec.Y) * 0.5f * height;
+            screenPos = new Vector2(x, y);
+            return true;
+        }
+
+        private bool TryComputeSourceCameraDistance(Vector3 pointWorld, out float value, out bool isMeters, out string sourceCameraName)
+        {
+            value = 0.0f;
+            isMeters = false;
+            sourceCameraName = string.Empty;
+
+            if (_sceneGraph == null)
+                return false;
+
+            CameraObject? sourceCamera = null;
+            float bestDist2 = float.MaxValue;
+            Vector3 sourceCameraPos = Vector3.Zero;
+
+            foreach (var camera in _sceneGraph.GetObjectsOfType<CameraObject>())
+            {
+                if (!camera.Visible || camera.Pose == null)
+                    continue;
+
+                Vector3 camPos = camera.Pose.CameraToWorld.ExtractTranslation();
+                float d2 = (camPos - pointWorld).LengthSquared;
+                if (d2 < bestDist2)
+                {
+                    bestDist2 = d2;
+                    sourceCamera = camera;
+                    sourceCameraPos = camPos;
+                }
+            }
+
+            if (sourceCamera?.Pose == null)
+                return false;
+
+            sourceCameraName = sourceCamera.Name;
+
+            if (GeoReferenceRuntime.HasActiveGeoreference)
+            {
+                Vector3 pointGeo = GeoReferenceService.TransformModelToWorld(pointWorld);
+                Vector3 camGeo = GeoReferenceService.TransformModelToWorld(sourceCameraPos);
+                value = (pointGeo - camGeo).Length;
+                isMeters = true;
+                return float.IsFinite(value);
+            }
+
+            float fx = sourceCamera.Pose.GetEffectiveFocalLength();
+            if (fx <= 1e-6f)
+                return false;
+
+            var pointCam = Vector3.TransformPosition(pointWorld, sourceCamera.Pose.WorldToCamera);
+            float depth = Math.Abs(pointCam.Z);
+            if (!float.IsFinite(depth) || depth <= 1e-6f)
+            {
+                var fallbackW2C = sourceCamera.Pose.CameraToWorld.Inverted();
+                pointCam = Vector3.TransformPosition(pointWorld, fallbackW2C);
+                depth = Math.Abs(pointCam.Z);
+            }
+
+            if (!float.IsFinite(depth) || depth <= 1e-6f)
+                return false;
+
+            value = fx / depth;
+            isMeters = false;
+            return float.IsFinite(value);
+        }
+
         private void CheckHandleSelection(int mouseX, int mouseY)
         {
             if (!_showCropBox)
@@ -2739,6 +2950,7 @@ namespace Deep3DStudio.Viewport
         {
             int x = (int)args.Event.X;
             int y = (int)args.Event.Y;
+            UpdateHoveredSourceDistanceFromMouse(x, y);
 
             if (!_isDragging && !_isPanning && !_isDraggingGizmo)
             {

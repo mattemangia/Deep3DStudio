@@ -522,6 +522,10 @@ namespace Deep3DStudio
                 OnPointCloudRemoveDuplicatesClicked, ConfigurePointCloudDuplicates);
             toolbar.Insert(dupBtn, -1);
 
+            var skyBtn = CreateActionButton("outlier_filter", iconSize, "Sky", "Remove Blue/Sky Points",
+                OnPointCloudRemoveSkyBlueClicked, ConfigurePointCloudSkyBlue);
+            toolbar.Insert(skyBtn, -1);
+
             var normalBtn = CreateActionButton("normals", iconSize, "Normals", "Estimate Point Cloud Normals",
                 OnPointCloudEstimateNormalsClicked, ConfigurePointCloudNormals);
             toolbar.Insert(normalBtn, -1);

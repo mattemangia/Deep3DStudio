@@ -1037,6 +1037,72 @@ namespace Deep3DStudio
             dlg.Destroy();
         }
 
+        private void OnPointCloudRemoveSkyBlueClicked(object? sender, EventArgs e)
+        {
+            var selected = GetSelectedPointClouds();
+            if (selected.Count == 0)
+            {
+                ShowMessage("Please select at least one point cloud first.");
+                return;
+            }
+
+            var options = new PointCloudBlueFilterOptions
+            {
+                MinBlue = _pcSkyMinBlue,
+                MaxRed = _pcSkyMaxRed,
+                MaxGreen = _pcSkyMaxGreen,
+                MinBlueDominance = _pcSkyBlueDominance
+            };
+
+            int removed = 0;
+            foreach (var pc in selected)
+                removed += PointCloudOperations.RemoveBlueDominantPoints(pc, options);
+
+            _sceneTreeView.RefreshTree();
+            UpdatePointCloudVisibilityControls();
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Sky/blue filter complete. Removed {removed:N0} points.";
+            _isDirty = true;
+            UpdateTitle();
+        }
+
+        private void ConfigurePointCloudSkyBlue()
+        {
+            var dlg = new Dialog("Sky / Blue Filter", this, DialogFlags.Modal);
+            dlg.SetDefaultSize(340, 220);
+            dlg.AddButton("Cancel", ResponseType.Cancel);
+            dlg.AddButton("Apply", ResponseType.Ok);
+
+            var area = dlg.ContentArea;
+            area.BorderWidth = 10;
+            area.Spacing = 8;
+
+            var minBlue = new SpinButton(0.0, 1.0, 0.01) { Digits = 3, Value = _pcSkyMinBlue };
+            var maxRed = new SpinButton(0.0, 1.0, 0.01) { Digits = 3, Value = _pcSkyMaxRed };
+            var maxGreen = new SpinButton(0.0, 1.0, 0.01) { Digits = 3, Value = _pcSkyMaxGreen };
+            var dominance = new SpinButton(0.0, 1.0, 0.01) { Digits = 3, Value = _pcSkyBlueDominance };
+
+            area.PackStart(new Label("Min Blue"), false, false, 0);
+            area.PackStart(minBlue, false, false, 0);
+            area.PackStart(new Label("Max Red"), false, false, 0);
+            area.PackStart(maxRed, false, false, 0);
+            area.PackStart(new Label("Max Green"), false, false, 0);
+            area.PackStart(maxGreen, false, false, 0);
+            area.PackStart(new Label("Min Blue Dominance (B - max(R,G))"), false, false, 0);
+            area.PackStart(dominance, false, false, 0);
+
+            dlg.ShowAll();
+            if (dlg.Run() == (int)ResponseType.Ok)
+            {
+                _pcSkyMinBlue = (float)minBlue.Value;
+                _pcSkyMaxRed = (float)maxRed.Value;
+                _pcSkyMaxGreen = (float)maxGreen.Value;
+                _pcSkyBlueDominance = (float)dominance.Value;
+            }
+
+            dlg.Destroy();
+        }
+
         private void OnPointCloudEstimateNormalsClicked(object? sender, EventArgs e)
         {
             var selected = GetSelectedPointClouds();

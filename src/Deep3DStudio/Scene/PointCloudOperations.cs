@@ -6,6 +6,14 @@ using Deep3DStudio.Model;
 
 namespace Deep3DStudio.Scene
 {
+    public sealed class PointCloudBlueFilterOptions
+    {
+        public float MinBlue { get; set; } = 0.45f;
+        public float MaxRed { get; set; } = 0.60f;
+        public float MaxGreen { get; set; } = 0.75f;
+        public float MinBlueDominance { get; set; } = 0.08f;
+    }
+
     /// <summary>
     /// High-level point cloud editing helpers that operate on scene objects.
     /// </summary>
@@ -212,6 +220,74 @@ namespace Deep3DStudio.Scene
             pointCloud.Confidence = outConfidence;
             pointCloud.UpdateBounds();
             return added;
+        }
+
+        public static int RemoveBlueDominantPoints(PointCloudObject pointCloud, PointCloudBlueFilterOptions options)
+        {
+            if (pointCloud.Points.Count == 0)
+                return 0;
+
+            options ??= new PointCloudBlueFilterOptions();
+
+            float minBlue = Math.Clamp(options.MinBlue, 0.0f, 1.0f);
+            float maxRed = Math.Clamp(options.MaxRed, 0.0f, 1.0f);
+            float maxGreen = Math.Clamp(options.MaxGreen, 0.0f, 1.0f);
+            float minBlueDominance = Math.Max(0.0f, options.MinBlueDominance);
+
+            int before = pointCloud.Points.Count;
+            bool hasAlignedNormals = pointCloud.Normals.Count == before;
+            bool hasAlignedConfidence = pointCloud.Confidence.Count == before;
+
+            var outPoints = new List<Vector3>(before);
+            var outColors = new List<Vector3>(before);
+            var outNormals = hasAlignedNormals ? new List<Vector3>(before) : new List<Vector3>();
+            var outConfidence = new List<float>(before);
+
+            int removed = 0;
+
+            for (int i = 0; i < before; i++)
+            {
+                bool hasColor = i < pointCloud.Colors.Count;
+                var color = hasColor ? pointCloud.Colors[i] : new Vector3(0.85f);
+
+                bool remove = false;
+                if (hasColor)
+                {
+                    float blue = color.Z;
+                    float red = color.X;
+                    float green = color.Y;
+                    float dominance = blue - Math.Max(red, green);
+
+                    remove = blue >= minBlue &&
+                             red <= maxRed &&
+                             green <= maxGreen &&
+                             dominance >= minBlueDominance;
+                }
+
+                if (remove)
+                {
+                    removed++;
+                    continue;
+                }
+
+                outPoints.Add(pointCloud.Points[i]);
+                outColors.Add(color);
+
+                if (hasAlignedNormals)
+                    outNormals.Add(pointCloud.Normals[i]);
+
+                if (hasAlignedConfidence)
+                    outConfidence.Add(pointCloud.Confidence[i]);
+                else
+                    outConfidence.Add(1.0f);
+            }
+
+            pointCloud.Points = outPoints;
+            pointCloud.Colors = outColors;
+            pointCloud.Normals = outNormals;
+            pointCloud.Confidence = outConfidence;
+            pointCloud.UpdateBounds();
+            return removed;
         }
 
         public static PointCloudData ToData(PointCloudObject pointCloud)

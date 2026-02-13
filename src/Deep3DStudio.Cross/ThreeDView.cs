@@ -81,6 +81,10 @@ namespace Deep3DStudio.Viewport
         private float _legendMin = 0.0f;
         private float _legendMax = 1.0f;
         private bool _legendUsesDepthFallback = false;
+        private bool _hasHoveredSourceDistance = false;
+        private float _hoveredSourceDistance = 0.0f;
+        private bool _hoveredDistanceIsMeters = false;
+        private string _hoveredSourceCameraName = string.Empty;
 
         public float FPS => _fps;
 
@@ -91,6 +95,14 @@ namespace Deep3DStudio.Viewport
             maxValue = _legendMax;
             depthFallback = _legendUsesDepthFallback;
             return _hasPointCloudLegend;
+        }
+
+        public bool TryGetHoveredSourceCameraDistance(out float value, out bool isMeters, out string sourceCameraName)
+        {
+            value = _hoveredSourceDistance;
+            isMeters = _hoveredDistanceIsMeters;
+            sourceCameraName = _hoveredSourceCameraName;
+            return _hasHoveredSourceDistance;
         }
 
         public ThreeDView(SceneGraph sceneGraph)
@@ -240,7 +252,15 @@ namespace Deep3DStudio.Viewport
              bool keepCurrentInteraction = _isDragging || _isDraggingGizmo || _isPanning;
              if (!pointerInViewport && !keepCurrentInteraction)
              {
+                 ClearHoveredSourceDistance();
                  return;
+             }
+
+             if (pointerInViewport && _viewportWidth > 0 && _viewportHeight > 0)
+             {
+                 int localX = (int)mouse.X - _viewportX;
+                 int localY = (int)mouse.Y - _viewportY;
+                 UpdateHoveredSourceDistance(localX, localY, _viewportWidth, _viewportHeight);
              }
 
              // Gizmo Interaction or Camera Interaction
@@ -1216,6 +1236,150 @@ namespace Deep3DStudio.Viewport
             float y = (1.0f - vec.Y) * 0.5f * height; // Flip Y for window coords
 
             return new Vector3(x, y, vec.Z);
+        }
+
+        private void ClearHoveredSourceDistance()
+        {
+            _hasHoveredSourceDistance = false;
+            _hoveredSourceDistance = 0.0f;
+            _hoveredDistanceIsMeters = false;
+            _hoveredSourceCameraName = string.Empty;
+        }
+
+        private void UpdateHoveredSourceDistance(int localMouseX, int localMouseY, int width, int height)
+        {
+            if (_sceneGraph == null)
+            {
+                ClearHoveredSourceDistance();
+                return;
+            }
+
+            if (!TryPickHoveredPoint(localMouseX, localMouseY, width, height, out var hoveredPointWorld))
+            {
+                ClearHoveredSourceDistance();
+                return;
+            }
+
+            if (TryComputeSourceCameraDistance(hoveredPointWorld, out float value, out bool isMeters, out string sourceCameraName))
+            {
+                _hasHoveredSourceDistance = true;
+                _hoveredSourceDistance = value;
+                _hoveredDistanceIsMeters = isMeters;
+                _hoveredSourceCameraName = sourceCameraName;
+                return;
+            }
+
+            ClearHoveredSourceDistance();
+        }
+
+        private bool TryPickHoveredPoint(int localMouseX, int localMouseY, int width, int height, out Vector3 pointWorld)
+        {
+            pointWorld = Vector3.Zero;
+            if (_sceneGraph == null)
+                return false;
+
+            Vector2 mouse = new Vector2(localMouseX, localMouseY);
+            float bestDistPx = 12.0f;
+            bool found = false;
+            const int maxSamplesPerCloud = 20000;
+
+            foreach (var obj in _sceneGraph.GetVisibleObjects())
+            {
+                if (obj is not PointCloudObject pc || pc.Points.Count == 0)
+                    continue;
+
+                int visibleCount = pc.GetVisiblePointCount();
+                if (visibleCount <= 0)
+                    continue;
+
+                int step = Math.Max(1, visibleCount / maxSamplesPerCloud);
+                Matrix4 world = pc.GetWorldTransform();
+
+                for (int i = 0; i < visibleCount; i += step)
+                {
+                    int sourceIndex = pc.GetSourcePointIndex(i, visibleCount);
+                    if (sourceIndex < 0 || sourceIndex >= pc.Points.Count)
+                        continue;
+
+                    Vector3 pWorld = Vector3.TransformPosition(pc.Points[sourceIndex], world);
+                    Vector3 screenPos = Project(pWorld, width, height);
+                    if (screenPos.Z < -1.0f || screenPos.Z > 1.0f)
+                        continue;
+
+                    float distPx = (new Vector2(screenPos.X, screenPos.Y) - mouse).Length;
+                    if (distPx < bestDistPx)
+                    {
+                        bestDistPx = distPx;
+                        pointWorld = pWorld;
+                        found = true;
+                    }
+                }
+            }
+
+            return found;
+        }
+
+        private bool TryComputeSourceCameraDistance(Vector3 pointWorld, out float value, out bool isMeters, out string sourceCameraName)
+        {
+            value = 0.0f;
+            isMeters = false;
+            sourceCameraName = string.Empty;
+
+            if (_sceneGraph == null)
+                return false;
+
+            CameraObject? sourceCamera = null;
+            float bestDist2 = float.MaxValue;
+            Vector3 sourceCameraPos = Vector3.Zero;
+
+            foreach (var camera in _sceneGraph.GetObjectsOfType<CameraObject>())
+            {
+                if (!camera.Visible || camera.Pose == null)
+                    continue;
+
+                Vector3 camPos = camera.Pose.CameraToWorld.ExtractTranslation();
+                float d2 = (camPos - pointWorld).LengthSquared;
+                if (d2 < bestDist2)
+                {
+                    bestDist2 = d2;
+                    sourceCamera = camera;
+                    sourceCameraPos = camPos;
+                }
+            }
+
+            if (sourceCamera?.Pose == null)
+                return false;
+
+            sourceCameraName = sourceCamera.Name;
+
+            if (GeoReferenceRuntime.HasActiveGeoreference)
+            {
+                Vector3 pointGeo = GeoReferenceService.TransformModelToWorld(pointWorld);
+                Vector3 camGeo = GeoReferenceService.TransformModelToWorld(sourceCameraPos);
+                value = (pointGeo - camGeo).Length;
+                isMeters = true;
+                return float.IsFinite(value);
+            }
+
+            float fx = sourceCamera.Pose.GetEffectiveFocalLength();
+            if (fx <= 1e-6f)
+                return false;
+
+            var pointCam = Vector3.TransformPosition(pointWorld, sourceCamera.Pose.WorldToCamera);
+            float depth = Math.Abs(pointCam.Z);
+            if (!float.IsFinite(depth) || depth <= 1e-6f)
+            {
+                var fallbackW2C = sourceCamera.Pose.CameraToWorld.Inverted();
+                pointCam = Vector3.TransformPosition(pointWorld, fallbackW2C);
+                depth = Math.Abs(pointCam.Z);
+            }
+
+            if (!float.IsFinite(depth) || depth <= 1e-6f)
+                return false;
+
+            value = fx / depth;
+            isMeters = false;
+            return float.IsFinite(value);
         }
 
         private int CheckGizmoIntersection(float mouseX, float mouseY, int width, int height)

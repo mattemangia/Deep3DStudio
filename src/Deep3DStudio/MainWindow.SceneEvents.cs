@@ -144,6 +144,10 @@ namespace Deep3DStudio
                     OnPointCloudRemoveDuplicatesClicked(null, EventArgs.Empty);
                     break;
 
+                case "remove_sky_blue":
+                    OnPointCloudRemoveSkyBlueClicked(null, EventArgs.Empty);
+                    break;
+
                 case "estimate_normals":
                     OnPointCloudEstimateNormalsClicked(null, EventArgs.Empty);
                     break;
