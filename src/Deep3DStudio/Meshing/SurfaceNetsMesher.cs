@@ -14,7 +14,7 @@ namespace Deep3DStudio.Meshing
         // This produces a dual mesh compared to Marching Cubes and is generally smoother than MC,
         // though it can retain blocky topology without additional smoothing.
 
-        public MeshData GenerateMesh(float[,,] densityGrid, Vector3 origin, float voxelSize, float isoLevel)
+        public MeshData GenerateMesh(float[,,] densityGrid, Vector3 origin, float voxelSize, float isoLevel, Action<string, float>? progress = null)
         {
             var mesh = new MeshData();
             int X = densityGrid.GetLength(0);
@@ -26,9 +26,14 @@ namespace Deep3DStudio.Meshing
             int[,,] nodeIndices = new int[X, Y, Z];
             for(int i=0; i<X; i++) for(int j=0; j<Y; j++) for(int k=0; k<Z; k++) nodeIndices[i,j,k] = -1;
 
+            progress?.Invoke("Surface Nets: generating vertices...", 0.0f);
+            int reportInterval = Math.Max(1, (X - 1) / 20);
+
             // 1. Generate Vertices for cells that intersect the surface
             for (int x = 0; x < X - 1; x++)
             {
+                if (x % reportInterval == 0)
+                    progress?.Invoke($"Surface Nets: vertices (slice {x}/{X - 1})...", 0.60f * x / (X - 1));
                 for (int y = 0; y < Y - 1; y++)
                 {
                     for (int z = 0; z < Z - 1; z++)
@@ -83,6 +88,7 @@ namespace Deep3DStudio.Meshing
 
             // 2. Generate Quads for edges crossing the surface
             // We iterate edges. If an edge crosses the surface (sign change), we connect the 4 surrounding cell centers.
+            progress?.Invoke("Surface Nets: generating quads...", 0.60f);
 
             // X-parallel edges
             for (int x = 0; x < X - 1; x++)
@@ -126,6 +132,7 @@ namespace Deep3DStudio.Meshing
                 }
             }
 
+            progress?.Invoke("Surface Nets: Y-parallel edges...", 0.73f);
             // Y-parallel edges
             for (int x = 1; x < X - 1; x++)
             {
@@ -161,6 +168,7 @@ namespace Deep3DStudio.Meshing
                 }
             }
 
+            progress?.Invoke("Surface Nets: Z-parallel edges...", 0.86f);
             // Z-parallel edges
             for (int x = 1; x < X - 1; x++)
             {
@@ -196,6 +204,7 @@ namespace Deep3DStudio.Meshing
                 }
             }
 
+            progress?.Invoke("Surface Nets complete.", 1.0f);
             return mesh;
         }
 

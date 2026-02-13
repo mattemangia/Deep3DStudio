@@ -6896,7 +6896,8 @@ namespace Deep3DStudio
                 try
                 {
                     var cancellationToken = ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
-                    var baseMesh = GenerateMeshFromPointClouds(selectedPointClouds, MeshingAlgorithm.MarchingCubes);
+                    Action<string, float> pipelineProgress = (msg, p) => ProgressDialog.Instance.Update(p, msg);
+                    var baseMesh = GenerateMeshFromPointClouds(selectedPointClouds, MeshingAlgorithm.MarchingCubes, 256, pipelineProgress);
                     MeshData? finalMesh = baseMesh;
 
                     switch (meshingAlgo)
@@ -6923,7 +6924,7 @@ namespace Deep3DStudio
                                 cancellationToken);
                             break;
                         default:
-                            finalMesh = GenerateMeshFromPointClouds(selectedPointClouds, meshingAlgo);
+                            finalMesh = GenerateMeshFromPointClouds(selectedPointClouds, meshingAlgo, 256, pipelineProgress);
                             break;
                     }
 
@@ -7030,18 +7031,24 @@ namespace Deep3DStudio
             });
         }
 
-        private MeshData GenerateMeshFromPointClouds(List<PointCloudObject> pointClouds, MeshingAlgorithm algorithm, int maxRes = 256)
+        private MeshData GenerateMeshFromPointClouds(List<PointCloudObject> pointClouds, MeshingAlgorithm algorithm, int maxRes = 256, Action<string, float>? progress = null)
         {
             var meshes = pointClouds.Select(pc => ToMeshData(pc, visibleOnly: true)).ToList();
             if (meshes.Sum(m => m.Vertices.Count) == 0)
                 return new MeshData();
 
-            var (grid, colorGrid, min, voxelSize) = VoxelizePoints(meshes, maxRes);
+            var (grid, colorGrid, min, voxelSize) = VoxelizePoints(meshes, maxRes,
+                (msg, p) => progress?.Invoke(msg, p * 0.40f));
             var mesher = GetMesher(algorithm);
-            var result = mesher.GenerateMesh(grid, min, voxelSize, 0.5f);
+            progress?.Invoke("Running meshing algorithm...", 0.40f);
+            var result = mesher.GenerateMesh(grid, min, voxelSize, 0.5f,
+                (msg, p) => progress?.Invoke(msg, 0.40f + p * 0.40f));
 
+            progress?.Invoke("Applying colors...", 0.80f);
             ApplyColorsFromGrid(result, colorGrid, min, voxelSize);
+            progress?.Invoke("Post-processing mesh...", 0.90f);
             result = PostProcessMesh(result, voxelSize);
+            progress?.Invoke("Meshing complete.", 1.0f);
             return result;
         }
 
@@ -7070,9 +7077,9 @@ namespace Deep3DStudio
             };
         }
 
-        private (float[,,] grid, Vector3[,,]? colorGrid, Vector3 min, float voxelSize) VoxelizePoints(List<MeshData> meshes, int maxRes = 256)
+        private (float[,,] grid, Vector3[,,]? colorGrid, Vector3 min, float voxelSize) VoxelizePoints(List<MeshData> meshes, int maxRes = 256, Action<string, float>? progress = null)
         {
-            var result = VoxelizationUtils.Voxelize(meshes, maxRes);
+            var result = VoxelizationUtils.Voxelize(meshes, maxRes, progress);
             return (result.grid ?? new float[1, 1, 1], result.colorGrid, result.origin, result.voxelSize);
         }
 

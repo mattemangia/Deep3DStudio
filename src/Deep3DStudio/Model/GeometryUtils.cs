@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using OpenTK.Mathematics;
 using MathNet.Numerics.LinearAlgebra;
 using SkiaSharp;
@@ -505,7 +506,7 @@ namespace Deep3DStudio.Model
             return tMax >= tMin && tMax >= 0;
         }
 
-        public static MeshData MarchingCubes(float[,,] density, Vector3[,,] color, Vector3 min, Vector3 voxelSize, float isoLevel)
+        public static MeshData MarchingCubes(float[,,] density, Vector3[,,] color, Vector3 min, Vector3 voxelSize, float isoLevel, Action<string, float>? progress = null)
         {
             var mesh = new MeshData();
             int resX = density.GetLength(0);
@@ -522,6 +523,9 @@ namespace Deep3DStudio.Model
             // Let's implement a thread-local list approach to parallelize triangle generation.
 
             object lockObj = new object();
+            int slicesCompleted = 0;
+            int totalSlices = Math.Max(1, resX - 1);
+            int reportInterval = Math.Max(1, totalSlices / 20);
 
             Parallel.For(0, resX - 1, x =>
             {
@@ -548,8 +552,13 @@ namespace Deep3DStudio.Model
                         mesh.Indices.Add(baseIdx + i);
                     }
                 }
+
+                int done = Interlocked.Increment(ref slicesCompleted);
+                if (done % reportInterval == 0)
+                    progress?.Invoke($"Marching Cubes ({done}/{totalSlices} slices)...", (float)done / totalSlices);
             });
 
+            progress?.Invoke("Marching Cubes complete.", 1.0f);
             return mesh;
         }
 

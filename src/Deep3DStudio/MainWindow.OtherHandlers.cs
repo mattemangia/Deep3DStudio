@@ -460,12 +460,20 @@ namespace Deep3DStudio
                         return;
                     }
 
+                    Action<string, float> pipelineProgress = (msg, p) =>
+                    {
+                        if (UI.ProgressDialog.Instance.IsVisible)
+                            UI.ProgressDialog.Instance.Update(p, msg);
+                        else
+                            Application.Invoke((s, e) => _statusLabel.Text = $"{msg} ({(int)(p * 100)}%)");
+                    };
+
                     if (meshingAlgo == MeshingAlgorithm.DeepMeshPrior ||
                         meshingAlgo == MeshingAlgorithm.TripoSF ||
                         meshingAlgo == MeshingAlgorithm.GaussianSDF)
                     {
                         // Use Poisson reconstruction for better topology before refinement
-                        var baseMesh = await Task.Run(() => GenerateMeshFromPointClouds(selectedPointClouds, MeshingAlgorithm.Poisson));
+                        var baseMesh = await Task.Run(() => GenerateMeshFromPointClouds(selectedPointClouds, MeshingAlgorithm.Poisson, 256, pipelineProgress));
                         if (baseMesh == null || baseMesh.Vertices.Count == 0)
                         {
                             _statusLabel.Text = "Base meshing failed.";
@@ -493,7 +501,7 @@ namespace Deep3DStudio
                     int maxRes = 256;
                     _statusLabel.Text = $"Meshing using {meshingAlgo}...";
 
-                    var meshedResult = await Task.Run(() => GenerateMeshFromPointClouds(selectedPointClouds, meshingAlgo, maxRes));
+                    var meshedResult = await Task.Run(() => GenerateMeshFromPointClouds(selectedPointClouds, meshingAlgo, maxRes, pipelineProgress));
 
                     Console.WriteLine($"Meshing result: {meshedResult.Vertices.Count} vertices, {meshedResult.Indices.Count} indices ({meshedResult.Indices.Count / 3} triangles)");
 
@@ -533,7 +541,7 @@ namespace Deep3DStudio
             }
         }
 
-        private MeshData GenerateMeshFromPointClouds(List<PointCloudObject> pointClouds, MeshingAlgorithm algorithm, int maxRes = 256)
+        private MeshData GenerateMeshFromPointClouds(List<PointCloudObject> pointClouds, MeshingAlgorithm algorithm, int maxRes = 256, Action<string, float>? progress = null)
         {
             Console.WriteLine($"[Meshing] GenerateMeshFromPointClouds: {pointClouds.Count} point clouds, algorithm={algorithm}, maxRes={maxRes}");
 
@@ -546,7 +554,8 @@ namespace Deep3DStudio
                 return new MeshData();
             }
 
-            var (grid, colorGrid, min, voxelSize) = VoxelizePoints(meshes, maxRes);
+            var (grid, colorGrid, min, voxelSize) = VoxelizePoints(meshes, maxRes,
+                (msg, p) => progress?.Invoke(msg, p * 0.40f));
             int gridX = grid.GetLength(0);
             int gridY = grid.GetLength(1);
             int gridZ = grid.GetLength(2);
@@ -562,12 +571,17 @@ namespace Deep3DStudio
 
             IMesher mesher = GetMesher(algorithm);
             Console.WriteLine($"[Meshing] Running {mesher.GetType().Name}...");
+            progress?.Invoke("Running meshing algorithm...", 0.40f);
 
-            var result = mesher.GenerateMesh(grid, min, voxelSize, 0.5f);
+            var result = mesher.GenerateMesh(grid, min, voxelSize, 0.5f,
+                (msg, p) => progress?.Invoke(msg, 0.40f + p * 0.40f));
             Console.WriteLine($"[Meshing] Result: {result.Vertices.Count} vertices, {result.Indices.Count} indices");
 
+            progress?.Invoke("Applying colors...", 0.80f);
             ApplyColorsFromGrid(result, colorGrid, min, voxelSize);
+            progress?.Invoke("Post-processing mesh...", 0.90f);
             result = PostProcessMesh(result, voxelSize);
+            progress?.Invoke("Meshing complete.", 1.0f);
 
             return result;
         }

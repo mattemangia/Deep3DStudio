@@ -7,7 +7,7 @@ namespace Deep3DStudio.Meshing
 {
     public class PoissonMesher : IMesher
     {
-        public MeshData GenerateMesh(float[,,] densityGrid, Vector3 origin, float voxelSize, float isoLevel)
+        public MeshData GenerateMesh(float[,,] densityGrid, Vector3 origin, float voxelSize, float isoLevel, Action<string, float>? progress = null)
         {
             int w = densityGrid.GetLength(0);
             int h = densityGrid.GetLength(1);
@@ -15,6 +15,7 @@ namespace Deep3DStudio.Meshing
 
             // 1. Compute Gradients (Normals) from the input density grid
             // We use central differences to estimate normals.
+            progress?.Invoke("Computing gradients...", 0.0f);
             Vector3[,,] vectorField = new Vector3[w, h, d];
 
             Parallel.For(1, w - 1, x =>
@@ -31,6 +32,7 @@ namespace Deep3DStudio.Meshing
                     }
                 }
             });
+            progress?.Invoke("Gradients computed.", 0.15f);
 
             // 2. Smooth the Vector Field
             // Smoothing the vector field helps in reducing noise and providing a cleaner reconstruction,
@@ -38,6 +40,7 @@ namespace Deep3DStudio.Meshing
             int smoothingPasses = 2;
             for (int i = 0; i < smoothingPasses; i++)
             {
+                progress?.Invoke($"Smoothing vector field (pass {i + 1}/{smoothingPasses})...", 0.15f + 0.10f * i / smoothingPasses);
                 vectorField = SmoothVectorField(vectorField);
             }
 
@@ -48,6 +51,7 @@ namespace Deep3DStudio.Meshing
             // -Laplacian(Phi) = -Divergence(V)
             // The Negative Laplacian operator (6*center - sum_neighbors) is Symmetric Positive Definite (SPD),
             // which is a strict requirement for the Conjugate Gradient method.
+            progress?.Invoke("Computing divergence...", 0.25f);
             float[,,] negDivergence = new float[w, h, d];
             Parallel.For(1, w - 1, x =>
             {
@@ -69,14 +73,16 @@ namespace Deep3DStudio.Meshing
             // Using Matrix-Free Conjugate Gradient Solver.
             // Heuristic for iterations: scale with grid dimension to ensure convergence on larger grids.
             // Base iterations = 200, plus dimension-dependent factor.
+            progress?.Invoke("Solving Poisson equation (CG)...", 0.35f);
             int maxDim = Math.Max(w, Math.Max(h, d));
             int iterations = Math.Max(200, maxDim * 4);
 
-            float[,,] phi = SolvePoissonCG(negDivergence, maxIterations: iterations);
+            float[,,] phi = SolvePoissonCG(negDivergence, maxIterations: iterations, progress: progress);
 
             // 5. Generate Mesh from the reconstructed potential field (Phi)
             // Use adaptive isoLevel based on phi statistics since the CG output
             // has arbitrary range unrelated to the caller's isoLevel.
+            progress?.Invoke("Computing adaptive iso-level...", 0.85f);
             float adaptiveIso = ComputeAdaptiveIsoLevel(phi);
 
             // Default white color grid for Marching Cubes extraction
@@ -88,7 +94,10 @@ namespace Deep3DStudio.Meshing
                         colorGrid[x,y,z] = new Vector3(1, 1, 1);
             });
 
-            return GeometryUtils.MarchingCubes(phi, colorGrid, origin, new Vector3(voxelSize), adaptiveIso);
+            progress?.Invoke("Extracting surface...", 0.90f);
+            var result = GeometryUtils.MarchingCubes(phi, colorGrid, origin, new Vector3(voxelSize), adaptiveIso);
+            progress?.Invoke("Poisson meshing complete.", 1.0f);
+            return result;
         }
 
         private float ComputeAdaptiveIsoLevel(float[,,] phi)
@@ -194,7 +203,7 @@ namespace Deep3DStudio.Meshing
             return output;
         }
 
-        private float[,,] SolvePoissonCG(float[,,] rhs, int maxIterations)
+        private float[,,] SolvePoissonCG(float[,,] rhs, int maxIterations, Action<string, float>? progress = null)
         {
             int w = rhs.GetLength(0);
             int h = rhs.GetLength(1);
@@ -207,10 +216,14 @@ namespace Deep3DStudio.Meshing
 
             double rsold = DotProduct(r, r);
 
+            int reportInterval = Math.Max(1, maxIterations / 50);
             for (int i = 0; i < maxIterations; i++)
             {
                 // Convergence check
                 if (rsold < 1e-10) break;
+
+                if (i % reportInterval == 0)
+                    progress?.Invoke($"Solving Poisson (iter {i}/{maxIterations})...", 0.35f + 0.50f * i / maxIterations);
 
                 // Apply Negative Laplacian operator (A * p)
                 // This operator must be Positive Definite.

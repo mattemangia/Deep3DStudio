@@ -7,7 +7,7 @@ namespace Deep3DStudio.Meshing
 {
     public class BlockMesher : IMesher
     {
-        public MeshData GenerateMesh(float[,,] densityGrid, Vector3 origin, float voxelSize, float isoLevel)
+        public MeshData GenerateMesh(float[,,] densityGrid, Vector3 origin, float voxelSize, float isoLevel, Action<string, float>? progress = null)
         {
             var mesh = new MeshData();
             int X = densityGrid.GetLength(0);
@@ -29,8 +29,14 @@ namespace Deep3DStudio.Meshing
             // Generate quads for each face and triangulate them.
             // Faces: -Z, +Z, -Y, +Y, -X, +X
 
+            progress?.Invoke("Generating blocks...", 0.0f);
+            int reportInterval = Math.Max(1, X / 20);
+
             for (int x = 0; x < X; x++)
             {
+                if (x % reportInterval == 0)
+                    progress?.Invoke($"Generating blocks (slice {x}/{X})...", (float)x / X);
+
                 for (int y = 0; y < Y; y++)
                 {
                     for (int z = 0; z < Z; z++)
@@ -44,6 +50,7 @@ namespace Deep3DStudio.Meshing
                 }
             }
 
+            progress?.Invoke("Block meshing complete.", 1.0f);
             return mesh;
         }
 

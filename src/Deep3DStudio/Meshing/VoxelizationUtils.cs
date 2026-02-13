@@ -8,7 +8,7 @@ namespace Deep3DStudio.Meshing
 {
     public static class VoxelizationUtils
     {
-        public static (float[,,]? grid, Vector3[,,]? colorGrid, Vector3 origin, float voxelSize) Voxelize(List<MeshData> meshes, int maxRes)
+        public static (float[,,]? grid, Vector3[,,]? colorGrid, Vector3 origin, float voxelSize) Voxelize(List<MeshData> meshes, int maxRes, Action<string, float>? progress = null)
         {
             int totalCount = 0;
             foreach (var m in meshes)
@@ -31,10 +31,10 @@ namespace Deep3DStudio.Meshing
                 }
             }
 
-            return VoxelizeCore(points, colors, maxRes);
+            return VoxelizeCore(points, colors, maxRes, progress);
         }
 
-        public static (float[,,]? grid, Vector3[,,]? colorGrid, Vector3 origin, float voxelSize) Voxelize(IList<Vector3> points, int maxRes)
+        public static (float[,,]? grid, Vector3[,,]? colorGrid, Vector3 origin, float voxelSize) Voxelize(IList<Vector3> points, int maxRes, Action<string, float>? progress = null)
         {
             if (points.Count == 0)
                 return (null, null, Vector3.Zero, 0.02f);
@@ -43,10 +43,10 @@ namespace Deep3DStudio.Meshing
             for (int i = 0; i < points.Count; i++)
                 arr[i] = points[i];
 
-            return VoxelizeCore(arr, null, maxRes);
+            return VoxelizeCore(arr, null, maxRes, progress);
         }
 
-        private static (float[,,]? grid, Vector3[,,]? colorGrid, Vector3 origin, float voxelSize) VoxelizeCore(Vector3[] points, Vector3[]? colors, int maxRes)
+        private static (float[,,]? grid, Vector3[,,]? colorGrid, Vector3 origin, float voxelSize) VoxelizeCore(Vector3[] points, Vector3[]? colors, int maxRes, Action<string, float>? progress = null)
         {
             if (points.Length == 0 || maxRes < 16)
                 return (null, null, Vector3.Zero, 0.02f);
@@ -84,6 +84,7 @@ namespace Deep3DStudio.Meshing
                 return (null, null, min, voxelSize);
 
             Console.WriteLine($"[Voxelize] Grid: {w}x{h}x{d}, voxelSize={voxelSize:F6}, points={points.Length}");
+            progress?.Invoke("Voxelizing points...", 0.05f);
 
             // 3. Binary voxelization: mark occupied voxels
             var grid = new float[w, h, d];
@@ -118,6 +119,7 @@ namespace Deep3DStudio.Meshing
                     for (int z = 0; z < d; z++)
                         if (grid[x, y, z] > 0) occupied++;
             Console.WriteLine($"[Voxelize] Occupied voxels: {occupied}");
+            progress?.Invoke($"Voxelized: {occupied} occupied voxels", 0.30f);
 
             // 4. Dilation: expand occupied region to bridge small gaps.
             //    Use adaptive radius but cap at 3 to avoid filling the entire grid.
@@ -131,6 +133,7 @@ namespace Deep3DStudio.Meshing
             var current = grid;
             for (int round = 0; round < dilationRadius; round++)
             {
+                progress?.Invoke($"Dilating voxels (pass {round + 1}/{dilationRadius})...", 0.30f + 0.20f * round / dilationRadius);
                 var dilated = new float[w, h, d];
                 Parallel.For(1, w - 1, x =>
                 {
@@ -156,9 +159,11 @@ namespace Deep3DStudio.Meshing
 
             // 5. Box blur smoothing (3 passes) to create smooth gradient for MC.
             //    Binary 0/1 → smooth [0,1]. MC at isoLevel=0.5 extracts the surface.
+            progress?.Invoke("Smoothing voxel grid...", 0.50f);
             var next = new float[w, h, d];
             for (int pass = 0; pass < 3; pass++)
             {
+                progress?.Invoke($"Smoothing voxels (pass {pass + 1}/3)...", 0.50f + 0.20f * pass / 3f);
                 Parallel.For(1, w - 1, x =>
                 {
                     for (int y = 1; y < h - 1; y++)
@@ -181,6 +186,7 @@ namespace Deep3DStudio.Meshing
             }
 
             // 6. Build color grid from accumulated colors
+            progress?.Invoke("Building color grid...", 0.70f);
             Vector3[,,]? colorGrid = null;
             if (colorSum != null && colorCount != null)
             {
@@ -210,6 +216,7 @@ namespace Deep3DStudio.Meshing
                         if (val > 0.1f && val < 0.9f) surfaceVoxels++;
                     }
             Console.WriteLine($"[Voxelize] Surface voxels (0.1-0.9): {surfaceVoxels}");
+            progress?.Invoke("Voxelization complete.", 1.0f);
 
             return (current, colorGrid, min, voxelSize);
         }

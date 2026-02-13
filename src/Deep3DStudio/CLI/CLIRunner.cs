@@ -306,7 +306,11 @@ namespace Deep3DStudio.CLI
                     : 0.5f;
                 Console.WriteLine($"Running marching cubes (iso={isoLevel:F4})...");
                 var mesher = new MarchingCubesMesher();
-                var baseMesh = mesher.GenerateMesh(voxelized.grid, voxelized.origin, voxelized.voxelSize, isoLevel);
+                Action<string, float> cliProgress = (msg, p) =>
+                {
+                    TuiStatusMonitor.Instance.UpdateProgress(msg, p);
+                };
+                var baseMesh = mesher.GenerateMesh(voxelized.grid, voxelized.origin, voxelized.voxelSize, isoLevel, cliProgress);
                 if (baseMesh.Vertices.Count == 0 || baseMesh.Indices.Count == 0)
                 {
                     Console.Error.WriteLine("Marching cubes produced no geometry.");
@@ -1720,7 +1724,11 @@ namespace Deep3DStudio.CLI
 
                 Console.WriteLine("Running marching cubes...");
                 var mesher = new MarchingCubesMesher();
-                var baseMesh = mesher.GenerateMesh(voxelized.grid, voxelized.origin, voxelized.voxelSize, 0.5f);
+                Action<string, float> cliProgress2 = (msg, p) =>
+                {
+                    TuiStatusMonitor.Instance.UpdateProgress(msg, p);
+                };
+                var baseMesh = mesher.GenerateMesh(voxelized.grid, voxelized.origin, voxelized.voxelSize, 0.5f, cliProgress2);
                 Console.WriteLine($"Marching cubes: {baseMesh.Vertices.Count} vertices, {baseMesh.Indices.Count / 3} triangles");
 
                 if (baseMesh.Vertices.Count == 0 || baseMesh.Indices.Count == 0)

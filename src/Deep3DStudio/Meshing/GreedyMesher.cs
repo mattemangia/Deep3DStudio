@@ -10,7 +10,7 @@ namespace Deep3DStudio.Meshing
         // Greedy Meshing merges adjacent faces of the same type to reduce triangle count.
         // For a density grid, this effectively merges voxel faces.
 
-        public MeshData GenerateMesh(float[,,] densityGrid, Vector3 origin, float voxelSize, float isoLevel)
+        public MeshData GenerateMesh(float[,,] densityGrid, Vector3 origin, float voxelSize, float isoLevel, Action<string, float>? progress = null)
         {
             var mesh = new MeshData();
             int X = densityGrid.GetLength(0);
@@ -24,10 +24,12 @@ namespace Deep3DStudio.Meshing
 
             // Dimensions
             int[] dims = new int[] { X, Y, Z };
+            string[] axisNames = { "X", "Y", "Z" };
 
             // Loop over 3 dimensions
             for (int d = 0; d < 3; d++)
             {
+                progress?.Invoke($"Greedy meshing axis {axisNames[d]}...", (float)d / 3f);
                 int u = (d + 1) % 3;
                 int v = (d + 2) % 3;
 
@@ -143,6 +145,7 @@ namespace Deep3DStudio.Meshing
                     }
                 }
             }
+            progress?.Invoke("Greedy meshing complete.", 1.0f);
             return mesh;
         }
 

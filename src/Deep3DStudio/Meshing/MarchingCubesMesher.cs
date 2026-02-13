@@ -9,7 +9,7 @@ namespace Deep3DStudio.Meshing
 {
     public class MarchingCubesMesher : IMesher
     {
-        public MeshData GenerateMesh(float[,,] densityGrid, Vector3 origin, float voxelSize, float isoLevel)
+        public MeshData GenerateMesh(float[,,] densityGrid, Vector3 origin, float voxelSize, float isoLevel, Action<string, float>? progress = null)
         {
             // Use Computation Device Setting
             // Although Marching Cubes is generally CPU bound unless using Compute Shaders,
@@ -22,6 +22,8 @@ namespace Deep3DStudio.Meshing
             int Y = densityGrid.GetLength(1);
             int Z = densityGrid.GetLength(2);
 
+            progress?.Invoke("Preparing color grid...", 0.0f);
+
             // Default white color grid
             Vector3[,,] colorGrid = new Vector3[X, Y, Z];
 
@@ -32,7 +34,8 @@ namespace Deep3DStudio.Meshing
                         colorGrid[x,y,z] = new Vector3(1, 1, 1);
             });
 
-            return GeometryUtils.MarchingCubes(densityGrid, colorGrid, origin, new Vector3(voxelSize), isoLevel);
+            progress?.Invoke("Running Marching Cubes...", 0.05f);
+            return GeometryUtils.MarchingCubes(densityGrid, colorGrid, origin, new Vector3(voxelSize), isoLevel, progress);
         }
     }
 }
