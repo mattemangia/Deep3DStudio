@@ -388,6 +388,7 @@ namespace Deep3DStudio
 
             _viewport.FocusOnSelection();
             _viewport.QueueDraw();
+            TryAutoRefineGeoreferenceFromScene("point cloud reconstruction");
         }
 
         private async Task RunMeshing()
@@ -481,6 +482,7 @@ namespace Deep3DStudio
                         var aiObj = new MeshObject("Refined Mesh", refinedMesh);
                         _sceneGraph.AddObject(aiObj);
                         _sceneGraph.Select(aiObj);
+                        TryAutoRefineGeoreferenceFromScene("AI meshing refinement");
                         _viewport.FocusOnSelection();
                         _statusLabel.Text = "AI meshing complete.";
                         _sceneTreeView.RefreshTree();
@@ -500,6 +502,7 @@ namespace Deep3DStudio
                         var meshObj = new MeshObject("Reconstructed Mesh", meshedResult);
                         _sceneGraph.AddObject(meshObj);
                         _sceneGraph.Select(meshObj);
+                        TryAutoRefineGeoreferenceFromScene("meshing");
                         _viewport.FocusOnSelection();
                     }
                     _statusLabel.Text = "Meshing Complete.";

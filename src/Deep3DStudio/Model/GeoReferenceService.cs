@@ -14,6 +14,26 @@ namespace Deep3DStudio.Model
         private const double Wgs84F = 1.0 / 298.257223563;
         private const double K0 = 0.9996;
 
+        public sealed class PendingResolveSummary
+        {
+            public int EnabledPendingCount { get; init; }
+            public int ResolvedCount { get; init; }
+            public int FailedCount { get; init; }
+            public string LastError { get; init; } = string.Empty;
+        }
+
+        public sealed class AutoRefineSummary
+        {
+            public bool Solved { get; init; }
+            public bool KeptPreviousTransform { get; init; }
+            public int ExistingGcpsRefreshed { get; init; }
+            public int ExistingGcpsRefreshFailed { get; init; }
+            public int PendingResolved { get; init; }
+            public int PendingFailed { get; init; }
+            public double Rms { get; init; }
+            public string Message { get; init; } = string.Empty;
+        }
+
         public static Vector3 TransformModelToWorld(Vector3 pointModel)
         {
             return TransformPoint(pointModel, GeoReferenceRuntime.GetModelToWorldMatrix());
@@ -32,6 +52,223 @@ namespace Deep3DStudio.Model
             if (Math.Abs(w.W) < 1e-8f)
                 return new Vector3(w.X, w.Y, w.Z);
             return new Vector3(w.X / w.W, w.Y / w.W, w.Z / w.W);
+        }
+
+        public static PendingResolveSummary ResolvePendingGcpsFromScene(
+            SceneGraph sceneGraph,
+            IList<PendingGcpEntryDTO> pendingGcps,
+            IList<GcpEntryDTO> gcps,
+            string projectEpsg)
+        {
+            int enabledPending = 0;
+            int resolved = 0;
+            int failed = 0;
+            string lastError = string.Empty;
+
+            foreach (var pending in pendingGcps)
+            {
+                if (!pending.Enabled)
+                    continue;
+
+                enabledPending++;
+
+                if (!TryNormalizeInputCoordinate(
+                    projectEpsg,
+                    pending.InputIsLatLon,
+                    pending.InputLonOrX,
+                    pending.InputLatOrY,
+                    pending.InputZ,
+                    out Vector3 worldPoint,
+                    out string coordError))
+                {
+                    pending.Status = "Failed";
+                    pending.LastError = coordError;
+                    failed++;
+                    lastError = coordError;
+                    continue;
+                }
+
+                if (!TryPickModelPointFromImagePixel(
+                    sceneGraph,
+                    pending.ImagePath,
+                    pending.PixelX,
+                    pending.PixelY,
+                    out Vector3 modelPoint,
+                    out string sampleError))
+                {
+                    pending.Status = "Failed";
+                    pending.LastError = sampleError;
+                    failed++;
+                    lastError = sampleError;
+                    continue;
+                }
+
+                var gcp = new GcpEntryDTO
+                {
+                    Id = string.IsNullOrWhiteSpace(pending.Id) ? Guid.NewGuid().ToString("N") : pending.Id,
+                    ImagePath = pending.ImagePath ?? string.Empty,
+                    PixelX = pending.PixelX,
+                    PixelY = pending.PixelY,
+                    InputIsLatLon = pending.InputIsLatLon,
+                    InputLonOrX = pending.InputLonOrX,
+                    InputLatOrY = pending.InputLatOrY,
+                    InputZ = pending.InputZ,
+                    ModelPoint = modelPoint,
+                    WorldPoint = worldPoint,
+                    Residual = 0f,
+                    Enabled = pending.Enabled
+                };
+
+                int idx = FindGcpIndexById(gcps, gcp.Id);
+                if (idx >= 0)
+                    gcps[idx] = gcp;
+                else
+                    gcps.Add(gcp);
+
+                pending.Status = "Resolved";
+                pending.LastError = string.Empty;
+                pending.WorldPoint = worldPoint;
+                resolved++;
+            }
+
+            return new PendingResolveSummary
+            {
+                EnabledPendingCount = enabledPending,
+                ResolvedCount = resolved,
+                FailedCount = failed,
+                LastError = lastError
+            };
+        }
+
+        public static AutoRefineSummary TryAutoRefineGeoreferenceAfterGeometryChange(
+            SceneGraph sceneGraph,
+            bool keepPreviousTransformOnFailure = true)
+        {
+            var pending = GeoReferenceRuntime.PendingGcps.Select(ClonePendingGcp).ToList();
+            var gcps = GeoReferenceRuntime.Gcps.Select(CloneGcp).ToList();
+            var geo = GeoReferenceRuntime.GeoReference;
+            string epsg = string.IsNullOrWhiteSpace(geo.ProjectCrsEpsg) ? "EPSG:4326" : geo.ProjectCrsEpsg.Trim();
+            bool hadPrevious = GeoReferenceRuntime.HasActiveGeoreference;
+            Matrix4 previousMatrix = GeoReferenceRuntime.GetModelToWorldMatrix();
+
+            var resolveSummary = ResolvePendingGcpsFromScene(sceneGraph, pending, gcps, epsg);
+            int refreshed = RefreshGcpModelPointsFromPixels(sceneGraph, gcps, out int refreshFailed);
+
+            GeoReferenceRuntime.SetPendingGcps(pending);
+            GeoReferenceRuntime.SetGcps(gcps);
+
+            int enabledGcps = gcps.Count(g => g.Enabled);
+            if (enabledGcps < 3)
+            {
+                if (!keepPreviousTransformOnFailure || !hadPrevious)
+                {
+                    var disabled = GeoReferenceRuntime.GeoReference;
+                    disabled.Enabled = false;
+                    disabled.ProjectCrsEpsg = epsg;
+                    disabled.ModelToWorldMatrix.Clear();
+                    GeoReferenceRuntime.SetGeoReference(disabled);
+                }
+                else
+                {
+                    GeoReferenceRuntime.SetModelToWorldMatrix(previousMatrix);
+                    var kept = GeoReferenceRuntime.GeoReference;
+                    kept.Enabled = true;
+                    kept.ProjectCrsEpsg = epsg;
+                    GeoReferenceRuntime.SetGeoReference(kept);
+                }
+
+                return new AutoRefineSummary
+                {
+                    Solved = false,
+                    KeptPreviousTransform = keepPreviousTransformOnFailure && hadPrevious,
+                    ExistingGcpsRefreshed = refreshed,
+                    ExistingGcpsRefreshFailed = refreshFailed,
+                    PendingResolved = resolveSummary.ResolvedCount,
+                    PendingFailed = resolveSummary.FailedCount,
+                    Message = "Auto-refine skipped: at least 3 enabled GCPs are required."
+                };
+            }
+
+            var runtimeGeo = GeoReferenceRuntime.GeoReference;
+            runtimeGeo.ProjectCrsEpsg = epsg;
+            GeoReferenceRuntime.SetGeoReference(runtimeGeo);
+
+            if (TrySolveModelToWorldFromGcps(gcps, out Matrix4 solved, out double rms, out string solveError))
+            {
+                GeoReferenceRuntime.SetModelToWorldMatrix(solved);
+                GeoReferenceRuntime.SetGcps(gcps);
+
+                var solvedGeo = GeoReferenceRuntime.GeoReference;
+                solvedGeo.Enabled = true;
+                solvedGeo.ProjectCrsEpsg = epsg;
+                GeoReferenceRuntime.SetGeoReference(solvedGeo);
+
+                return new AutoRefineSummary
+                {
+                    Solved = true,
+                    KeptPreviousTransform = false,
+                    ExistingGcpsRefreshed = refreshed,
+                    ExistingGcpsRefreshFailed = refreshFailed,
+                    PendingResolved = resolveSummary.ResolvedCount,
+                    PendingFailed = resolveSummary.FailedCount,
+                    Rms = rms,
+                    Message = $"Auto-refine solved. RMS {rms:F6}."
+                };
+            }
+
+            if (keepPreviousTransformOnFailure && hadPrevious)
+            {
+                GeoReferenceRuntime.SetModelToWorldMatrix(previousMatrix);
+                var kept = GeoReferenceRuntime.GeoReference;
+                kept.Enabled = true;
+                kept.ProjectCrsEpsg = epsg;
+                GeoReferenceRuntime.SetGeoReference(kept);
+            }
+            else
+            {
+                var disabled = GeoReferenceRuntime.GeoReference;
+                disabled.Enabled = false;
+                disabled.ProjectCrsEpsg = epsg;
+                disabled.ModelToWorldMatrix.Clear();
+                GeoReferenceRuntime.SetGeoReference(disabled);
+            }
+
+            return new AutoRefineSummary
+            {
+                Solved = false,
+                KeptPreviousTransform = keepPreviousTransformOnFailure && hadPrevious,
+                ExistingGcpsRefreshed = refreshed,
+                ExistingGcpsRefreshFailed = refreshFailed,
+                PendingResolved = resolveSummary.ResolvedCount,
+                PendingFailed = resolveSummary.FailedCount,
+                Message = string.IsNullOrWhiteSpace(solveError)
+                    ? "Auto-refine failed."
+                    : $"Auto-refine failed: {solveError}"
+            };
+        }
+
+        public static string FormatPendingStats(IEnumerable<PendingGcpEntryDTO> pendingGcps)
+        {
+            int enabled = 0;
+            int pending = 0;
+            int resolved = 0;
+            int failed = 0;
+
+            foreach (var g in pendingGcps)
+            {
+                if (!g.Enabled)
+                    continue;
+                enabled++;
+                if (string.Equals(g.Status, "Resolved", StringComparison.OrdinalIgnoreCase))
+                    resolved++;
+                else if (string.Equals(g.Status, "Failed", StringComparison.OrdinalIgnoreCase))
+                    failed++;
+                else
+                    pending++;
+            }
+
+            return string.Create(CultureInfo.InvariantCulture,
+                $"Pending enabled: {enabled} | Pending: {pending} | Resolved: {resolved} | Failed: {failed}");
         }
 
         public static bool TryNormalizeInputCoordinate(
@@ -213,6 +450,78 @@ namespace Deep3DStudio.Model
             double min = residuals.Min();
             double avg = residuals.Average();
             return string.Create(CultureInfo.InvariantCulture, $"RMS: {rms:F4} | AVG: {avg:F4} | MIN: {min:F4} | MAX: {max:F4}");
+        }
+
+        private static int RefreshGcpModelPointsFromPixels(SceneGraph sceneGraph, IList<GcpEntryDTO> gcps, out int failed)
+        {
+            int refreshed = 0;
+            failed = 0;
+            for (int i = 0; i < gcps.Count; i++)
+            {
+                var g = gcps[i];
+                if (!g.Enabled)
+                    continue;
+
+                if (!TryPickModelPointFromImagePixel(sceneGraph, g.ImagePath, g.PixelX, g.PixelY, out Vector3 modelPoint, out _))
+                {
+                    failed++;
+                    continue;
+                }
+
+                g.ModelPoint = modelPoint;
+                gcps[i] = g;
+                refreshed++;
+            }
+
+            return refreshed;
+        }
+
+        private static int FindGcpIndexById(IList<GcpEntryDTO> gcps, string id)
+        {
+            for (int i = 0; i < gcps.Count; i++)
+            {
+                if (string.Equals(gcps[i].Id, id, StringComparison.OrdinalIgnoreCase))
+                    return i;
+            }
+            return -1;
+        }
+
+        private static GcpEntryDTO CloneGcp(GcpEntryDTO g)
+        {
+            return new GcpEntryDTO
+            {
+                Id = g.Id,
+                ImagePath = g.ImagePath,
+                PixelX = g.PixelX,
+                PixelY = g.PixelY,
+                InputIsLatLon = g.InputIsLatLon,
+                InputLonOrX = g.InputLonOrX,
+                InputLatOrY = g.InputLatOrY,
+                InputZ = g.InputZ,
+                ModelPoint = g.ModelPoint,
+                WorldPoint = g.WorldPoint,
+                Residual = g.Residual,
+                Enabled = g.Enabled
+            };
+        }
+
+        private static PendingGcpEntryDTO ClonePendingGcp(PendingGcpEntryDTO g)
+        {
+            return new PendingGcpEntryDTO
+            {
+                Id = g.Id,
+                ImagePath = g.ImagePath,
+                PixelX = g.PixelX,
+                PixelY = g.PixelY,
+                InputIsLatLon = g.InputIsLatLon,
+                InputLonOrX = g.InputLonOrX,
+                InputLatOrY = g.InputLatOrY,
+                InputZ = g.InputZ,
+                WorldPoint = g.WorldPoint,
+                Enabled = g.Enabled,
+                Status = g.Status,
+                LastError = g.LastError
+            };
         }
 
         private static CameraObject? FindCameraByImage(SceneGraph sceneGraph, string imagePath)

@@ -22,6 +22,7 @@ namespace Deep3DStudio
         private System.Numerics.Vector3 _geoModel = System.Numerics.Vector3.Zero;
         private System.Numerics.Vector3 _geoWorld = System.Numerics.Vector3.Zero;
         private string _geoSelectedGcpId = string.Empty;
+        private string _geoSelectedPendingId = string.Empty;
         private string _geoStatus = "No solve yet.";
         private float _geoDemCellSize = 0.5f;
         private int _geoPreviewTexture = -1;
@@ -39,6 +40,8 @@ namespace Deep3DStudio
                 DrawToolbarButton("##GeoOpen", IconType.Georef, false, () => _showGeoreferenceWindow = true, "GCP Editor", size);
                 ImGui.SameLine();
                 DrawToolbarButton("##GeoSolve", IconType.Residuals, false, SolveGeoFromRuntime, "Solve from GCP", size);
+                ImGui.SameLine();
+                DrawToolbarButton("##GeoResolvePending", IconType.Residuals, false, ResolvePendingGeoGcpsFromRuntime, "Resolve pending GCP", size);
                 ImGui.SameLine();
                 DrawToolbarButton("##GeoDem", IconType.Dem, false, OnExportDemImGui, "Export DEM", size);
                 ImGui.SameLine();
@@ -71,6 +74,8 @@ namespace Deep3DStudio
             ImGui.Checkbox("Input Lat/Lon", ref _geoInputLatLon);
             ImGui.SameLine();
             if (ImGui.Button("Solve GCP")) SolveGeoFromRuntime();
+            ImGui.SameLine();
+            if (ImGui.Button("Resolve Pending")) ResolvePendingGeoGcpsFromRuntime();
             ImGui.SameLine();
             if (ImGui.Button("Reset Georef"))
             {
@@ -141,8 +146,14 @@ namespace Deep3DStudio
             if (ImGui.Button("Add/Update GCP"))
                 AddOrUpdateGeoGcp();
             ImGui.SameLine();
+            if (ImGui.Button("Add/Update Pending"))
+                AddOrUpdateGeoPendingGcp();
+            ImGui.SameLine();
             if (ImGui.Button("Remove Selected GCP"))
                 RemoveSelectedGeoGcp();
+            ImGui.SameLine();
+            if (ImGui.Button("Remove Selected Pending"))
+                RemoveSelectedGeoPendingGcp();
 
             ImGui.Separator();
             if (ImGui.BeginTable("##GeoGcps", 8, ImGuiTableFlags.RowBg | ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY, new System.Numerics.Vector2(0, 220)))
@@ -167,6 +178,7 @@ namespace Deep3DStudio
                     if (ImGui.Selectable(shortId, selected, ImGuiSelectableFlags.SpanAllColumns))
                     {
                         _geoSelectedGcpId = g.Id;
+                        _geoSelectedPendingId = string.Empty;
                         _geoPixel = new System.Numerics.Vector2(g.PixelX, g.PixelY);
                         _geoModel = new System.Numerics.Vector3(g.ModelPoint.X, g.ModelPoint.Y, g.ModelPoint.Z);
                         _geoWorld = new System.Numerics.Vector3((float)g.InputLonOrX, (float)g.InputLatOrY, (float)g.InputZ);
@@ -185,6 +197,54 @@ namespace Deep3DStudio
                     {
                         g.Enabled = enabled;
                         GeoReferenceRuntime.AddOrUpdateGcp(g);
+                    }
+                }
+                ImGui.EndTable();
+            }
+
+            ImGui.Separator();
+            ImGui.TextUnformatted(GeoReferenceService.FormatPendingStats(GeoReferenceRuntime.PendingGcps));
+            if (ImGui.BeginTable("##GeoPending", 7, ImGuiTableFlags.RowBg | ImGuiTableFlags.Borders | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY, new System.Numerics.Vector2(0, 160)))
+            {
+                ImGui.TableSetupColumn("ID");
+                ImGui.TableSetupColumn("Image");
+                ImGui.TableSetupColumn("Px");
+                ImGui.TableSetupColumn("Py");
+                ImGui.TableSetupColumn("World");
+                ImGui.TableSetupColumn("Status");
+                ImGui.TableSetupColumn("On");
+                ImGui.TableHeadersRow();
+
+                var pending = GeoReferenceRuntime.PendingGcps.ToList();
+                foreach (var g in pending)
+                {
+                    ImGui.TableNextRow();
+                    ImGui.TableSetColumnIndex(0);
+                    bool selected = _geoSelectedPendingId == g.Id;
+                    string shortId = g.Id.Length > 8 ? g.Id.Substring(0, 8) : g.Id;
+                    if (ImGui.Selectable(shortId, selected, ImGuiSelectableFlags.SpanAllColumns))
+                    {
+                        _geoSelectedPendingId = g.Id;
+                        _geoSelectedGcpId = string.Empty;
+                        _geoPixel = new System.Numerics.Vector2(g.PixelX, g.PixelY);
+                        _geoWorld = new System.Numerics.Vector3((float)g.InputLonOrX, (float)g.InputLatOrY, (float)g.InputZ);
+                        _geoInputLatLon = g.InputIsLatLon;
+                        _geoModel = System.Numerics.Vector3.Zero;
+                    }
+
+                    ImGui.TableSetColumnIndex(1); ImGui.TextUnformatted(Path.GetFileName(g.ImagePath));
+                    ImGui.TableSetColumnIndex(2); ImGui.Text($"{g.PixelX:F1}");
+                    ImGui.TableSetColumnIndex(3); ImGui.Text($"{g.PixelY:F1}");
+                    ImGui.TableSetColumnIndex(4); ImGui.Text($"{g.WorldPoint.X:F2},{g.WorldPoint.Y:F2},{g.WorldPoint.Z:F2}");
+                    ImGui.TableSetColumnIndex(5); ImGui.TextUnformatted(g.Status);
+                    if (!string.IsNullOrWhiteSpace(g.LastError) && ImGui.IsItemHovered())
+                        ImGui.SetTooltip(g.LastError);
+                    ImGui.TableSetColumnIndex(6);
+                    bool enabled = g.Enabled;
+                    if (ImGui.Checkbox($"##pg{g.Id}", ref enabled))
+                    {
+                        g.Enabled = enabled;
+                        GeoReferenceRuntime.AddOrUpdatePendingGcp(g);
                     }
                 }
                 ImGui.EndTable();
@@ -279,7 +339,57 @@ namespace Deep3DStudio
             GeoReferenceRuntime.SetGeoReference(geo);
             _isDirty = true;
             UpdateTitle();
+            _geoSelectedPendingId = string.Empty;
             _geoStatus = "GCP saved.";
+        }
+
+        private void AddOrUpdateGeoPendingGcp()
+        {
+            if (_geoImageIndex < 0 || _geoImageIndex >= _loadedImages.Count)
+            {
+                _geoStatus = "Select an image first.";
+                return;
+            }
+
+            string imagePath = _loadedImages[_geoImageIndex].FilePath;
+            if (!GeoReferenceService.TryNormalizeInputCoordinate(
+                _geoEpsg,
+                _geoInputLatLon,
+                _geoWorld.X,
+                _geoWorld.Y,
+                _geoWorld.Z,
+                out Vector3 worldPoint,
+                out string error))
+            {
+                _geoStatus = error;
+                return;
+            }
+
+            string id = string.IsNullOrWhiteSpace(_geoSelectedPendingId) ? Guid.NewGuid().ToString("N") : _geoSelectedPendingId;
+            var pending = new PendingGcpEntryDTO
+            {
+                Id = id,
+                ImagePath = imagePath,
+                PixelX = _geoPixel.X,
+                PixelY = _geoPixel.Y,
+                InputIsLatLon = _geoInputLatLon,
+                InputLonOrX = _geoWorld.X,
+                InputLatOrY = _geoWorld.Y,
+                InputZ = _geoWorld.Z,
+                WorldPoint = worldPoint,
+                Enabled = true,
+                Status = "Pending",
+                LastError = string.Empty
+            };
+
+            GeoReferenceRuntime.AddOrUpdatePendingGcp(pending);
+            var geo = GeoReferenceRuntime.GeoReference;
+            geo.ProjectCrsEpsg = string.IsNullOrWhiteSpace(_geoEpsg) ? "EPSG:4326" : _geoEpsg.Trim();
+            GeoReferenceRuntime.SetGeoReference(geo);
+            _isDirty = true;
+            UpdateTitle();
+            _geoSelectedGcpId = string.Empty;
+            _geoStatus = "Pending GCP saved.";
         }
 
         private void RemoveSelectedGeoGcp()
@@ -293,18 +403,34 @@ namespace Deep3DStudio
             _geoStatus = "GCP removed.";
         }
 
+        private void RemoveSelectedGeoPendingGcp()
+        {
+            if (string.IsNullOrWhiteSpace(_geoSelectedPendingId))
+                return;
+            GeoReferenceRuntime.RemovePendingGcp(_geoSelectedPendingId);
+            _geoSelectedPendingId = string.Empty;
+            _isDirty = true;
+            UpdateTitle();
+            _geoStatus = "Pending GCP removed.";
+        }
+
         private void SolveGeoFromRuntime()
         {
-            var gcps = GeoReferenceRuntime.Gcps.ToList();
+            var geo = GeoReferenceRuntime.GeoReference;
+            geo.ProjectCrsEpsg = string.IsNullOrWhiteSpace(_geoEpsg) ? "EPSG:4326" : _geoEpsg.Trim();
+            GeoReferenceRuntime.SetGeoReference(geo);
+
+            var pending = GeoReferenceRuntime.PendingGcps.Select(ClonePendingGcp).ToList();
+            var gcps = GeoReferenceRuntime.Gcps.Select(CloneGcp).ToList();
+            var resolveSummary = GeoReferenceService.ResolvePendingGcpsFromScene(_sceneGraph, pending, gcps, geo.ProjectCrsEpsg);
+            GeoReferenceRuntime.SetPendingGcps(pending);
+            GeoReferenceRuntime.SetGcps(gcps);
+
             if (!gcps.Any())
             {
                 _geoStatus = "No GCP defined.";
                 return;
             }
-
-            var geo = GeoReferenceRuntime.GeoReference;
-            geo.ProjectCrsEpsg = string.IsNullOrWhiteSpace(_geoEpsg) ? "EPSG:4326" : _geoEpsg.Trim();
-            GeoReferenceRuntime.SetGeoReference(geo);
 
             if (!GeoReferenceService.TrySolveModelToWorldFromGcps(gcps, out Matrix4 m, out double rms, out string error))
             {
@@ -316,7 +442,36 @@ namespace Deep3DStudio
             GeoReferenceRuntime.SetGcps(gcps);
             _isDirty = true;
             UpdateTitle();
-            _geoStatus = $"Solved. RMS {rms:F6}";
+            _geoStatus = $"Solved. RMS {rms:F6}. Pending resolved: {resolveSummary.ResolvedCount}, failed: {resolveSummary.FailedCount}";
+        }
+
+        private void ResolvePendingGeoGcpsFromRuntime()
+        {
+            var geo = GeoReferenceRuntime.GeoReference;
+            geo.ProjectCrsEpsg = string.IsNullOrWhiteSpace(_geoEpsg) ? "EPSG:4326" : _geoEpsg.Trim();
+            GeoReferenceRuntime.SetGeoReference(geo);
+
+            var pending = GeoReferenceRuntime.PendingGcps.Select(ClonePendingGcp).ToList();
+            var gcps = GeoReferenceRuntime.Gcps.Select(CloneGcp).ToList();
+            var summary = GeoReferenceService.ResolvePendingGcpsFromScene(_sceneGraph, pending, gcps, geo.ProjectCrsEpsg);
+            GeoReferenceRuntime.SetPendingGcps(pending);
+            GeoReferenceRuntime.SetGcps(gcps);
+            _isDirty = true;
+            UpdateTitle();
+            _geoStatus = $"Pending resolved: {summary.ResolvedCount}, failed: {summary.FailedCount}.";
+        }
+
+        private void TryAutoRefineGeoreferenceFromScene(string reason)
+        {
+            bool hasContext = GeoReferenceRuntime.Gcps.Count > 0 || GeoReferenceRuntime.PendingGcps.Count > 0;
+            if (!hasContext)
+                return;
+
+            var summary = GeoReferenceService.TryAutoRefineGeoreferenceAfterGeometryChange(_sceneGraph, keepPreviousTransformOnFailure: true);
+            _isDirty = true;
+            UpdateTitle();
+            _geoStatus = $"Auto-georef ({reason}): {summary.Message} Pending resolved={summary.PendingResolved}, failed={summary.PendingFailed}";
+            _logBuffer += $"Auto-georef ({reason}): {summary.Message}\n";
         }
 
         private void OnExportDemImGui()
@@ -437,6 +592,44 @@ namespace Deep3DStudio
             foreach (char c in Path.GetInvalidFileNameChars())
                 name = name.Replace(c, '_');
             return string.IsNullOrWhiteSpace(name) ? "object" : name;
+        }
+
+        private static GcpEntryDTO CloneGcp(GcpEntryDTO g)
+        {
+            return new GcpEntryDTO
+            {
+                Id = g.Id,
+                ImagePath = g.ImagePath,
+                PixelX = g.PixelX,
+                PixelY = g.PixelY,
+                InputIsLatLon = g.InputIsLatLon,
+                InputLonOrX = g.InputLonOrX,
+                InputLatOrY = g.InputLatOrY,
+                InputZ = g.InputZ,
+                ModelPoint = g.ModelPoint,
+                WorldPoint = g.WorldPoint,
+                Residual = g.Residual,
+                Enabled = g.Enabled
+            };
+        }
+
+        private static PendingGcpEntryDTO ClonePendingGcp(PendingGcpEntryDTO g)
+        {
+            return new PendingGcpEntryDTO
+            {
+                Id = g.Id,
+                ImagePath = g.ImagePath,
+                PixelX = g.PixelX,
+                PixelY = g.PixelY,
+                InputIsLatLon = g.InputIsLatLon,
+                InputLonOrX = g.InputLonOrX,
+                InputLatOrY = g.InputLatOrY,
+                InputZ = g.InputZ,
+                WorldPoint = g.WorldPoint,
+                Enabled = g.Enabled,
+                Status = g.Status,
+                LastError = g.LastError
+            };
         }
     }
 }

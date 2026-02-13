@@ -592,6 +592,11 @@ namespace Deep3DStudio
             solveBtn.Clicked += (s, e) => OnSolveGeoreferenceFromCurrentGcps();
             toolbar.Insert(solveBtn, -1);
 
+            var resolvePendingBtn = new ToolButton(AppIconFactory.GenerateIcon("residuals", iconSize), "Resolve Pending");
+            resolvePendingBtn.TooltipText = "Risolvi i GCP pending (2D+World) campionando il punto modello dalla scena";
+            resolvePendingBtn.Clicked += (s, e) => OnResolvePendingGcpsFromCurrentScene();
+            toolbar.Insert(resolvePendingBtn, -1);
+
             var demBtn = new ToolButton(AppIconFactory.GenerateIcon("dem", iconSize), "DEM");
             demBtn.TooltipText = "Esporta DEM (GeoTIFF + ASCII Grid)";
             demBtn.Clicked += (s, e) => OnExportDem(null, EventArgs.Empty);

@@ -8,11 +8,13 @@ namespace Deep3DStudio.Model
     {
         private static ProjectGeoReferenceDTO _geoReference = new ProjectGeoReferenceDTO();
         private static readonly List<GcpEntryDTO> _gcps = new List<GcpEntryDTO>();
+        private static readonly List<PendingGcpEntryDTO> _pendingGcps = new List<PendingGcpEntryDTO>();
 
         public static event EventHandler? Changed;
 
         public static ProjectGeoReferenceDTO GeoReference => _geoReference;
         public static IReadOnlyList<GcpEntryDTO> Gcps => _gcps;
+        public static IReadOnlyList<PendingGcpEntryDTO> PendingGcps => _pendingGcps;
 
         public static bool HasActiveGeoreference =>
             _geoReference.Enabled &&
@@ -23,6 +25,7 @@ namespace Deep3DStudio.Model
         {
             _geoReference = new ProjectGeoReferenceDTO();
             _gcps.Clear();
+            _pendingGcps.Clear();
             Changed?.Invoke(null, EventArgs.Empty);
         }
 
@@ -32,6 +35,9 @@ namespace Deep3DStudio.Model
             _gcps.Clear();
             if (state.Gcps != null)
                 _gcps.AddRange(state.Gcps);
+            _pendingGcps.Clear();
+            if (state.PendingGcps != null)
+                _pendingGcps.AddRange(state.PendingGcps);
             Changed?.Invoke(null, EventArgs.Empty);
         }
 
@@ -39,6 +45,7 @@ namespace Deep3DStudio.Model
         {
             state.GeoReference = CloneGeoReference(_geoReference);
             state.Gcps = CloneGcps(_gcps);
+            state.PendingGcps = ClonePendingGcps(_pendingGcps);
         }
 
         public static void SetGeoReference(ProjectGeoReferenceDTO geoReference)
@@ -54,6 +61,13 @@ namespace Deep3DStudio.Model
             Changed?.Invoke(null, EventArgs.Empty);
         }
 
+        public static void SetPendingGcps(IEnumerable<PendingGcpEntryDTO> pendingGcps)
+        {
+            _pendingGcps.Clear();
+            _pendingGcps.AddRange(pendingGcps);
+            Changed?.Invoke(null, EventArgs.Empty);
+        }
+
         public static void AddOrUpdateGcp(GcpEntryDTO gcp)
         {
             int idx = _gcps.FindIndex(g => string.Equals(g.Id, gcp.Id, StringComparison.OrdinalIgnoreCase));
@@ -64,9 +78,25 @@ namespace Deep3DStudio.Model
             Changed?.Invoke(null, EventArgs.Empty);
         }
 
+        public static void AddOrUpdatePendingGcp(PendingGcpEntryDTO pendingGcp)
+        {
+            int idx = _pendingGcps.FindIndex(g => string.Equals(g.Id, pendingGcp.Id, StringComparison.OrdinalIgnoreCase));
+            if (idx >= 0)
+                _pendingGcps[idx] = pendingGcp;
+            else
+                _pendingGcps.Add(pendingGcp);
+            Changed?.Invoke(null, EventArgs.Empty);
+        }
+
         public static void RemoveGcp(string id)
         {
             _gcps.RemoveAll(g => string.Equals(g.Id, id, StringComparison.OrdinalIgnoreCase));
+            Changed?.Invoke(null, EventArgs.Empty);
+        }
+
+        public static void RemovePendingGcp(string id)
+        {
+            _pendingGcps.RemoveAll(g => string.Equals(g.Id, id, StringComparison.OrdinalIgnoreCase));
             Changed?.Invoke(null, EventArgs.Empty);
         }
 
@@ -129,6 +159,30 @@ namespace Deep3DStudio.Model
                     WorldPoint = g.WorldPoint,
                     Residual = g.Residual,
                     Enabled = g.Enabled
+                });
+            }
+            return result;
+        }
+
+        private static List<PendingGcpEntryDTO> ClonePendingGcps(IEnumerable<PendingGcpEntryDTO> src)
+        {
+            var result = new List<PendingGcpEntryDTO>();
+            foreach (var g in src)
+            {
+                result.Add(new PendingGcpEntryDTO
+                {
+                    Id = g.Id,
+                    ImagePath = g.ImagePath,
+                    PixelX = g.PixelX,
+                    PixelY = g.PixelY,
+                    InputIsLatLon = g.InputIsLatLon,
+                    InputLonOrX = g.InputLonOrX,
+                    InputLatOrY = g.InputLatOrY,
+                    InputZ = g.InputZ,
+                    WorldPoint = g.WorldPoint,
+                    Enabled = g.Enabled,
+                    Status = g.Status,
+                    LastError = g.LastError
                 });
             }
             return result;

@@ -15,6 +15,7 @@ namespace Deep3DStudio.Model
         public SceneGraphDTO Scene { get; set; } = new SceneGraphDTO();
         public ProjectGeoReferenceDTO GeoReference { get; set; } = new ProjectGeoReferenceDTO();
         public List<GcpEntryDTO> Gcps { get; set; } = new List<GcpEntryDTO>();
+        public List<PendingGcpEntryDTO> PendingGcps { get; set; } = new List<PendingGcpEntryDTO>();
         public DateTime Created { get; set; } = DateTime.Now;
         public DateTime LastModified { get; set; } = DateTime.Now;
     }
@@ -47,6 +48,25 @@ namespace Deep3DStudio.Model
 
         public float Residual { get; set; }
         public bool Enabled { get; set; } = true;
+    }
+
+    public class PendingGcpEntryDTO
+    {
+        public string Id { get; set; } = Guid.NewGuid().ToString("N");
+        public string ImagePath { get; set; } = "";
+        public float PixelX { get; set; }
+        public float PixelY { get; set; }
+        public bool InputIsLatLon { get; set; }
+        public double InputLonOrX { get; set; }
+        public double InputLatOrY { get; set; }
+        public double InputZ { get; set; }
+
+        [JsonConverter(typeof(Vector3Converter))]
+        public Vector3 WorldPoint { get; set; }
+
+        public bool Enabled { get; set; } = true;
+        public string Status { get; set; } = "Pending";
+        public string LastError { get; set; } = "";
     }
 
     public class SceneGraphDTO

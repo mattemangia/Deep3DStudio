@@ -84,6 +84,8 @@ namespace Deep3DStudio
                     }
                 }
 
+                TryAutoRefineGeoreferenceFromScene(label);
+
                 _viewport.QueueDraw();
                 _sceneTreeView.RefreshTree();
                 _statusLabel.Text = $"{label} complete.";
@@ -257,6 +259,7 @@ namespace Deep3DStudio
             var refinedObj = new MeshObject("Refined Mesh", refinedMesh);
             _sceneGraph.AddObject(refinedObj);
             _sceneGraph.Select(refinedObj);
+            TryAutoRefineGeoreferenceFromScene("selection refinement");
             _sceneTreeView.RefreshTree();
             _viewport.FocusOnSelection();
             _viewport.QueueDraw();
@@ -483,6 +486,8 @@ namespace Deep3DStudio
                 var meshObj = new Scene.MeshObject($"Mesh_{_sceneGraph.GetAllObjects().Count}", mesh);
                 _sceneGraph.AddObject(meshObj);
             }
+
+            TryAutoRefineGeoreferenceFromScene("workflow result");
 
             _sceneTreeView.RefreshTree();
             _viewport.QueueDraw();

@@ -15,6 +15,7 @@ namespace Deep3DStudio.UI
         private readonly SceneGraph _sceneGraph;
         private readonly List<ProjectImage> _images;
         private readonly List<GcpEntryDTO> _workingGcps = new List<GcpEntryDTO>();
+        private readonly List<PendingGcpEntryDTO> _workingPendingGcps = new List<PendingGcpEntryDTO>();
 
         private readonly ComboBoxText _imageCombo = new ComboBoxText();
         private readonly Entry _epsgEntry = new Entry();
@@ -34,6 +35,9 @@ namespace Deep3DStudio.UI
         private readonly ListStore _gcpStore = new ListStore(
             typeof(string), typeof(string), typeof(string), typeof(string), typeof(string), typeof(string), typeof(string), typeof(bool));
         private readonly TreeView _gcpTree = new TreeView();
+        private readonly ListStore _pendingStore = new ListStore(
+            typeof(string), typeof(string), typeof(string), typeof(string), typeof(string), typeof(string), typeof(bool));
+        private readonly TreeView _pendingTree = new TreeView();
 
         private Pixbuf? _fullPixbuf;
         private Pixbuf? _displayPixbuf;
@@ -42,6 +46,7 @@ namespace Deep3DStudio.UI
         private int _displayWidth;
         private int _displayHeight;
         private string? _selectedGcpId;
+        private string? _selectedPendingGcpId;
 
         public GeoReferenceDialog(Gtk.Window parent, SceneGraph sceneGraph, List<ProjectImage> images)
             : base("Georeferenziazione (GCP)", parent, DialogFlags.Modal | DialogFlags.DestroyWithParent)
@@ -49,6 +54,7 @@ namespace Deep3DStudio.UI
             _sceneGraph = sceneGraph;
             _images = images ?? new List<ProjectImage>();
             _workingGcps.AddRange(GeoReferenceRuntime.Gcps.Select(CloneGcp));
+            _workingPendingGcps.AddRange(GeoReferenceRuntime.PendingGcps.Select(ClonePendingGcp));
 
             SetDefaultSize(1100, 760);
             AddButton("Chiudi", ResponseType.Close);
@@ -56,6 +62,7 @@ namespace Deep3DStudio.UI
             BuildUi();
             LoadFromRuntime();
             RefreshGcpTable();
+            RefreshPendingTable();
             ShowAll();
         }
 
@@ -72,6 +79,9 @@ namespace Deep3DStudio.UI
             var solveBtn = new Button("Solve GCP");
             solveBtn.Clicked += (s, e) => SolveAndApply();
             topRow.PackStart(solveBtn, false, false, 0);
+            var resolvePendingBtn = new Button("Resolve Pending");
+            resolvePendingBtn.Clicked += (s, e) => ResolvePendingGcps();
+            topRow.PackStart(resolvePendingBtn, false, false, 0);
             var clearBtn = new Button("Reset Georef");
             clearBtn.Clicked += (s, e) => ResetGeoreference();
             topRow.PackStart(clearBtn, false, false, 0);
@@ -121,9 +131,18 @@ namespace Deep3DStudio.UI
             var addBtn = new Button("Aggiungi/Update GCP");
             addBtn.Clicked += (s, e) => AddOrUpdateGcp();
             formButtons.PackStart(addBtn, false, false, 0);
+            var addPendingBtn = new Button("Aggiungi/Update Pending");
+            addPendingBtn.Clicked += (s, e) => AddOrUpdatePendingGcp();
+            formButtons.PackStart(addPendingBtn, false, false, 0);
             var removeBtn = new Button("Rimuovi selezionato");
             removeBtn.Clicked += (s, e) => RemoveSelectedGcp();
             formButtons.PackStart(removeBtn, false, false, 0);
+            var removePendingBtn = new Button("Rimuovi pending selezionato");
+            removePendingBtn.Clicked += (s, e) => RemoveSelectedPendingGcp();
+            formButtons.PackStart(removePendingBtn, false, false, 0);
+            var resolvePendingBottomBtn = new Button("Resolve Pending");
+            resolvePendingBottomBtn.Clicked += (s, e) => ResolvePendingGcps();
+            formButtons.PackStart(resolvePendingBottomBtn, false, false, 0);
             var clearFieldsBtn = new Button("Pulisci campi");
             clearFieldsBtn.Clicked += (s, e) => ClearInputFields();
             formButtons.PackStart(clearFieldsBtn, false, false, 0);
@@ -155,6 +174,30 @@ namespace Deep3DStudio.UI
             gcpScroll.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
             gcpScroll.Add(_gcpTree);
             right.PackStart(gcpScroll, true, true, 0);
+
+            right.PackStart(new Label("Pending GCP (2D + World)"), false, false, 0);
+            _pendingTree.Model = _pendingStore;
+            _pendingTree.HeadersVisible = true;
+            AddColumn(_pendingTree, "ID", 0, 90);
+            AddColumn(_pendingTree, "Image", 1, 130);
+            AddColumn(_pendingTree, "Px", 2, 75);
+            AddColumn(_pendingTree, "Py", 3, 75);
+            AddColumn(_pendingTree, "World XYZ", 4, 190);
+            AddColumn(_pendingTree, "Status", 5, 90);
+            var pendingEnabledCol = new TreeViewColumn { Title = "On" };
+            var pendingToggle = new CellRendererToggle();
+            pendingEnabledCol.PackStart(pendingToggle, true);
+            pendingEnabledCol.AddAttribute(pendingToggle, "active", 6);
+            _pendingTree.AppendColumn(pendingEnabledCol);
+
+            _pendingTree.Selection.Changed += (s, e) => LoadSelectedPendingGcpToFields();
+            pendingToggle.Toggled += OnPendingGcpToggleEnabled;
+
+            var pendingScroll = new ScrolledWindow();
+            pendingScroll.SetPolicy(PolicyType.Automatic, PolicyType.Automatic);
+            pendingScroll.Add(_pendingTree);
+            pendingScroll.SetSizeRequest(-1, 180);
+            right.PackStart(pendingScroll, false, true, 0);
 
             hSplit.Position = 680;
         }
@@ -298,7 +341,64 @@ namespace Deep3DStudio.UI
 
             RefreshGcpTable();
             SyncRuntime();
+            _selectedPendingGcpId = null;
             _statsLabel.Text = $"GCP {(existing >= 0 ? "aggiornato" : "aggiunto")}.";
+            ClearInputFields();
+        }
+
+        private void AddOrUpdatePendingGcp()
+        {
+            int imageIdx = _imageCombo.Active;
+            if (imageIdx < 0 || imageIdx >= _images.Count)
+            {
+                _statsLabel.Text = "Seleziona un'immagine.";
+                return;
+            }
+
+            if (!TryReadFloat(_pixelXEntry.Text, out float px) ||
+                !TryReadFloat(_pixelYEntry.Text, out float py) ||
+                !TryReadDouble(_worldXEntry.Text, out double wxInput) ||
+                !TryReadDouble(_worldYEntry.Text, out double wyInput) ||
+                !TryReadDouble(_worldZEntry.Text, out double wzInput))
+            {
+                _statsLabel.Text = "Per il pending servono Pixel e World.";
+                return;
+            }
+
+            string epsg = string.IsNullOrWhiteSpace(_epsgEntry.Text) ? "EPSG:4326" : _epsgEntry.Text.Trim();
+            bool latLon = _inputLatLonCheck.Active;
+            if (!GeoReferenceService.TryNormalizeInputCoordinate(epsg, latLon, wxInput, wyInput, wzInput, out Vector3 worldPoint, out string err))
+            {
+                _statsLabel.Text = err;
+                return;
+            }
+
+            var pending = new PendingGcpEntryDTO
+            {
+                Id = _selectedPendingGcpId ?? Guid.NewGuid().ToString("N"),
+                ImagePath = _images[imageIdx].FilePath,
+                PixelX = px,
+                PixelY = py,
+                InputIsLatLon = latLon,
+                InputLonOrX = wxInput,
+                InputLatOrY = wyInput,
+                InputZ = wzInput,
+                WorldPoint = worldPoint,
+                Enabled = true,
+                Status = "Pending",
+                LastError = string.Empty
+            };
+
+            int existing = _workingPendingGcps.FindIndex(g => g.Id == pending.Id);
+            if (existing >= 0)
+                _workingPendingGcps[existing] = pending;
+            else
+                _workingPendingGcps.Add(pending);
+
+            RefreshPendingTable();
+            SyncRuntime();
+            _selectedGcpId = null;
+            _statsLabel.Text = $"Pending {(existing >= 0 ? "aggiornato" : "aggiunto")}.";
             ClearInputFields();
         }
 
@@ -312,13 +412,35 @@ namespace Deep3DStudio.UI
             SyncRuntime();
         }
 
+        private void RemoveSelectedPendingGcp()
+        {
+            if (string.IsNullOrWhiteSpace(_selectedPendingGcpId))
+                return;
+            _workingPendingGcps.RemoveAll(g => g.Id == _selectedPendingGcpId);
+            _selectedPendingGcpId = null;
+            RefreshPendingTable();
+            SyncRuntime();
+        }
+
+        private void ResolvePendingGcps()
+        {
+            string epsg = string.IsNullOrWhiteSpace(_epsgEntry.Text) ? "EPSG:4326" : _epsgEntry.Text.Trim();
+            var summary = GeoReferenceService.ResolvePendingGcpsFromScene(_sceneGraph, _workingPendingGcps, _workingGcps, epsg);
+            RefreshPendingTable();
+            RefreshGcpTable();
+            SyncRuntime();
+            _statsLabel.Text = $"Pending risolti: {summary.ResolvedCount}, falliti: {summary.FailedCount}";
+        }
+
         private void SolveAndApply()
         {
             string epsg = string.IsNullOrWhiteSpace(_epsgEntry.Text) ? "EPSG:4326" : _epsgEntry.Text.Trim();
+            GeoReferenceService.ResolvePendingGcpsFromScene(_sceneGraph, _workingPendingGcps, _workingGcps, epsg);
             var geo = GeoReferenceRuntime.GeoReference;
             geo.ProjectCrsEpsg = epsg;
             GeoReferenceRuntime.SetGeoReference(geo);
             GeoReferenceRuntime.SetGcps(_workingGcps);
+            GeoReferenceRuntime.SetPendingGcps(_workingPendingGcps);
 
             if (!GeoReferenceService.TrySolveModelToWorldFromGcps(_workingGcps, out Matrix4 m, out double rms, out string error))
             {
@@ -334,6 +456,7 @@ namespace Deep3DStudio.UI
             GeoReferenceService.UpdateResiduals(_workingGcps, m, out _);
             SyncRuntime();
             RefreshGcpTable();
+            RefreshPendingTable();
             _statsLabel.Text = $"Solve completato. RMS: {rms:F6}";
         }
 
@@ -346,6 +469,7 @@ namespace Deep3DStudio.UI
             foreach (var g in _workingGcps) g.Residual = 0;
             SyncRuntime();
             RefreshGcpTable();
+            RefreshPendingTable();
             _statsLabel.Text = "Georeferenziazione disattivata.";
         }
 
@@ -364,6 +488,21 @@ namespace Deep3DStudio.UI
             }
         }
 
+        private void OnPendingGcpToggleEnabled(object o, ToggledArgs args)
+        {
+            if (_pendingStore.GetIterFromString(out TreeIter iter, args.Path))
+            {
+                string id = (string)_pendingStore.GetValue(iter, 0);
+                var g = _workingPendingGcps.FirstOrDefault(x => x.Id == id);
+                if (g != null)
+                {
+                    g.Enabled = !g.Enabled;
+                    RefreshPendingTable();
+                    SyncRuntime();
+                }
+            }
+        }
+
         private void LoadSelectedGcpToFields()
         {
             if (!_gcpTree.Selection.GetSelected(out TreeIter iter))
@@ -375,6 +514,7 @@ namespace Deep3DStudio.UI
                 return;
 
             _selectedGcpId = g.Id;
+            _selectedPendingGcpId = null;
             int imgIndex = _images.FindIndex(i => SamePath(i.FilePath, g.ImagePath));
             if (imgIndex >= 0)
                 _imageCombo.Active = imgIndex;
@@ -390,6 +530,33 @@ namespace Deep3DStudio.UI
             _inputLatLonCheck.Active = g.InputIsLatLon;
         }
 
+        private void LoadSelectedPendingGcpToFields()
+        {
+            if (!_pendingTree.Selection.GetSelected(out TreeIter iter))
+                return;
+
+            string id = (string)_pendingStore.GetValue(iter, 0);
+            var g = _workingPendingGcps.FirstOrDefault(x => x.Id == id);
+            if (g == null)
+                return;
+
+            _selectedPendingGcpId = g.Id;
+            _selectedGcpId = null;
+            int imgIndex = _images.FindIndex(i => SamePath(i.FilePath, g.ImagePath));
+            if (imgIndex >= 0)
+                _imageCombo.Active = imgIndex;
+
+            _pixelXEntry.Text = g.PixelX.ToString("F2", CultureInfo.InvariantCulture);
+            _pixelYEntry.Text = g.PixelY.ToString("F2", CultureInfo.InvariantCulture);
+            _modelXEntry.Text = "";
+            _modelYEntry.Text = "";
+            _modelZEntry.Text = "";
+            _worldXEntry.Text = g.InputLonOrX.ToString("G17", CultureInfo.InvariantCulture);
+            _worldYEntry.Text = g.InputLatOrY.ToString("G17", CultureInfo.InvariantCulture);
+            _worldZEntry.Text = g.InputZ.ToString("G17", CultureInfo.InvariantCulture);
+            _inputLatLonCheck.Active = g.InputIsLatLon;
+        }
+
         private void RefreshGcpTable()
         {
             _gcpStore.Clear();
@@ -398,14 +565,33 @@ namespace Deep3DStudio.UI
                 string img = System.IO.Path.GetFileName(g.ImagePath);
                 string model = $"{g.ModelPoint.X:F3},{g.ModelPoint.Y:F3},{g.ModelPoint.Z:F3}";
                 string world = $"{g.WorldPoint.X:F3},{g.WorldPoint.Y:F3},{g.WorldPoint.Z:F3}";
-                _gcpStore.AppendValues(g.Id[..Math.Min(8, g.Id.Length)], img, g.PixelX.ToString("F1"), g.PixelY.ToString("F1"), model, world, g.Residual.ToString("F4"), g.Enabled);
+                _gcpStore.AppendValues(g.Id, img, g.PixelX.ToString("F1"), g.PixelY.ToString("F1"), model, world, g.Residual.ToString("F4"), g.Enabled);
             }
             _statsLabel.Text = GeoReferenceService.FormatResidualStats(_workingGcps);
+        }
+
+        private void RefreshPendingTable()
+        {
+            _pendingStore.Clear();
+            foreach (var g in _workingPendingGcps)
+            {
+                string img = System.IO.Path.GetFileName(g.ImagePath);
+                string world = $"{g.WorldPoint.X:F3},{g.WorldPoint.Y:F3},{g.WorldPoint.Z:F3}";
+                _pendingStore.AppendValues(
+                    g.Id,
+                    img,
+                    g.PixelX.ToString("F1"),
+                    g.PixelY.ToString("F1"),
+                    world,
+                    g.Status,
+                    g.Enabled);
+            }
         }
 
         private void ClearInputFields()
         {
             _selectedGcpId = null;
+            _selectedPendingGcpId = null;
             _pixelXEntry.Text = "";
             _pixelYEntry.Text = "";
             _modelXEntry.Text = "";
@@ -422,6 +608,7 @@ namespace Deep3DStudio.UI
             geo.ProjectCrsEpsg = string.IsNullOrWhiteSpace(_epsgEntry.Text) ? "EPSG:4326" : _epsgEntry.Text.Trim();
             GeoReferenceRuntime.SetGeoReference(geo);
             GeoReferenceRuntime.SetGcps(_workingGcps.Select(CloneGcp));
+            GeoReferenceRuntime.SetPendingGcps(_workingPendingGcps.Select(ClonePendingGcp));
         }
 
         private static GcpEntryDTO CloneGcp(GcpEntryDTO g)
@@ -440,6 +627,25 @@ namespace Deep3DStudio.UI
                 WorldPoint = g.WorldPoint,
                 Residual = g.Residual,
                 Enabled = g.Enabled
+            };
+        }
+
+        private static PendingGcpEntryDTO ClonePendingGcp(PendingGcpEntryDTO g)
+        {
+            return new PendingGcpEntryDTO
+            {
+                Id = g.Id,
+                ImagePath = g.ImagePath,
+                PixelX = g.PixelX,
+                PixelY = g.PixelY,
+                InputIsLatLon = g.InputIsLatLon,
+                InputLonOrX = g.InputLonOrX,
+                InputLatOrY = g.InputLatOrY,
+                InputZ = g.InputZ,
+                WorldPoint = g.WorldPoint,
+                Enabled = g.Enabled,
+                Status = g.Status,
+                LastError = g.LastError
             };
         }
 

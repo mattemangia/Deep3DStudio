@@ -372,12 +372,15 @@ namespace Deep3DStudio.Model
         private static void ApplyGcpFlagsToImages(List<ProjectImage> images)
         {
             var gcps = GeoReferenceRuntime.Gcps;
+            var pendingGcps = GeoReferenceRuntime.PendingGcps;
             foreach (var img in images)
             {
-                int count = gcps.Count(g =>
+                int gcpCount = gcps.Count(g =>
                     string.Equals(NormalizePath(g.ImagePath), NormalizePath(img.FilePath), StringComparison.OrdinalIgnoreCase));
-                img.GcpCount = count;
-                img.HasGcps = count > 0;
+                int pendingCount = pendingGcps.Count(g =>
+                    string.Equals(NormalizePath(g.ImagePath), NormalizePath(img.FilePath), StringComparison.OrdinalIgnoreCase));
+                img.GcpCount = gcpCount + pendingCount;
+                img.HasGcps = img.GcpCount > 0;
             }
         }
 

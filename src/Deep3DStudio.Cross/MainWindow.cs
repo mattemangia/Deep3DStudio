@@ -1252,6 +1252,7 @@ namespace Deep3DStudio
                     {
                         if (ImGui.MenuItem("GCP Editor")) _showGeoreferenceWindow = true;
                         if (ImGui.MenuItem("Solve from GCP")) SolveGeoFromRuntime();
+                        if (ImGui.MenuItem("Resolve Pending GCP")) ResolvePendingGeoGcpsFromRuntime();
                         if (ImGui.MenuItem("Export Georeferenced Selection")) OnExportGeoreferencedSelectionImGui();
                         if (ImGui.MenuItem("Generate DEM...")) OnExportDemImGui();
                         ImGui.EndMenu();
@@ -6023,7 +6024,11 @@ namespace Deep3DStudio
                             });
                         }
                     }
-                    EnqueueAction(() => ProgressDialog.Instance.Complete());
+                    EnqueueAction(() =>
+                    {
+                        TryAutoRefineGeoreferenceFromScene("DeepMeshPrior refinement");
+                        ProgressDialog.Instance.Complete();
+                    });
                 }
                 catch (OperationCanceledException)
                 {
@@ -6066,7 +6071,11 @@ namespace Deep3DStudio
                             });
                         }
                     }
-                    EnqueueAction(() => ProgressDialog.Instance.Complete());
+                    EnqueueAction(() =>
+                    {
+                        TryAutoRefineGeoreferenceFromScene("GaussianSDF refinement");
+                        ProgressDialog.Instance.Complete();
+                    });
                 }
                 catch (OperationCanceledException)
                 {
@@ -6109,7 +6118,11 @@ namespace Deep3DStudio
                             });
                         }
                     }
-                    EnqueueAction(() => ProgressDialog.Instance.Complete());
+                    EnqueueAction(() =>
+                    {
+                        TryAutoRefineGeoreferenceFromScene("TripoSF refinement");
+                        ProgressDialog.Instance.Complete();
+                    });
                 }
                 catch (OperationCanceledException)
                 {
@@ -6230,6 +6243,7 @@ namespace Deep3DStudio
 
                                 // Populate depth maps for visualization
                                 PopulateDepthData(result);
+                                TryAutoRefineGeoreferenceFromScene("reconstruction mesh result");
 
                                 ProgressDialog.Instance.Log($"Reconstruction complete. Result classified as mesh: {meshCount} mesh(es).");
                             }
@@ -6401,6 +6415,7 @@ namespace Deep3DStudio
                             }
 
                             PopulateDepthData(result);
+                            TryAutoRefineGeoreferenceFromScene(stepName);
                             ProgressDialog.Instance.Log($"{stepName} complete. Added {result.Meshes.Count} objects.");
                             if (!(ProgressDialog.Instance.CancellationTokenSource?.IsCancellationRequested ?? false))
                                 ProgressDialog.Instance.Complete();
@@ -6513,6 +6528,7 @@ namespace Deep3DStudio
 
             PopulateDepthData(result);
             _viewport.FocusOnSelection();
+            TryAutoRefineGeoreferenceFromScene(stepName);
         }
 
         private void ClearReconstructionObjects()
@@ -6602,6 +6618,7 @@ namespace Deep3DStudio
                             _sceneGraph.AddObject(obj);
                         }
                         _sceneGraph.Select(obj);
+                        TryAutoRefineGeoreferenceFromScene("point cloud meshing");
                         _viewport.FocusOnSelection();
                         ProgressDialog.Instance.Complete();
                     });
@@ -6678,6 +6695,7 @@ namespace Deep3DStudio
                             _sceneGraph.AddObject(obj);
                         }
                         _sceneGraph.Select(obj);
+                        TryAutoRefineGeoreferenceFromScene("NeRF refinement");
                         _viewport.FocusOnSelection();
                         ProgressDialog.Instance.Complete();
                     });

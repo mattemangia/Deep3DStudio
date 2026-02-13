@@ -36,7 +36,14 @@ namespace Deep3DStudio
 
         private void OnSolveGeoreferenceFromCurrentGcps()
         {
-            var gcps = GeoReferenceRuntime.Gcps.ToList();
+            var geo = GeoReferenceRuntime.GeoReference;
+            string epsg = string.IsNullOrWhiteSpace(geo.ProjectCrsEpsg) ? "EPSG:4326" : geo.ProjectCrsEpsg.Trim();
+            var pending = GeoReferenceRuntime.PendingGcps.Select(ClonePendingGcp).ToList();
+            var gcps = GeoReferenceRuntime.Gcps.Select(CloneGcp).ToList();
+            var resolve = GeoReferenceService.ResolvePendingGcpsFromScene(_sceneGraph, pending, gcps, epsg);
+            GeoReferenceRuntime.SetPendingGcps(pending);
+            GeoReferenceRuntime.SetGcps(gcps);
+
             if (!gcps.Any())
             {
                 ShowMessage("Nessun GCP disponibile. Apri l'editor GCP.");
@@ -50,13 +57,39 @@ namespace Deep3DStudio
             }
 
             GeoReferenceRuntime.SetModelToWorldMatrix(m);
-            var geo = GeoReferenceRuntime.GeoReference;
             geo.Enabled = true;
+            geo.ProjectCrsEpsg = epsg;
             GeoReferenceRuntime.SetGeoReference(geo);
             GeoReferenceRuntime.SetGcps(gcps);
             _isDirty = true;
             UpdateTitle();
-            _statusLabel.Text = $"Georeferenziazione aggiornata. RMS {rms:F6}";
+            _statusLabel.Text = $"Georeferenziazione aggiornata. RMS {rms:F6}. Pending risolti: {resolve.ResolvedCount}, falliti: {resolve.FailedCount}";
+        }
+
+        private void OnResolvePendingGcpsFromCurrentScene()
+        {
+            var geo = GeoReferenceRuntime.GeoReference;
+            string epsg = string.IsNullOrWhiteSpace(geo.ProjectCrsEpsg) ? "EPSG:4326" : geo.ProjectCrsEpsg.Trim();
+            var pending = GeoReferenceRuntime.PendingGcps.Select(ClonePendingGcp).ToList();
+            var gcps = GeoReferenceRuntime.Gcps.Select(CloneGcp).ToList();
+            var summary = GeoReferenceService.ResolvePendingGcpsFromScene(_sceneGraph, pending, gcps, epsg);
+            GeoReferenceRuntime.SetPendingGcps(pending);
+            GeoReferenceRuntime.SetGcps(gcps);
+            _isDirty = true;
+            UpdateTitle();
+            _statusLabel.Text = $"Pending GCP risolti: {summary.ResolvedCount}, falliti: {summary.FailedCount}";
+        }
+
+        private void TryAutoRefineGeoreferenceFromScene(string reason)
+        {
+            bool hasContext = GeoReferenceRuntime.Gcps.Count > 0 || GeoReferenceRuntime.PendingGcps.Count > 0;
+            if (!hasContext)
+                return;
+
+            var summary = GeoReferenceService.TryAutoRefineGeoreferenceAfterGeometryChange(_sceneGraph, keepPreviousTransformOnFailure: true);
+            _isDirty = true;
+            UpdateTitle();
+            _statusLabel.Text = $"Auto-georef ({reason}): {summary.Message} Pending resolved={summary.PendingResolved}, failed={summary.PendingFailed}";
         }
 
         private void OnExportDem(object? sender, EventArgs e)
@@ -167,6 +200,44 @@ namespace Deep3DStudio
             foreach (char c in System.IO.Path.GetInvalidFileNameChars())
                 name = name.Replace(c, '_');
             return string.IsNullOrWhiteSpace(name) ? "object" : name;
+        }
+
+        private static GcpEntryDTO CloneGcp(GcpEntryDTO g)
+        {
+            return new GcpEntryDTO
+            {
+                Id = g.Id,
+                ImagePath = g.ImagePath,
+                PixelX = g.PixelX,
+                PixelY = g.PixelY,
+                InputIsLatLon = g.InputIsLatLon,
+                InputLonOrX = g.InputLonOrX,
+                InputLatOrY = g.InputLatOrY,
+                InputZ = g.InputZ,
+                ModelPoint = g.ModelPoint,
+                WorldPoint = g.WorldPoint,
+                Residual = g.Residual,
+                Enabled = g.Enabled
+            };
+        }
+
+        private static PendingGcpEntryDTO ClonePendingGcp(PendingGcpEntryDTO g)
+        {
+            return new PendingGcpEntryDTO
+            {
+                Id = g.Id,
+                ImagePath = g.ImagePath,
+                PixelX = g.PixelX,
+                PixelY = g.PixelY,
+                InputIsLatLon = g.InputIsLatLon,
+                InputLonOrX = g.InputLonOrX,
+                InputLatOrY = g.InputLatOrY,
+                InputZ = g.InputZ,
+                WorldPoint = g.WorldPoint,
+                Enabled = g.Enabled,
+                Status = g.Status,
+                LastError = g.LastError
+            };
         }
 
         private bool TryPromptDouble(string title, string prompt, string defaultValue, out double value)

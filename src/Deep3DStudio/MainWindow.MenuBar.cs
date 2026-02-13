@@ -364,6 +364,10 @@ namespace Deep3DStudio
             solveGeoItem.Activated += (s, e) => OnSolveGeoreferenceFromCurrentGcps();
             georefMenu.Append(solveGeoItem);
 
+            var resolvePendingItem = new MenuItem("_Resolve Pending GCP");
+            resolvePendingItem.Activated += (s, e) => OnResolvePendingGcpsFromCurrentScene();
+            georefMenu.Append(resolvePendingItem);
+
             var exportGeoItem = new MenuItem("_Export Georeferenced Selection");
             exportGeoItem.Activated += (s, e) => OnExportGeoreferencedSelection();
             georefMenu.Append(exportGeoItem);
