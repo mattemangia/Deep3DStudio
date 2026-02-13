@@ -1783,7 +1783,8 @@ namespace Deep3DStudio.CLI
             IList<OpenTK.Mathematics.Vector3> points,
             int targetRes)
         {
-            return VoxelizationUtils.Voxelize(points, targetRes);
+            var result = VoxelizationUtils.Voxelize(points, targetRes);
+            return (result.grid, result.origin, result.voxelSize);
         }
 
         private int RunTestProblematicModels()

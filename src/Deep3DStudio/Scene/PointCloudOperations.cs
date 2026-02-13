@@ -215,7 +215,12 @@ namespace Deep3DStudio.Scene
             float diagonal = (max - min).Length;
             if (diagonal > 0f)
             {
-                float adaptiveMinRadius = Math.Max(0.0001f, diagonal * 0.005f);
+                // Estimate average spacing from volumetric density
+                float volume = (max.X - min.X) * (max.Y - min.Y) * (max.Z - min.Z);
+                float estimatedSpacing = volume > 0 ? (float)Math.Pow(volume / sourcePoints.Length, 1.0 / 3.0) : diagonal * 0.01f;
+
+                // Use the larger of: 1% of diagonal or 2x estimated spacing
+                float adaptiveMinRadius = Math.Max(0.0001f, Math.Max(diagonal * 0.01f, estimatedSpacing * 2.0f));
                 if (neighborRadius < adaptiveMinRadius)
                 {
                     neighborRadius = adaptiveMinRadius;
@@ -289,27 +294,35 @@ namespace Deep3DStudio.Scene
                     continue;
 
                 nearest.Sort((a, b) => a.dist2.CompareTo(b.dist2));
-                int take = Math.Min(pointsPerSeed, nearest.Count);
-                for (int n = 0; n < take && added < maxAdded; n++)
+                // Take up to 3 nearest neighbors, create multiple interpolated points per pair
+                int neighborsTake = Math.Min(3, nearest.Count);
+                int pointsPerNeighbor = Math.Max(1, pointsPerSeed / Math.Max(1, neighborsTake));
+                for (int n = 0; n < neighborsTake && added < maxAdded; n++)
                 {
                     int j = nearest[n].idx;
                     var q = sourcePoints[j];
-                    var mid = (p + q) * 0.5f;
 
-                    outPoints.Add(mid);
-                    if (outColors != null && sourceColors != null)
+                    // Create uniformly distributed interpolated points along the segment
+                    for (int s = 0; s < pointsPerNeighbor && added < maxAdded; s++)
                     {
-                        outColors.Add((sourceColors[i] + sourceColors[j]) * 0.5f);
+                        float t = (s + 1.0f) / (pointsPerNeighbor + 1.0f);
+                        var interpolated = p + t * (q - p);
+
+                        outPoints.Add(interpolated);
+                        if (outColors != null && sourceColors != null)
+                        {
+                            outColors.Add(sourceColors[i] * (1.0f - t) + sourceColors[j] * t);
+                        }
+                        if (outNormals != null && sourceNormals != null)
+                        {
+                            var avg = sourceNormals[i] * (1.0f - t) + sourceNormals[j] * t;
+                            if (avg.LengthSquared > 1e-10f)
+                                avg.Normalize();
+                            outNormals.Add(avg);
+                        }
+                        outConfidence.Add(sourceConfidence != null ? sourceConfidence[i] * (1.0f - t) + sourceConfidence[j] * t : 1.0f);
+                        added++;
                     }
-                    if (outNormals != null && sourceNormals != null)
-                    {
-                        var avg = sourceNormals[i] + sourceNormals[j];
-                        if (avg.LengthSquared > 1e-10f)
-                            avg.Normalize();
-                        outNormals.Add(avg);
-                    }
-                    outConfidence.Add(sourceConfidence != null ? (sourceConfidence[i] + sourceConfidence[j]) * 0.5f : 1.0f);
-                    added++;
                 }
             }
 

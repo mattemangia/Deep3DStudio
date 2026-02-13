@@ -1015,7 +1015,8 @@ namespace Deep3DStudio.Model.AIModels
 
         private static (float[,,]? grid, Vector3 origin, float voxelSize) VoxelizePointClouds(List<MeshData> meshes, int maxRes)
         {
-            return Meshing.VoxelizationUtils.Voxelize(meshes, maxRes);
+            var result = Meshing.VoxelizationUtils.Voxelize(meshes, maxRes);
+            return (result.grid, result.origin, result.voxelSize);
         }
 
         public async Task<SceneResult?> RefineSfMResultAsync(SceneResult sfmResult, Action<string>? statusCallback = null)

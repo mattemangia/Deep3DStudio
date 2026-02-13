@@ -230,8 +230,8 @@ namespace Deep3DStudio
         private float _pcPassMax = 0.5f;
         private System.Numerics.Vector3 _pcRadiusCenter = System.Numerics.Vector3.Zero;
         private float _pcRadius = 1.0f;
-        private float _pcDenseRadius = 0.03f;
-        private int _pcDensePointsPerSeed = 2;
+        private float _pcDenseRadius = 0.05f;
+        private int _pcDensePointsPerSeed = 3;
         private float _pcSkyMinBlue = 0.45f;
         private float _pcSkyMaxRed = 0.60f;
         private float _pcSkyMaxGreen = 0.75f;
@@ -7036,9 +7036,13 @@ namespace Deep3DStudio
             if (meshes.Sum(m => m.Vertices.Count) == 0)
                 return new MeshData();
 
-            var (grid, min, size) = VoxelizePoints(meshes, maxRes);
+            var (grid, colorGrid, min, voxelSize) = VoxelizePoints(meshes, maxRes);
             var mesher = GetMesher(algorithm);
-            return mesher.GenerateMesh(grid, min, size, 0.5f);
+            var result = mesher.GenerateMesh(grid, min, voxelSize, 0.5f);
+
+            ApplyColorsFromGrid(result, colorGrid, min, voxelSize);
+            result = PostProcessMesh(result, voxelSize);
+            return result;
         }
 
         private MeshData ToMeshData(PointCloudObject pointCloud, bool visibleOnly = false)
@@ -7066,63 +7070,37 @@ namespace Deep3DStudio
             };
         }
 
-        private (float[,,], Vector3 min, float voxelSize) VoxelizePoints(List<MeshData> meshes, int maxRes = 200)
+        private (float[,,] grid, Vector3[,,]? colorGrid, Vector3 min, float voxelSize) VoxelizePoints(List<MeshData> meshes, int maxRes = 200)
         {
-            var min = new Vector3(float.MaxValue);
-            var max = new Vector3(float.MinValue);
-            foreach (var m in meshes)
+            var result = VoxelizationUtils.Voxelize(meshes, maxRes);
+            return (result.grid ?? new float[1, 1, 1], result.colorGrid, result.origin, result.voxelSize);
+        }
+
+        private static void ApplyColorsFromGrid(MeshData mesh, Vector3[,,]? colorGrid, Vector3 origin, float voxelSize)
+        {
+            if (colorGrid == null || mesh.Vertices.Count == 0) return;
+            int w = colorGrid.GetLength(0), h = colorGrid.GetLength(1), d = colorGrid.GetLength(2);
+            mesh.Colors.Clear();
+            for (int i = 0; i < mesh.Vertices.Count; i++)
             {
-                foreach (var v in m.Vertices)
-                {
-                    min = Vector3.ComponentMin(min, v);
-                    max = Vector3.ComponentMax(max, v);
-                }
+                var v = mesh.Vertices[i];
+                int gx = Math.Clamp((int)((v.X - origin.X) / voxelSize), 0, w - 1);
+                int gy = Math.Clamp((int)((v.Y - origin.Y) / voxelSize), 0, h - 1);
+                int gz = Math.Clamp((int)((v.Z - origin.Z) / voxelSize), 0, d - 1);
+                mesh.Colors.Add(colorGrid[gx, gy, gz]);
             }
+        }
 
-            float voxelSize = 0.02f;
-            int w = (int)((max.X - min.X) / voxelSize) + 5;
-            int h = (int)((max.Y - min.Y) / voxelSize) + 5;
-            int d = (int)((max.Z - min.Z) / voxelSize) + 5;
+        private static MeshData PostProcessMesh(MeshData mesh, float voxelSize)
+        {
+            if (mesh.Vertices.Count == 0 || mesh.Indices.Count == 0)
+                return mesh;
 
-            if (w > maxRes)
-            {
-                voxelSize *= (w / (float)maxRes);
-                w = maxRes;
-                h = (int)((max.Y - min.Y) / voxelSize) + 5;
-                d = (int)((max.Z - min.Z) / voxelSize) + 5;
-            }
-
-            float[,,] grid = new float[w, h, d];
-
-            foreach (var m in meshes)
-            {
-                foreach (var v in m.Vertices)
-                {
-                    int x = (int)((v.X - min.X) / voxelSize);
-                    int y = (int)((v.Y - min.Y) / voxelSize);
-                    int z = (int)((v.Z - min.Z) / voxelSize);
-                    if (x >= 0 && x < w && y >= 0 && y < h && z >= 0 && z < d)
-                    {
-                        grid[x, y, z] = 1.0f;
-                    }
-                }
-            }
-
-            float[,,] smooth = new float[w, h, d];
-            for (int x = 1; x < w - 1; x++)
-                for (int y = 1; y < h - 1; y++)
-                    for (int z = 1; z < d - 1; z++)
-                    {
-                        if (grid[x, y, z] > 0)
-                        {
-                            smooth[x, y, z] = 1;
-                            smooth[x + 1, y, z] = 1; smooth[x - 1, y, z] = 1;
-                            smooth[x, y + 1, z] = 1; smooth[x, y - 1, z] = 1;
-                            smooth[x, y, z + 1] = 1; smooth[x, y, z - 1] = 1;
-                        }
-                    }
-
-            return (smooth, min, voxelSize);
+            mesh = MeshCleaningTools.RemoveOversizedTriangles(mesh, voxelSize * 10.0f);
+            mesh = MeshCleaningTools.RemoveDegenerateTriangles(mesh);
+            mesh = MeshCleaningTools.RemoveSliverTriangles(mesh, 0.01f);
+            mesh = MeshCleaningTools.RemoveSmallComponentsByRatio(mesh, 0.01f);
+            return mesh;
         }
 
         private void PopulateDepthData(SceneResult result)

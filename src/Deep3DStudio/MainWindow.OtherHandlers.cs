@@ -546,11 +546,11 @@ namespace Deep3DStudio
                 return new MeshData();
             }
 
-            var (grid, min, size) = VoxelizePoints(meshes, maxRes);
+            var (grid, colorGrid, min, voxelSize) = VoxelizePoints(meshes, maxRes);
             int gridX = grid.GetLength(0);
             int gridY = grid.GetLength(1);
             int gridZ = grid.GetLength(2);
-            Console.WriteLine($"[Meshing] Voxel grid: {gridX}x{gridY}x{gridZ}, origin=({min.X:F2},{min.Y:F2},{min.Z:F2}), voxelSize={size:F4}");
+            Console.WriteLine($"[Meshing] Voxel grid: {gridX}x{gridY}x{gridZ}, origin=({min.X:F2},{min.Y:F2},{min.Z:F2}), voxelSize={voxelSize:F4}");
 
             // Count non-zero voxels
             int nonZeroVoxels = 0;
@@ -563,10 +563,40 @@ namespace Deep3DStudio
             IMesher mesher = GetMesher(algorithm);
             Console.WriteLine($"[Meshing] Running {mesher.GetType().Name}...");
 
-            var result = mesher.GenerateMesh(grid, min, size, 0.5f);
+            var result = mesher.GenerateMesh(grid, min, voxelSize, 0.5f);
             Console.WriteLine($"[Meshing] Result: {result.Vertices.Count} vertices, {result.Indices.Count} indices");
 
+            ApplyColorsFromGrid(result, colorGrid, min, voxelSize);
+            result = PostProcessMesh(result, voxelSize);
+
             return result;
+        }
+
+        private static void ApplyColorsFromGrid(MeshData mesh, OpenTK.Mathematics.Vector3[,,]? colorGrid, OpenTK.Mathematics.Vector3 origin, float voxelSize)
+        {
+            if (colorGrid == null || mesh.Vertices.Count == 0) return;
+            int w = colorGrid.GetLength(0), h = colorGrid.GetLength(1), d = colorGrid.GetLength(2);
+            mesh.Colors.Clear();
+            for (int i = 0; i < mesh.Vertices.Count; i++)
+            {
+                var v = mesh.Vertices[i];
+                int gx = Math.Clamp((int)((v.X - origin.X) / voxelSize), 0, w - 1);
+                int gy = Math.Clamp((int)((v.Y - origin.Y) / voxelSize), 0, h - 1);
+                int gz = Math.Clamp((int)((v.Z - origin.Z) / voxelSize), 0, d - 1);
+                mesh.Colors.Add(colorGrid[gx, gy, gz]);
+            }
+        }
+
+        private static MeshData PostProcessMesh(MeshData mesh, float voxelSize)
+        {
+            if (mesh.Vertices.Count == 0 || mesh.Indices.Count == 0)
+                return mesh;
+
+            mesh = MeshCleaningTools.RemoveOversizedTriangles(mesh, voxelSize * 10.0f);
+            mesh = MeshCleaningTools.RemoveDegenerateTriangles(mesh);
+            mesh = MeshCleaningTools.RemoveSliverTriangles(mesh, 0.01f);
+            mesh = MeshCleaningTools.RemoveSmallComponentsByRatio(mesh, 0.01f);
+            return mesh;
         }
 
         private async Task<MeshData?> RefineMeshAsync(

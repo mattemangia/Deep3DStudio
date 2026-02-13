@@ -75,11 +75,12 @@ namespace Deep3DStudio.Meshing
             float[,,] phi = SolvePoissonCG(negDivergence, maxIterations: iterations);
 
             // 5. Generate Mesh from the reconstructed potential field (Phi)
-            // We use Marching Cubes to extract the isosurface at the specified isoLevel.
+            // Use adaptive isoLevel based on phi statistics since the CG output
+            // has arbitrary range unrelated to the caller's isoLevel.
+            float adaptiveIso = ComputeAdaptiveIsoLevel(phi);
 
             // Default white color grid for Marching Cubes extraction
-            // Colors are typically overwritten by the caller (e.g., NeRFModel.GetMesh)
-            // which interpolates colors from the voxel color field
+            // Colors are typically overwritten by the caller (e.g., pipeline ApplyColorsFromGrid)
             Vector3[,,] colorGrid = new Vector3[w, h, d];
             Parallel.For(0, w, x => {
                 for(int y=0; y<h; y++)
@@ -87,7 +88,38 @@ namespace Deep3DStudio.Meshing
                         colorGrid[x,y,z] = new Vector3(1, 1, 1);
             });
 
-            return GeometryUtils.MarchingCubes(phi, colorGrid, origin, new Vector3(voxelSize), isoLevel);
+            return GeometryUtils.MarchingCubes(phi, colorGrid, origin, new Vector3(voxelSize), adaptiveIso);
+        }
+
+        private float ComputeAdaptiveIsoLevel(float[,,] phi)
+        {
+            int w = phi.GetLength(0);
+            int h = phi.GetLength(1);
+            int d = phi.GetLength(2);
+
+            double sum = 0;
+            int count = 0;
+
+            for (int x = 1; x < w - 1; x++)
+            {
+                for (int y = 1; y < h - 1; y++)
+                {
+                    for (int z = 1; z < d - 1; z++)
+                    {
+                        float v = phi[x, y, z];
+                        if (Math.Abs(v) > 1e-12f)
+                        {
+                            sum += v;
+                            count++;
+                        }
+                    }
+                }
+            }
+
+            if (count == 0)
+                return 0.0f;
+
+            return (float)(sum / count);
         }
 
         private Vector3[,,] SmoothVectorField(Vector3[,,] input)

@@ -691,6 +691,45 @@ namespace Deep3DStudio.Scene
             return RemoveUnusedVertices(result);
         }
 
+        /// <summary>
+        /// Removes triangles where any edge exceeds maxEdgeLength.
+        /// Eliminates giant triangles that span across gaps in sparse point clouds.
+        /// </summary>
+        public static MeshData RemoveOversizedTriangles(MeshData mesh, float maxEdgeLength)
+        {
+            var result = new MeshData
+            {
+                Vertices = new List<Vector3>(mesh.Vertices),
+                Colors = new List<Vector3>(mesh.Colors)
+            };
+
+            float maxEdgeSq = maxEdgeLength * maxEdgeLength;
+
+            for (int i = 0; i < mesh.Indices.Count; i += 3)
+            {
+                int i0 = mesh.Indices[i];
+                int i1 = mesh.Indices[i + 1];
+                int i2 = mesh.Indices[i + 2];
+
+                var v0 = mesh.Vertices[i0];
+                var v1 = mesh.Vertices[i1];
+                var v2 = mesh.Vertices[i2];
+
+                float e0sq = (v1 - v0).LengthSquared;
+                float e1sq = (v2 - v1).LengthSquared;
+                float e2sq = (v0 - v2).LengthSquared;
+
+                if (e0sq > maxEdgeSq || e1sq > maxEdgeSq || e2sq > maxEdgeSq)
+                    continue;
+
+                result.Indices.Add(i0);
+                result.Indices.Add(i1);
+                result.Indices.Add(i2);
+            }
+
+            return RemoveUnusedVertices(result);
+        }
+
         #endregion
 
         #region Fix Normals
