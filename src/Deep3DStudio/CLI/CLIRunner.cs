@@ -292,7 +292,7 @@ namespace Deep3DStudio.CLI
             var manager = AIModelManager.Instance;
             try
             {
-                int targetRes = _options.VoxelResolution.HasValue ? Math.Clamp(_options.VoxelResolution.Value, 32, 512) : 128;
+                int targetRes = _options.VoxelResolution.HasValue ? Math.Clamp(_options.VoxelResolution.Value, 32, 512) : 256;
                 Console.WriteLine($"Voxelizing point cloud (targetRes={targetRes})...");
                 var voxelized = VoxelizePointCloud(pc.Points, targetRes);
                 if (voxelized.grid == null)
@@ -1709,7 +1709,7 @@ namespace Deep3DStudio.CLI
 
             try
             {
-                int targetRes = _options.VoxelResolution.HasValue ? Math.Clamp(_options.VoxelResolution.Value, 32, 512) : 128;
+                int targetRes = _options.VoxelResolution.HasValue ? Math.Clamp(_options.VoxelResolution.Value, 32, 512) : 256;
                 Console.WriteLine($"Voxelizing point cloud (targetRes={targetRes})...");
                 var voxelized = VoxelizePointCloud(pc.Points, targetRes);
                 if (voxelized.grid == null)

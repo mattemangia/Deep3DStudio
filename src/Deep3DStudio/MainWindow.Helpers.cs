@@ -535,7 +535,7 @@ namespace Deep3DStudio
             return false;
         }
 
-        private (float[,,] grid, OpenTK.Mathematics.Vector3[,,]? colorGrid, OpenTK.Mathematics.Vector3 origin, float voxelSize) VoxelizePoints(List<MeshData> meshes, int maxRes = 200)
+        private (float[,,] grid, OpenTK.Mathematics.Vector3[,,]? colorGrid, OpenTK.Mathematics.Vector3 origin, float voxelSize) VoxelizePoints(List<MeshData> meshes, int maxRes = 256)
         {
             var result = VoxelizationUtils.Voxelize(meshes, maxRes);
             return (result.grid ?? new float[1, 1, 1], result.colorGrid, result.origin, result.voxelSize);

@@ -761,7 +761,7 @@ namespace Deep3DStudio.Model.AIModels
                             if (currentResult != null && currentResult.Meshes.Count > 0)
                             {
                                 Report("Voxelizing point cloud...", 0.1f);
-                                var voxelized = VoxelizePointClouds(currentResult.Meshes, 200);
+                                var voxelized = VoxelizePointClouds(currentResult.Meshes, 256);
                                 if (voxelized.grid != null)
                                 {
                                     voxelGrid = voxelized.grid;

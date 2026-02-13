@@ -490,7 +490,7 @@ namespace Deep3DStudio
                         return;
                     }
 
-                    int maxRes = (!string.IsNullOrEmpty(workflow) && workflow.Contains("Interior")) ? 500 : 200;
+                    int maxRes = 256;
                     _statusLabel.Text = $"Meshing using {meshingAlgo}...";
 
                     var meshedResult = await Task.Run(() => GenerateMeshFromPointClouds(selectedPointClouds, meshingAlgo, maxRes));
@@ -533,7 +533,7 @@ namespace Deep3DStudio
             }
         }
 
-        private MeshData GenerateMeshFromPointClouds(List<PointCloudObject> pointClouds, MeshingAlgorithm algorithm, int maxRes = 200)
+        private MeshData GenerateMeshFromPointClouds(List<PointCloudObject> pointClouds, MeshingAlgorithm algorithm, int maxRes = 256)
         {
             Console.WriteLine($"[Meshing] GenerateMeshFromPointClouds: {pointClouds.Count} point clouds, algorithm={algorithm}, maxRes={maxRes}");
 
@@ -592,7 +592,7 @@ namespace Deep3DStudio
             if (mesh.Vertices.Count == 0 || mesh.Indices.Count == 0)
                 return mesh;
 
-            mesh = MeshCleaningTools.RemoveOversizedTriangles(mesh, voxelSize * 10.0f);
+            mesh = MeshCleaningTools.RemoveOversizedTriangles(mesh, voxelSize * 50.0f);
             mesh = MeshCleaningTools.RemoveDegenerateTriangles(mesh);
             mesh = MeshCleaningTools.RemoveSliverTriangles(mesh, 0.01f);
             mesh = MeshCleaningTools.RemoveSmallComponentsByRatio(mesh, 0.01f);

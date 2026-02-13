@@ -7030,7 +7030,7 @@ namespace Deep3DStudio
             });
         }
 
-        private MeshData GenerateMeshFromPointClouds(List<PointCloudObject> pointClouds, MeshingAlgorithm algorithm, int maxRes = 200)
+        private MeshData GenerateMeshFromPointClouds(List<PointCloudObject> pointClouds, MeshingAlgorithm algorithm, int maxRes = 256)
         {
             var meshes = pointClouds.Select(pc => ToMeshData(pc, visibleOnly: true)).ToList();
             if (meshes.Sum(m => m.Vertices.Count) == 0)
@@ -7070,7 +7070,7 @@ namespace Deep3DStudio
             };
         }
 
-        private (float[,,] grid, Vector3[,,]? colorGrid, Vector3 min, float voxelSize) VoxelizePoints(List<MeshData> meshes, int maxRes = 200)
+        private (float[,,] grid, Vector3[,,]? colorGrid, Vector3 min, float voxelSize) VoxelizePoints(List<MeshData> meshes, int maxRes = 256)
         {
             var result = VoxelizationUtils.Voxelize(meshes, maxRes);
             return (result.grid ?? new float[1, 1, 1], result.colorGrid, result.origin, result.voxelSize);
@@ -7096,7 +7096,7 @@ namespace Deep3DStudio
             if (mesh.Vertices.Count == 0 || mesh.Indices.Count == 0)
                 return mesh;
 
-            mesh = MeshCleaningTools.RemoveOversizedTriangles(mesh, voxelSize * 10.0f);
+            mesh = MeshCleaningTools.RemoveOversizedTriangles(mesh, voxelSize * 50.0f);
             mesh = MeshCleaningTools.RemoveDegenerateTriangles(mesh);
             mesh = MeshCleaningTools.RemoveSliverTriangles(mesh, 0.01f);
             mesh = MeshCleaningTools.RemoveSmallComponentsByRatio(mesh, 0.01f);

@@ -598,6 +598,10 @@ namespace Deep3DStudio.Model
             if ((edgeTable[cubeIndex] & 1024) != 0) { VertexInterp(isoLevel, poss[2], poss[6], vals[2], vals[6], cVals[2], cVals[6], out vertList[10], out colList[10]); edgeValid[10] = true; }
             if ((edgeTable[cubeIndex] & 2048) != 0) { VertexInterp(isoLevel, poss[3], poss[7], vals[3], vals[7], cVals[3], cVals[7], out vertList[11], out colList[11]); edgeValid[11] = true; }
 
+            // Degenerate threshold: relative to voxel size (not absolute)
+            float minVs = Math.Min(voxelSize.X, Math.Min(voxelSize.Y, voxelSize.Z));
+            float minCrossSq = minVs * minVs * minVs * minVs * 1e-6f;
+
             for (int i = 0; i < 15 && triTable[cubeIndex, i] != -1; i += 3)
             {
                 int e0 = triTable[cubeIndex, i];
@@ -613,7 +617,7 @@ namespace Deep3DStudio.Model
 
                 var edge1 = v1 - v0;
                 var edge2 = v2 - v0;
-                if (Vector3.Cross(edge1, edge2).LengthSquared < 1e-10f) continue;
+                if (Vector3.Cross(edge1, edge2).LengthSquared < minCrossSq) continue;
 
                 verts.Add(v0);
                 cols.Add(colList[e0]);
