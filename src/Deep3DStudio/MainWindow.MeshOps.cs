@@ -944,16 +944,45 @@ namespace Deep3DStudio
                 return;
             }
 
-            int removed = 0;
-            foreach (var pc in selected)
-                removed += PointCloudOperations.VoxelDownsample(pc, _pcVoxelSize);
+            float voxelSize = _pcVoxelSize;
+            ProgressDialog.Instance.Start("Voxel Downsampling...", OperationType.Processing);
 
-            _sceneTreeView.RefreshTree();
-            UpdatePointCloudVisibilityControls();
-            _viewport.QueueDraw();
-            _statusLabel.Text = $"Voxel downsample complete. Removed {removed:N0} points.";
-            _isDirty = true;
-            UpdateTitle();
+            Task.Run(() => {
+                try {
+                    int totalRemoved = 0;
+                    for (int i = 0; i < selected.Count; i++) {
+                        var progress = new Progress<string>(msg => ProgressDialog.Instance.Log(msg));
+                        var cloudProgress = new Progress<float>(p => {
+                            ProgressDialog.Instance.Update((i + p) / (float)selected.Count, $"Processing {selected[i].Name}... {(int)(p*100)}%");
+                        });
+
+                        var removed = PointCloudOperations.VoxelDownsampleAsync(
+                            selected[i],
+                            voxelSize,
+                            ProgressDialog.Instance.CancellationTokenSource!.Token,
+                            progress).Result;
+
+                        totalRemoved += removed;
+                    }
+
+                    Application.Invoke((s, args) => {
+                        _sceneTreeView.RefreshTree();
+                        UpdatePointCloudVisibilityControls();
+                        _viewport.QueueDraw();
+                        _statusLabel.Text = $"Voxel downsample complete. Removed {totalRemoved:N0} points.";
+                        _isDirty = true;
+                        UpdateTitle();
+                        ProgressDialog.Instance.Complete();
+                    });
+                } catch (AggregateException ae) when (ae.InnerException is OperationCanceledException) {
+                    Application.Invoke((s, args) => {
+                        _statusLabel.Text = "Voxel downsampling cancelled.";
+                        ProgressDialog.Instance.Close();
+                    });
+                } catch (Exception ex) {
+                    Application.Invoke((s, args) => ProgressDialog.Instance.Fail(ex));
+                }
+            });
         }
 
         private void ConfigurePointCloudVoxel()
@@ -975,16 +1004,47 @@ namespace Deep3DStudio
                 return;
             }
 
-            int removed = 0;
-            foreach (var pc in selected)
-                removed += PointCloudOperations.RemoveStatisticalOutliers(pc, _pcOutlierK, _pcOutlierStdRatio);
+            int kNeighbors = _pcOutlierK;
+            float stdRatio = _pcOutlierStdRatio;
+            ProgressDialog.Instance.Start("Removing Outliers...", OperationType.Processing);
 
-            _sceneTreeView.RefreshTree();
-            UpdatePointCloudVisibilityControls();
-            _viewport.QueueDraw();
-            _statusLabel.Text = $"Outlier filter complete. Removed {removed:N0} points.";
-            _isDirty = true;
-            UpdateTitle();
+            Task.Run(() => {
+                try {
+                    int totalRemoved = 0;
+                    for (int i = 0; i < selected.Count; i++) {
+                        var progress = new Progress<string>(msg => ProgressDialog.Instance.Log(msg));
+                        var cloudProgress = new Progress<float>(p => {
+                            ProgressDialog.Instance.Update((i + p) / (float)selected.Count, $"Processing {selected[i].Name}... {(int)(p*100)}%");
+                        });
+
+                        var removed = PointCloudOperations.RemoveStatisticalOutliersAsync(
+                            selected[i],
+                            kNeighbors,
+                            stdRatio,
+                            ProgressDialog.Instance.CancellationTokenSource!.Token,
+                            progress).Result;
+
+                        totalRemoved += removed;
+                    }
+
+                    Application.Invoke((s, args) => {
+                        _sceneTreeView.RefreshTree();
+                        UpdatePointCloudVisibilityControls();
+                        _viewport.QueueDraw();
+                        _statusLabel.Text = $"Outlier filter complete. Removed {totalRemoved:N0} points.";
+                        _isDirty = true;
+                        UpdateTitle();
+                        ProgressDialog.Instance.Complete();
+                    });
+                } catch (AggregateException ae) when (ae.InnerException is OperationCanceledException) {
+                    Application.Invoke((s, args) => {
+                        _statusLabel.Text = "Outlier removal cancelled.";
+                        ProgressDialog.Instance.Close();
+                    });
+                } catch (Exception ex) {
+                    Application.Invoke((s, args) => ProgressDialog.Instance.Fail(ex));
+                }
+            });
         }
 
         private void ConfigurePointCloudOutliers()
@@ -1015,16 +1075,45 @@ namespace Deep3DStudio
                 return;
             }
 
-            int removed = 0;
-            foreach (var pc in selected)
-                removed += PointCloudOperations.RemoveDuplicates(pc, _pcDuplicateThreshold);
+            float threshold = _pcDuplicateThreshold;
+            ProgressDialog.Instance.Start("Removing Duplicates...", OperationType.Processing);
 
-            _sceneTreeView.RefreshTree();
-            UpdatePointCloudVisibilityControls();
-            _viewport.QueueDraw();
-            _statusLabel.Text = $"Duplicate removal complete. Removed {removed:N0} points.";
-            _isDirty = true;
-            UpdateTitle();
+            Task.Run(() => {
+                try {
+                    int totalRemoved = 0;
+                    for (int i = 0; i < selected.Count; i++) {
+                        var progress = new Progress<string>(msg => ProgressDialog.Instance.Log(msg));
+                        var cloudProgress = new Progress<float>(p => {
+                            ProgressDialog.Instance.Update((i + p) / (float)selected.Count, $"Processing {selected[i].Name}... {(int)(p*100)}%");
+                        });
+
+                        var removed = PointCloudOperations.RemoveDuplicatesAsync(
+                            selected[i],
+                            threshold,
+                            ProgressDialog.Instance.CancellationTokenSource!.Token,
+                            progress).Result;
+
+                        totalRemoved += removed;
+                    }
+
+                    Application.Invoke((s, args) => {
+                        _sceneTreeView.RefreshTree();
+                        UpdatePointCloudVisibilityControls();
+                        _viewport.QueueDraw();
+                        _statusLabel.Text = $"Duplicate removal complete. Removed {totalRemoved:N0} points.";
+                        _isDirty = true;
+                        UpdateTitle();
+                        ProgressDialog.Instance.Complete();
+                    });
+                } catch (AggregateException ae) when (ae.InnerException is OperationCanceledException) {
+                    Application.Invoke((s, args) => {
+                        _statusLabel.Text = "Duplicate removal cancelled.";
+                        ProgressDialog.Instance.Close();
+                    });
+                } catch (Exception ex) {
+                    Application.Invoke((s, args) => ProgressDialog.Instance.Fail(ex));
+                }
+            });
         }
 
         private void ConfigurePointCloudDuplicates()
@@ -1054,16 +1143,44 @@ namespace Deep3DStudio
                 MinBlueDominance = _pcSkyBlueDominance
             };
 
-            int removed = 0;
-            foreach (var pc in selected)
-                removed += PointCloudOperations.RemoveBlueDominantPoints(pc, options);
+            ProgressDialog.Instance.Start("Removing Sky/Blue Points...", OperationType.Processing);
 
-            _sceneTreeView.RefreshTree();
-            UpdatePointCloudVisibilityControls();
-            _viewport.QueueDraw();
-            _statusLabel.Text = $"Sky/blue filter complete. Removed {removed:N0} points.";
-            _isDirty = true;
-            UpdateTitle();
+            Task.Run(() => {
+                try {
+                    int totalRemoved = 0;
+                    for (int i = 0; i < selected.Count; i++) {
+                        var progress = new Progress<string>(msg => ProgressDialog.Instance.Log(msg));
+                        var cloudProgress = new Progress<float>(p => {
+                            ProgressDialog.Instance.Update((i + p) / (float)selected.Count, $"Processing {selected[i].Name}... {(int)(p*100)}%");
+                        });
+
+                        var removed = PointCloudOperations.RemoveBlueDominantPointsAsync(
+                            selected[i],
+                            options,
+                            ProgressDialog.Instance.CancellationTokenSource!.Token,
+                            progress).Result;
+
+                        totalRemoved += removed;
+                    }
+
+                    Application.Invoke((s, args) => {
+                        _sceneTreeView.RefreshTree();
+                        UpdatePointCloudVisibilityControls();
+                        _viewport.QueueDraw();
+                        _statusLabel.Text = $"Sky/blue filter complete. Removed {totalRemoved:N0} points.";
+                        _isDirty = true;
+                        UpdateTitle();
+                        ProgressDialog.Instance.Complete();
+                    });
+                } catch (AggregateException ae) when (ae.InnerException is OperationCanceledException) {
+                    Application.Invoke((s, args) => {
+                        _statusLabel.Text = "Sky/blue filter cancelled.";
+                        ProgressDialog.Instance.Close();
+                    });
+                } catch (Exception ex) {
+                    Application.Invoke((s, args) => ProgressDialog.Instance.Fail(ex));
+                }
+            });
         }
 
         private void ConfigurePointCloudSkyBlue()
@@ -1112,15 +1229,42 @@ namespace Deep3DStudio
                 return;
             }
 
-            foreach (var pc in selected)
-                PointCloudOperations.EstimateNormals(pc, _pcNormalK);
+            int kNeighbors = _pcNormalK;
+            ProgressDialog.Instance.Start("Estimating Normals...", OperationType.Processing);
 
-            _sceneTreeView.RefreshTree();
-            UpdatePointCloudVisibilityControls();
-            _viewport.QueueDraw();
-            _statusLabel.Text = $"Estimated normals for {selected.Count} point cloud(s).";
-            _isDirty = true;
-            UpdateTitle();
+            Task.Run(() => {
+                try {
+                    for (int i = 0; i < selected.Count; i++) {
+                        var progress = new Progress<string>(msg => ProgressDialog.Instance.Log(msg));
+                        var cloudProgress = new Progress<float>(p => {
+                            ProgressDialog.Instance.Update((i + p) / (float)selected.Count, $"Processing {selected[i].Name}... {(int)(p*100)}%");
+                        });
+
+                        PointCloudOperations.EstimateNormalsAsync(
+                            selected[i],
+                            kNeighbors,
+                            ProgressDialog.Instance.CancellationTokenSource!.Token,
+                            progress).Wait();
+                    }
+
+                    Application.Invoke((s, args) => {
+                        _sceneTreeView.RefreshTree();
+                        UpdatePointCloudVisibilityControls();
+                        _viewport.QueueDraw();
+                        _statusLabel.Text = $"Estimated normals for {selected.Count} point cloud(s).";
+                        _isDirty = true;
+                        UpdateTitle();
+                        ProgressDialog.Instance.Complete();
+                    });
+                } catch (AggregateException ae) when (ae.InnerException is OperationCanceledException) {
+                    Application.Invoke((s, args) => {
+                        _statusLabel.Text = "Normal estimation cancelled.";
+                        ProgressDialog.Instance.Close();
+                    });
+                } catch (Exception ex) {
+                    Application.Invoke((s, args) => ProgressDialog.Instance.Fail(ex));
+                }
+            });
         }
 
         private void ConfigurePointCloudNormals()
@@ -1142,16 +1286,49 @@ namespace Deep3DStudio
                 return;
             }
 
-            int removed = 0;
-            foreach (var pc in selected)
-                removed += PointCloudOperations.PassThroughAxis(pc, _pcPassAxis, _pcPassMin, _pcPassMax);
+            int axis = _pcPassAxis;
+            float minValue = _pcPassMin;
+            float maxValue = _pcPassMax;
+            ProgressDialog.Instance.Start("Pass-Through Filter...", OperationType.Processing);
 
-            _sceneTreeView.RefreshTree();
-            UpdatePointCloudVisibilityControls();
-            _viewport.QueueDraw();
-            _statusLabel.Text = $"Pass-through complete. Removed {removed:N0} points.";
-            _isDirty = true;
-            UpdateTitle();
+            Task.Run(() => {
+                try {
+                    int totalRemoved = 0;
+                    for (int i = 0; i < selected.Count; i++) {
+                        var progress = new Progress<string>(msg => ProgressDialog.Instance.Log(msg));
+                        var cloudProgress = new Progress<float>(p => {
+                            ProgressDialog.Instance.Update((i + p) / (float)selected.Count, $"Processing {selected[i].Name}... {(int)(p*100)}%");
+                        });
+
+                        var removed = PointCloudOperations.PassThroughAxisAsync(
+                            selected[i],
+                            axis,
+                            minValue,
+                            maxValue,
+                            ProgressDialog.Instance.CancellationTokenSource!.Token,
+                            progress).Result;
+
+                        totalRemoved += removed;
+                    }
+
+                    Application.Invoke((s, args) => {
+                        _sceneTreeView.RefreshTree();
+                        UpdatePointCloudVisibilityControls();
+                        _viewport.QueueDraw();
+                        _statusLabel.Text = $"Pass-through complete. Removed {totalRemoved:N0} points.";
+                        _isDirty = true;
+                        UpdateTitle();
+                        ProgressDialog.Instance.Complete();
+                    });
+                } catch (AggregateException ae) when (ae.InnerException is OperationCanceledException) {
+                    Application.Invoke((s, args) => {
+                        _statusLabel.Text = "Pass-through filter cancelled.";
+                        ProgressDialog.Instance.Close();
+                    });
+                } catch (Exception ex) {
+                    Application.Invoke((s, args) => ProgressDialog.Instance.Fail(ex));
+                }
+            });
         }
 
         private void ConfigurePointCloudPassThrough()
@@ -1201,16 +1378,47 @@ namespace Deep3DStudio
                 return;
             }
 
-            int removed = 0;
-            foreach (var pc in selected)
-                removed += PointCloudOperations.RadiusCrop(pc, _pcRadiusCenter, _pcRadius);
+            var center = _pcRadiusCenter;
+            float radius = _pcRadius;
+            ProgressDialog.Instance.Start("Radius Crop...", OperationType.Processing);
 
-            _sceneTreeView.RefreshTree();
-            UpdatePointCloudVisibilityControls();
-            _viewport.QueueDraw();
-            _statusLabel.Text = $"Radius crop complete. Removed {removed:N0} points.";
-            _isDirty = true;
-            UpdateTitle();
+            Task.Run(() => {
+                try {
+                    int totalRemoved = 0;
+                    for (int i = 0; i < selected.Count; i++) {
+                        var progress = new Progress<string>(msg => ProgressDialog.Instance.Log(msg));
+                        var cloudProgress = new Progress<float>(p => {
+                            ProgressDialog.Instance.Update((i + p) / (float)selected.Count, $"Processing {selected[i].Name}... {(int)(p*100)}%");
+                        });
+
+                        var removed = PointCloudOperations.RadiusCropAsync(
+                            selected[i],
+                            center,
+                            radius,
+                            ProgressDialog.Instance.CancellationTokenSource!.Token,
+                            progress).Result;
+
+                        totalRemoved += removed;
+                    }
+
+                    Application.Invoke((s, args) => {
+                        _sceneTreeView.RefreshTree();
+                        UpdatePointCloudVisibilityControls();
+                        _viewport.QueueDraw();
+                        _statusLabel.Text = $"Radius crop complete. Removed {totalRemoved:N0} points.";
+                        _isDirty = true;
+                        UpdateTitle();
+                        ProgressDialog.Instance.Complete();
+                    });
+                } catch (AggregateException ae) when (ae.InnerException is OperationCanceledException) {
+                    Application.Invoke((s, args) => {
+                        _statusLabel.Text = "Radius crop cancelled.";
+                        ProgressDialog.Instance.Close();
+                    });
+                } catch (Exception ex) {
+                    Application.Invoke((s, args) => ProgressDialog.Instance.Fail(ex));
+                }
+            });
         }
 
         private void ConfigurePointCloudRadiusCrop()
@@ -1248,25 +1456,57 @@ namespace Deep3DStudio
                 return;
             }
 
+            float radius = _pcDenseRadius;
+            int seeds = _pcDensePointsPerSeed;
             int before = selected.Sum(pc => pc.PointCount);
-            int added = 0;
-            foreach (var pc in selected)
-                added += PointCloudOperations.Densify(pc, _pcDenseRadius, _pcDensePointsPerSeed);
-            int after = selected.Sum(pc => pc.PointCount);
 
-            _sceneTreeView.RefreshTree();
-            UpdatePointCloudVisibilityControls();
-            _viewport.QueueDraw();
-            if (added > 0)
-            {
-                _statusLabel.Text = $"Dense cloud complete. Added {added:N0} points ({before:N0} -> {after:N0}).";
-            }
-            else
-            {
-                _statusLabel.Text = $"Dense cloud: no points added. Increase radius (current {_pcDenseRadius:F4}) or reduce filtering.";
-            }
-            _isDirty = true;
-            UpdateTitle();
+            ProgressDialog.Instance.Start("Densifying Point Cloud...", OperationType.Processing);
+
+            Task.Run(() => {
+                try {
+                    int totalAdded = 0;
+                    for (int i = 0; i < selected.Count; i++) {
+                        var progress = new Progress<string>(msg => ProgressDialog.Instance.Log(msg));
+                        var cloudProgress = new Progress<float>(p => {
+                            ProgressDialog.Instance.Update((i + p) / (float)selected.Count, $"Processing {selected[i].Name}... {(int)(p*100)}%");
+                        });
+
+                        var added = PointCloudOperations.DensifyAsync(
+                            selected[i],
+                            radius,
+                            seeds,
+                            ProgressDialog.Instance.CancellationTokenSource!.Token,
+                            progress).Result;
+
+                        totalAdded += added;
+                    }
+
+                    Application.Invoke((s, args) => {
+                        int after = selected.Sum(pc => pc.PointCount);
+                        _sceneTreeView.RefreshTree();
+                        UpdatePointCloudVisibilityControls();
+                        _viewport.QueueDraw();
+                        if (totalAdded > 0)
+                        {
+                            _statusLabel.Text = $"Dense cloud complete. Added {totalAdded:N0} points ({before:N0} -> {after:N0}).";
+                        }
+                        else
+                        {
+                            _statusLabel.Text = $"Dense cloud: no points added. Increase radius (current {radius:F4}) or reduce filtering.";
+                        }
+                        _isDirty = true;
+                        UpdateTitle();
+                        ProgressDialog.Instance.Complete();
+                    });
+                } catch (AggregateException ae) when (ae.InnerException is OperationCanceledException) {
+                    Application.Invoke((s, args) => {
+                        _statusLabel.Text = "Densification cancelled.";
+                        ProgressDialog.Instance.Close();
+                    });
+                } catch (Exception ex) {
+                    Application.Invoke((s, args) => ProgressDialog.Instance.Fail(ex));
+                }
+            });
         }
 
         private void ConfigurePointCloudDense()

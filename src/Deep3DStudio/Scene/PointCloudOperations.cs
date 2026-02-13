@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using OpenTK.Mathematics;
 using Deep3DStudio.Model;
 
@@ -28,6 +31,25 @@ namespace Deep3DStudio.Scene
             return before - pointCloud.Points.Count;
         }
 
+        public static async Task<int> VoxelDownsampleAsync(
+            PointCloudObject pointCloud,
+            float voxelSize,
+            CancellationToken cancellationToken = default,
+            IProgress<string>? progress = null)
+        {
+            return await Task.Run(() =>
+            {
+                progress?.Report("Building voxel grid...");
+                var merger = new PointCloudMerger();
+                var before = pointCloud.Points.Count;
+                var data = ToData(pointCloud);
+                var filtered = merger.VoxelDownsample(data, Math.Max(0.0001f, voxelSize));
+                ApplyData(pointCloud, filtered);
+                progress?.Report($"Voxel downsample removed {before - pointCloud.Points.Count:N0} points");
+                return before - pointCloud.Points.Count;
+            }, cancellationToken);
+        }
+
         public static int RemoveStatisticalOutliers(PointCloudObject pointCloud, int kNeighbors, float stdRatio)
         {
             var merger = new PointCloudMerger();
@@ -40,6 +62,28 @@ namespace Deep3DStudio.Scene
             return before - pointCloud.Points.Count;
         }
 
+        public static async Task<int> RemoveStatisticalOutliersAsync(
+            PointCloudObject pointCloud,
+            int kNeighbors,
+            float stdRatio,
+            CancellationToken cancellationToken = default,
+            IProgress<string>? progress = null)
+        {
+            return await Task.Run(() =>
+            {
+                progress?.Report("Building KD-tree for outlier detection...");
+                var merger = new PointCloudMerger();
+                var before = pointCloud.Points.Count;
+                var filtered = merger.RemoveStatisticalOutliers(
+                    ToData(pointCloud),
+                    Math.Max(2, kNeighbors),
+                    Math.Max(0.1f, stdRatio));
+                ApplyData(pointCloud, filtered);
+                progress?.Report($"Outlier filter removed {before - pointCloud.Points.Count:N0} points");
+                return before - pointCloud.Points.Count;
+            }, cancellationToken);
+        }
+
         public static int RemoveDuplicates(PointCloudObject pointCloud, float threshold)
         {
             var merger = new PointCloudMerger();
@@ -49,11 +93,45 @@ namespace Deep3DStudio.Scene
             return before - pointCloud.Points.Count;
         }
 
+        public static async Task<int> RemoveDuplicatesAsync(
+            PointCloudObject pointCloud,
+            float threshold,
+            CancellationToken cancellationToken = default,
+            IProgress<string>? progress = null)
+        {
+            return await Task.Run(() =>
+            {
+                progress?.Report("Finding duplicate points...");
+                var merger = new PointCloudMerger();
+                var before = pointCloud.Points.Count;
+                var filtered = merger.RemoveDuplicates(ToData(pointCloud), Math.Max(0.00001f, threshold));
+                ApplyData(pointCloud, filtered);
+                progress?.Report($"Duplicate removal removed {before - pointCloud.Points.Count:N0} points");
+                return before - pointCloud.Points.Count;
+            }, cancellationToken);
+        }
+
         public static void EstimateNormals(PointCloudObject pointCloud, int kNeighbors)
         {
             var merger = new PointCloudMerger();
             var withNormals = merger.EstimateNormals(ToData(pointCloud), Math.Max(3, kNeighbors));
             ApplyData(pointCloud, withNormals);
+        }
+
+        public static async Task EstimateNormalsAsync(
+            PointCloudObject pointCloud,
+            int kNeighbors,
+            CancellationToken cancellationToken = default,
+            IProgress<string>? progress = null)
+        {
+            await Task.Run(() =>
+            {
+                progress?.Report("Building KD-tree for normal estimation...");
+                var merger = new PointCloudMerger();
+                var withNormals = merger.EstimateNormals(ToData(pointCloud), Math.Max(3, kNeighbors));
+                ApplyData(pointCloud, withNormals);
+                progress?.Report($"Estimated normals for {pointCloud.Points.Count:N0} points");
+            }, cancellationToken);
         }
 
         public static int PassThroughAxis(PointCloudObject pointCloud, int axis, float minValue, float maxValue)
@@ -65,6 +143,26 @@ namespace Deep3DStudio.Scene
             return before - pointCloud.Points.Count;
         }
 
+        public static async Task<int> PassThroughAxisAsync(
+            PointCloudObject pointCloud,
+            int axis,
+            float minValue,
+            float maxValue,
+            CancellationToken cancellationToken = default,
+            IProgress<string>? progress = null)
+        {
+            return await Task.Run(() =>
+            {
+                progress?.Report("Filtering points by axis...");
+                var merger = new PointCloudMerger();
+                var before = pointCloud.Points.Count;
+                var filtered = merger.PassThroughAxis(ToData(pointCloud), axis, minValue, maxValue);
+                ApplyData(pointCloud, filtered);
+                progress?.Report($"Pass-through removed {before - pointCloud.Points.Count:N0} points");
+                return before - pointCloud.Points.Count;
+            }, cancellationToken);
+        }
+
         public static int RadiusCrop(PointCloudObject pointCloud, Vector3 center, float radius)
         {
             var merger = new PointCloudMerger();
@@ -72,6 +170,25 @@ namespace Deep3DStudio.Scene
             var filtered = merger.RadiusCrop(ToData(pointCloud), center, radius);
             ApplyData(pointCloud, filtered);
             return before - pointCloud.Points.Count;
+        }
+
+        public static async Task<int> RadiusCropAsync(
+            PointCloudObject pointCloud,
+            Vector3 center,
+            float radius,
+            CancellationToken cancellationToken = default,
+            IProgress<string>? progress = null)
+        {
+            return await Task.Run(() =>
+            {
+                progress?.Report("Filtering points by radius...");
+                var merger = new PointCloudMerger();
+                var before = pointCloud.Points.Count;
+                var filtered = merger.RadiusCrop(ToData(pointCloud), center, radius);
+                ApplyData(pointCloud, filtered);
+                progress?.Report($"Radius crop removed {before - pointCloud.Points.Count:N0} points");
+                return before - pointCloud.Points.Count;
+            }, cancellationToken);
         }
 
         public static int Densify(PointCloudObject pointCloud, float neighborRadius, int pointsPerSeed)
@@ -87,7 +204,6 @@ namespace Deep3DStudio.Scene
             var sourceNormals = pointCloud.Normals.Count == sourcePoints.Length ? pointCloud.Normals.ToArray() : null;
             var sourceConfidence = pointCloud.Confidence.Count == sourcePoints.Length ? pointCloud.Confidence.ToArray() : null;
 
-            // Auto-scale radius to scene size so dense cloud works on large-coordinate reconstructions.
             var min = new Vector3(float.MaxValue);
             var max = new Vector3(float.MinValue);
             for (int i = 0; i < sourcePoints.Length; i++)
@@ -222,6 +338,168 @@ namespace Deep3DStudio.Scene
             return added;
         }
 
+        public static async Task<int> DensifyAsync(
+            PointCloudObject pointCloud,
+            float neighborRadius,
+            int pointsPerSeed,
+            CancellationToken cancellationToken = default,
+            IProgress<string>? progress = null)
+        {
+            return await Task.Run(() =>
+            {
+                if (pointCloud.Points.Count < 2)
+                    return 0;
+
+                progress?.Report("Computing scene bounds...");
+                neighborRadius = Math.Max(0.0001f, neighborRadius);
+                pointsPerSeed = Math.Clamp(pointsPerSeed, 1, 8);
+
+                var sourcePoints = pointCloud.Points.ToArray();
+                var sourceColors = pointCloud.Colors.Count == sourcePoints.Length ? pointCloud.Colors.ToArray() : null;
+                var sourceNormals = pointCloud.Normals.Count == sourcePoints.Length ? pointCloud.Normals.ToArray() : null;
+                var sourceConfidence = pointCloud.Confidence.Count == sourcePoints.Length ? pointCloud.Confidence.ToArray() : null;
+
+                var min = new Vector3(float.MaxValue);
+                var max = new Vector3(float.MinValue);
+                for (int i = 0; i < sourcePoints.Length; i++)
+                {
+                    min = Vector3.ComponentMin(min, sourcePoints[i]);
+                    max = Vector3.ComponentMax(max, sourcePoints[i]);
+                }
+
+                float diagonal = (max - min).Length;
+                if (diagonal > 0f)
+                {
+                    float adaptiveMinRadius = Math.Max(0.0001f, diagonal * 0.005f);
+                    if (neighborRadius < adaptiveMinRadius)
+                    {
+                        neighborRadius = adaptiveMinRadius;
+                    }
+                }
+
+                progress?.Report("Building spatial grid...");
+                float cellSize = neighborRadius;
+                var buckets = new ConcurrentDictionary<(int x, int y, int z), ConcurrentBag<int>>();
+
+                Parallel.For(0, sourcePoints.Length, new ParallelOptions { CancellationToken = cancellationToken }, i =>
+                {
+                    var p = sourcePoints[i];
+                    var key = (
+                        (int)Math.Floor(p.X / cellSize),
+                        (int)Math.Floor(p.Y / cellSize),
+                        (int)Math.Floor(p.Z / cellSize));
+                    buckets.AddOrUpdate(key, _ => new ConcurrentBag<int> { i }, (_, bag) => { bag.Add(i); return bag; });
+                });
+
+                progress?.Report("Creating dense points...");
+                var outPoints = new ConcurrentBag<Vector3>();
+                var outColors = sourceColors != null ? new ConcurrentBag<Vector3>() : null;
+                var outNormals = sourceNormals != null ? new ConcurrentBag<Vector3>() : null;
+                var outConfidence = new ConcurrentBag<float>();
+
+                var reportInterval = Math.Max(1, sourcePoints.Length / 20);
+                int lastReport = 0;
+
+                Parallel.For(0, sourcePoints.Length, new ParallelOptions { CancellationToken = cancellationToken }, i =>
+                {
+                    var p = sourcePoints[i];
+                    int bx = (int)Math.Floor(p.X / cellSize);
+                    int by = (int)Math.Floor(p.Y / cellSize);
+                    int bz = (int)Math.Floor(p.Z / cellSize);
+
+                    var nearest = new List<(int idx, float dist2)>();
+                    for (int dz = -1; dz <= 1; dz++)
+                    {
+                        for (int dy = -1; dy <= 1; dy++)
+                        {
+                            for (int dx = -1; dx <= 1; dx++)
+                            {
+                                var key = (bx + dx, by + dy, bz + dz);
+                                if (!buckets.TryGetValue(key, out var candidates))
+                                    continue;
+
+                                foreach (var c in candidates)
+                                {
+                                    if (c == i) continue;
+                                    var d = sourcePoints[c] - p;
+                                    float d2 = d.LengthSquared;
+                                    if (d2 <= 1e-12f || d2 > neighborRadius * neighborRadius) continue;
+                                    nearest.Add((c, d2));
+                                }
+                            }
+                        }
+                    }
+
+                    outPoints.Add(p);
+                    if (outColors != null && sourceColors != null) outColors.Add(sourceColors[i]);
+                    if (outNormals != null && sourceNormals != null) outNormals.Add(sourceNormals[i]);
+                    outConfidence.Add(sourceConfidence != null ? sourceConfidence[i] : 1.0f);
+
+                    if (nearest.Count == 0)
+                        return;
+
+                    nearest.Sort((a, b) => a.dist2.CompareTo(b.dist2));
+                    int take = Math.Min(pointsPerSeed, nearest.Count);
+                    for (int n = 0; n < take; n++)
+                    {
+                        int j = nearest[n].idx;
+                        var q = sourcePoints[j];
+                        var mid = (p + q) * 0.5f;
+
+                        outPoints.Add(mid);
+                        if (outColors != null && sourceColors != null)
+                        {
+                            outColors.Add((sourceColors[i] + sourceColors[j]) * 0.5f);
+                        }
+                        if (outNormals != null && sourceNormals != null)
+                        {
+                            var avg = sourceNormals[i] + sourceNormals[j];
+                            if (avg.LengthSquared > 1e-10f)
+                                avg.Normalize();
+                            outNormals.Add(avg);
+                        }
+                        outConfidence.Add(sourceConfidence != null ? (sourceConfidence[i] + sourceConfidence[j]) * 0.5f : 1.0f);
+                    }
+
+                    if (Interlocked.CompareExchange(ref lastReport, i, lastReport) == lastReport && i % reportInterval == 0)
+                    {
+                        progress?.Report($"Densifying... {i * 100 / sourcePoints.Length}%");
+                    }
+                });
+
+                var finalPoints = outPoints.ToList();
+                var finalColors = outColors?.ToList();
+                var finalNormals = outNormals?.ToList();
+                var finalConfidence = outConfidence.ToList();
+
+                pointCloud.Points = finalPoints;
+                if (finalColors != null)
+                {
+                    pointCloud.Colors = finalColors;
+                }
+                else
+                {
+                    pointCloud.Colors = new List<Vector3>(pointCloud.Points.Count);
+                    for (int i = 0; i < pointCloud.Points.Count; i++)
+                        pointCloud.Colors.Add(new Vector3(0.85f));
+                }
+
+                if (finalNormals != null)
+                {
+                    pointCloud.Normals = finalNormals;
+                }
+                else
+                {
+                    pointCloud.Normals = new List<Vector3>();
+                }
+                pointCloud.Confidence = finalConfidence;
+                pointCloud.UpdateBounds();
+
+                progress?.Report($"Dense cloud added {finalPoints.Count - sourcePoints.Length:N0} points");
+                return finalPoints.Count - sourcePoints.Length;
+            }, cancellationToken);
+        }
+
         public static int RemoveBlueDominantPoints(PointCloudObject pointCloud, PointCloudBlueFilterOptions options)
         {
             if (pointCloud.Points.Count == 0)
@@ -288,6 +566,97 @@ namespace Deep3DStudio.Scene
             pointCloud.Confidence = outConfidence;
             pointCloud.UpdateBounds();
             return removed;
+        }
+
+        public static async Task<int> RemoveBlueDominantPointsAsync(
+            PointCloudObject pointCloud,
+            PointCloudBlueFilterOptions options,
+            CancellationToken cancellationToken = default,
+            IProgress<string>? progress = null)
+        {
+            return await Task.Run(() =>
+            {
+                if (pointCloud.Points.Count == 0)
+                    return 0;
+
+                progress?.Report("Filtering blue-dominant points...");
+                options ??= new PointCloudBlueFilterOptions();
+
+                float minBlue = Math.Clamp(options.MinBlue, 0.0f, 1.0f);
+                float maxRed = Math.Clamp(options.MaxRed, 0.0f, 1.0f);
+                float maxGreen = Math.Clamp(options.MaxGreen, 0.0f, 1.0f);
+                float minBlueDominance = Math.Max(0.0f, options.MinBlueDominance);
+
+                int before = pointCloud.Points.Count;
+                bool hasAlignedNormals = pointCloud.Normals.Count == before;
+                bool hasAlignedConfidence = pointCloud.Confidence.Count == before;
+
+                var outPoints = new ConcurrentBag<Vector3>();
+                var outColors = new ConcurrentBag<Vector3>();
+                var outNormals = hasAlignedNormals ? new ConcurrentBag<Vector3>() : null;
+                var outConfidence = new ConcurrentBag<float>();
+
+                var reportInterval = Math.Max(1, before / 20);
+                int removed = 0;
+                int lastReport = 0;
+
+                Parallel.For(0, before, new ParallelOptions { CancellationToken = cancellationToken }, i =>
+                {
+                    bool hasColor = i < pointCloud.Colors.Count;
+                    var color = hasColor ? pointCloud.Colors[i] : new Vector3(0.85f);
+
+                    bool remove = false;
+                    if (hasColor)
+                    {
+                        float blue = color.Z;
+                        float red = color.X;
+                        float green = color.Y;
+                        float dominance = blue - Math.Max(red, green);
+
+                        remove = blue >= minBlue &&
+                                 red <= maxRed &&
+                                 green <= maxGreen &&
+                                 dominance >= minBlueDominance;
+                    }
+
+                    if (!remove)
+                    {
+                        outPoints.Add(pointCloud.Points[i]);
+                        outColors.Add(color);
+
+                        if (hasAlignedNormals && outNormals != null)
+                            outNormals.Add(pointCloud.Normals[i]);
+
+                        if (hasAlignedConfidence)
+                            outConfidence.Add(pointCloud.Confidence[i]);
+                        else
+                            outConfidence.Add(1.0f);
+                    }
+                    else
+                    {
+                        Interlocked.Increment(ref removed);
+                    }
+
+                    if (Interlocked.CompareExchange(ref lastReport, i, lastReport) == lastReport && i % reportInterval == 0)
+                    {
+                        progress?.Report($"Filtering blue-dominant points... {i * 100 / before}%");
+                    }
+                });
+
+                var finalPoints = outPoints.ToList();
+                var finalColors = outColors.ToList();
+                var finalNormals = outNormals?.ToList();
+                var finalConfidence = outConfidence.ToList();
+
+                pointCloud.Points = finalPoints;
+                pointCloud.Colors = finalColors;
+                pointCloud.Normals = finalNormals ?? new List<Vector3>();
+                pointCloud.Confidence = finalConfidence;
+                pointCloud.UpdateBounds();
+
+                progress?.Report($"Sky/blue filter removed {removed:N0} points");
+                return removed;
+            }, cancellationToken);
         }
 
         public static PointCloudData ToData(PointCloudObject pointCloud)
