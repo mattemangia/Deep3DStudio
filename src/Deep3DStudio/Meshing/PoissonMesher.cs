@@ -97,29 +97,66 @@ namespace Deep3DStudio.Meshing
             int h = phi.GetLength(1);
             int d = phi.GetLength(2);
 
-            double sum = 0;
-            int count = 0;
-
+            // Use Otsu's method on the phi field to find the optimal threshold
+            // that separates exterior (zero/low) from interior (high) regions.
+            float minVal = float.MaxValue, maxVal = float.MinValue;
             for (int x = 1; x < w - 1; x++)
-            {
                 for (int y = 1; y < h - 1; y++)
-                {
                     for (int z = 1; z < d - 1; z++)
                     {
                         float v = phi[x, y, z];
-                        if (Math.Abs(v) > 1e-12f)
-                        {
-                            sum += v;
-                            count++;
-                        }
+                        if (v < minVal) minVal = v;
+                        if (v > maxVal) maxVal = v;
                     }
+
+            if (maxVal - minVal < 1e-12f)
+                return 0.0f;
+
+            const int bins = 256;
+            int[] histogram = new int[bins];
+            int total = 0;
+            float range = maxVal - minVal;
+
+            for (int x = 1; x < w - 1; x++)
+                for (int y = 1; y < h - 1; y++)
+                    for (int z = 1; z < d - 1; z++)
+                    {
+                        int bin = Math.Clamp((int)((phi[x, y, z] - minVal) / range * (bins - 1)), 0, bins - 1);
+                        histogram[bin]++;
+                        total++;
+                    }
+
+            if (total == 0) return 0.0f;
+
+            double sumTotal = 0;
+            for (int i = 0; i < bins; i++)
+                sumTotal += (double)i * histogram[i];
+
+            double sumB = 0;
+            int wB = 0;
+            double maxVariance = 0;
+            int bestThreshold = 1;
+
+            for (int t = 1; t < bins; t++)
+            {
+                wB += histogram[t - 1];
+                if (wB == 0) continue;
+                int wF = total - wB;
+                if (wF == 0) break;
+
+                sumB += (double)(t - 1) * histogram[t - 1];
+                double mB = sumB / wB;
+                double mF = (sumTotal - sumB) / wF;
+                double variance = (double)wB * wF * (mB - mF) * (mB - mF);
+
+                if (variance > maxVariance)
+                {
+                    maxVariance = variance;
+                    bestThreshold = t;
                 }
             }
 
-            if (count == 0)
-                return 0.0f;
-
-            return (float)(sum / count);
+            return minVal + ((float)bestThreshold / (bins - 1)) * range;
         }
 
         private Vector3[,,] SmoothVectorField(Vector3[,,] input)

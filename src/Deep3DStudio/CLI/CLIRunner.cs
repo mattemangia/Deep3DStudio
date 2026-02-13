@@ -293,7 +293,6 @@ namespace Deep3DStudio.CLI
             try
             {
                 int targetRes = _options.VoxelResolution.HasValue ? Math.Clamp(_options.VoxelResolution.Value, 32, 512) : 128;
-                float isoLevel = _options.IsoLevel.HasValue ? Math.Clamp(_options.IsoLevel.Value, -2.0f, 2.0f) : 0.5f;
                 Console.WriteLine($"Voxelizing point cloud (targetRes={targetRes})...");
                 var voxelized = VoxelizePointCloud(pc.Points, targetRes);
                 if (voxelized.grid == null)
@@ -302,7 +301,10 @@ namespace Deep3DStudio.CLI
                     return 1;
                 }
 
-                Console.WriteLine($"Running marching cubes (iso={isoLevel})...");
+                float isoLevel = _options.IsoLevel.HasValue
+                    ? Math.Clamp(_options.IsoLevel.Value, -2.0f, 2.0f)
+                    : 0.5f;
+                Console.WriteLine($"Running marching cubes (iso={isoLevel:F4})...");
                 var mesher = new MarchingCubesMesher();
                 var baseMesh = mesher.GenerateMesh(voxelized.grid, voxelized.origin, voxelized.voxelSize, isoLevel);
                 if (baseMesh.Vertices.Count == 0 || baseMesh.Indices.Count == 0)

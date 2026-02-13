@@ -29,13 +29,27 @@ namespace Deep3DStudio.CLI
         private readonly object _fileLock = new object();
         private string? _logFilePath;
 
-        // P/Invoke to allocate console on Windows
+        // P/Invoke for console management on Windows
         [DllImport("kernel32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         static extern bool AllocConsole();
 
         [DllImport("kernel32.dll")]
         static extern IntPtr GetConsoleWindow();
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr GetStdHandle(int nStdHandle);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
+
+        private const int STD_INPUT_HANDLE = -10;
+        private const uint ENABLE_MOUSE_INPUT = 0x0010;
+        private const uint ENABLE_QUICK_EDIT_MODE = 0x0040;
+        private const uint ENABLE_EXTENDED_FLAGS = 0x0080;
 
         [DllImport("user32.dll")]
         static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
@@ -90,6 +104,14 @@ namespace Deep3DStudio.CLI
             try
             {
                 Application.Init();
+
+                // Disable mouse input on the console to prevent Terminal.Gui from
+                // receiving spurious mouse events (hover, movement) that cause
+                // random command execution and UI interaction.
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                    DisableConsoleMouseInput();
+                }
 
                 string appTitle = BuildWindowTitle();
 
@@ -260,6 +282,32 @@ namespace Deep3DStudio.CLI
             }
 
             return true;
+        }
+
+        private static void DisableConsoleMouseInput()
+        {
+            try
+            {
+                var handle = GetStdHandle(STD_INPUT_HANDLE);
+                if (handle == IntPtr.Zero) return;
+
+                if (GetConsoleMode(handle, out uint mode))
+                {
+                    // Remove ENABLE_MOUSE_INPUT so the console does not generate
+                    // mouse event records that Terminal.Gui would process.
+                    // Also remove ENABLE_QUICK_EDIT_MODE to avoid text selection via mouse.
+                    // ENABLE_EXTENDED_FLAGS is required when modifying QUICK_EDIT_MODE.
+                    mode &= ~ENABLE_MOUSE_INPUT;
+                    mode &= ~ENABLE_QUICK_EDIT_MODE;
+                    mode |= ENABLE_EXTENDED_FLAGS;
+                    SetConsoleMode(handle, mode);
+                }
+            }
+            catch
+            {
+                // Best-effort: if this fails, mouse events will still be processed
+                // but the TUI will still function correctly for keyboard interaction.
+            }
         }
 
         public void SetCancellationTokenSource(CancellationTokenSource? tokenSource)
