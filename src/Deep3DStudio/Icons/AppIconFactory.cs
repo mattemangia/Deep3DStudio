@@ -68,6 +68,7 @@ namespace Deep3DStudio.Icons
                         case "residuals": DrawResidualsIcon(cr, size); break;
                         case "dem": DrawDemIcon(cr, size); break;
                         case "geo_export": DrawGeoExportIcon(cr, size); break;
+                        case "fill_holes": DrawFillHolesIcon(cr, size); break;
                     }
                 }
 
@@ -896,6 +897,44 @@ namespace Deep3DStudio.Icons
             cr.Stroke();
             cr.MoveTo(size * 0.45, size * 0.5);
             cr.LineTo(size * 0.55, size * 0.5);
+            cr.Stroke();
+        }
+
+        private static void DrawFillHolesIcon(Context cr, int size)
+        {
+            // Draw a polygon with a 'hole' being filled
+            cr.SetSourceRGB(0.7, 0.7, 0.7);
+            cr.LineWidth = 1.5;
+
+            // Main mesh part 1
+            cr.MoveTo(size * 0.15, size * 0.15);
+            cr.LineTo(size * 0.5, size * 0.35);
+            cr.LineTo(size * 0.15, size * 0.6);
+            cr.ClosePath();
+            cr.Stroke();
+
+            // Main mesh part 2
+            cr.MoveTo(size * 0.85, size * 0.15);
+            cr.LineTo(size * 0.5, size * 0.35);
+            cr.LineTo(size * 0.85, size * 0.6);
+            cr.ClosePath();
+            cr.Stroke();
+
+            // The 'Hole' being filled (highlighted triangle in the middle)
+            cr.SetSourceRGB(0.3, 0.7, 1.0); // Bright blue for filling
+            cr.MoveTo(size * 0.15, size * 0.6);
+            cr.LineTo(size * 0.5, size * 0.35);
+            cr.LineTo(size * 0.85, size * 0.6);
+            cr.ClosePath();
+            cr.FillPreserve();
+            cr.SetSourceRGB(0.2, 0.5, 0.8);
+            cr.Stroke();
+
+            // Bottom base
+            cr.SetSourceRGB(0.7, 0.7, 0.7);
+            cr.MoveTo(size * 0.15, size * 0.6);
+            cr.LineTo(size * 0.5, size * 0.85);
+            cr.LineTo(size * 0.85, size * 0.6);
             cr.Stroke();
         }
 
