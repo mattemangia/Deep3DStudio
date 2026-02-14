@@ -28,13 +28,15 @@ namespace Deep3DStudio
         {
             if (_statusLabel == null) return;
             string escaped = System.Security.SecurityElement.Escape(text);
-            _statusLabel.Markup = $"<span foreground='#60B0FF'><b>{escaped}</b></span>";
+            // Black bold text for active tooltips
+            _statusLabel.Markup = $"<span foreground='#000000'><b>{escaped}</b></span>";
         }
 
         private void ResetStatusText()
         {
             if (_statusLabel == null) return;
-            _statusLabel.Markup = "<span foreground='#AAAAAA'><b>Ready</b></span>";
+            // Dark gray for Ready state
+            _statusLabel.Markup = "<span foreground='#333333'><b>Ready</b></span>";
         }
 
         private void ApplyStatusBarFeedback(Widget widget, string text)
