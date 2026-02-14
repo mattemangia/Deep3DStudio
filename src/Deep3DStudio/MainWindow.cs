@@ -352,13 +352,14 @@ namespace Deep3DStudio
             _statusLabel.Xalign = 0;
             _statusLabel.MarginStart = 10;
             _statusLabel.Ellipsize = Pango.EllipsizeMode.None;
-            // Normal size, bold for clarity
+            // Force a large minimum width so it doesn't truncate to "Ready" length
+            _statusLabel.WidthRequest = 800; 
             _statusLabel.Markup = "<b>Ready</b>";
 
             var statusBox = new Box(Orientation.Horizontal, 0);
             statusBox.Visible = true;
             statusBox.HeightRequest = 30;
-            // Force horizontal expansion to prevent truncation
+            // Pack with expand and fill
             statusBox.PackStart(_statusLabel, true, true, 0);
             
             var statusEventBox = new EventBox();
