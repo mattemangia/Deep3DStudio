@@ -12,6 +12,7 @@ using OpenTK.Mathematics;
 using Deep3DStudio.Configuration;
 using Deep3DStudio.Model;
 using Deep3DStudio.Model.AIModels;
+using Deep3DStudio.IO;
 
 namespace Deep3DStudio.Python
 {
@@ -279,6 +280,7 @@ namespace Deep3DStudio.Python
                     using var reader = new StreamReader(stream);
                     string content = reader.ReadToEnd();
                     File.WriteAllText(tempPath, content);
+                    TemporaryFileManager.RegisterFile(tempPath);
                     Log($"Extracted script to {tempPath}");
                     return tempPath;
                 }
@@ -300,6 +302,7 @@ namespace Deep3DStudio.Python
                                 using var reader = new StreamReader(stream);
                                 string content = reader.ReadToEnd();
                                 File.WriteAllText(tempPath, content);
+                                TemporaryFileManager.RegisterFile(tempPath);
                                 Log($"Extracted script from {asm.GetName().Name} to {tempPath}");
                                 return tempPath;
                             }
@@ -994,6 +997,8 @@ namespace Deep3DStudio.Python
                 // Create temp files for input/output
                 inputPath = Path.GetTempFileName();
                 outputPath = Path.GetTempFileName();
+                TemporaryFileManager.RegisterFile(inputPath);
+                TemporaryFileManager.RegisterFile(outputPath);
 
                 // Prepare input JSON with base64-encoded images
                 var images = new List<string>();
@@ -1163,6 +1168,7 @@ namespace Deep3DStudio.Python
                 OnProgress?.Invoke("inference", 0.1f, "Preparing mesh input...");
 
                 outputPath = Path.GetTempFileName();
+                TemporaryFileManager.RegisterFile(outputPath);
 
                 OnProgress?.Invoke("inference", 0.2f, "Running mesh refinement...");
 
@@ -1288,6 +1294,8 @@ namespace Deep3DStudio.Python
 
                 inputPath = Path.GetTempFileName();
                 outputPath = Path.GetTempFileName();
+                TemporaryFileManager.RegisterFile(inputPath);
+                TemporaryFileManager.RegisterFile(outputPath);
 
                 // Prepare mesh payload
                 var vertices = new List<float[]>(mesh.Vertices.Count);
@@ -1452,6 +1460,7 @@ namespace Deep3DStudio.Python
             {
                 OnProgress?.Invoke("inference", 0.1f, "Preparing UniRig mesh file input...");
                 outputPath = Path.GetTempFileName();
+                TemporaryFileManager.RegisterFile(outputPath);
 
                 string weightsArg = !string.IsNullOrEmpty(_weightsPath) ? $"--weights \"{_weightsPath}\"" : "";
                 string deviceArg = $"--device {_device}";

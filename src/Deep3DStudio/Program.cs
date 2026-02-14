@@ -5,6 +5,7 @@ using Deep3DStudio.Configuration;
 using Deep3DStudio.UI;
 using Deep3DStudio.Python;
 using Deep3DStudio.CLI;
+using Deep3DStudio.IO;
 
 namespace Deep3DStudio
 {
@@ -128,7 +129,15 @@ namespace Deep3DStudio
             try
             {
                 var runner = new CLIRunner(options);
-                return runner.Run();
+                int result = runner.Run();
+                
+                // Final cleanup for CLI mode
+                Console.WriteLine("Cleaning up temporary files...");
+                TemporaryFileManager.Cleanup((msg, prog) => {
+                    if (options.Verbose) Console.WriteLine($"[{prog:P0}] {msg}");
+                });
+                
+                return result;
             }
             catch (Exception ex)
             {

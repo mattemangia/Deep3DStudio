@@ -188,6 +188,7 @@ namespace Deep3DStudio.Model.AIModels
             {
                 // Save input mesh to temp file
                 string tempMeshPath = Path.GetTempFileName() + ".obj";
+                TemporaryFileManager.RegisterFile(tempMeshPath);
                 MeshExporter.Save(tempMeshPath, inputMesh);
                 Log($"[TripoSF] Saved input mesh to: {tempMeshPath}");
 

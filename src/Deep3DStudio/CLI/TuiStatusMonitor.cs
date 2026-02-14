@@ -8,6 +8,7 @@ using SkiaSharp;
 using System.Reflection;
 using Deep3DStudio.UI;
 using Deep3DStudio.Configuration;
+using Deep3DStudio.IO;
 
 namespace Deep3DStudio.CLI
 {
@@ -169,8 +170,20 @@ namespace Deep3DStudio.CLI
                     int choice = MessageBox.Query("Exit", "Are you sure?", "Yes", "No");
                     if (choice == 0)
                     {
-                        Application.RequestStop();
-                        Environment.Exit(0);
+                        // Run cleanup in a task so the UI can update
+                        System.Threading.Tasks.Task.Run(() => {
+                             TemporaryFileManager.Cleanup((msg, prog) => {
+                                 UpdateProgress(msg, prog);
+                             });
+                             
+                             // Small delay to see result
+                             System.Threading.Thread.Sleep(500);
+
+                             Application.MainLoop.Invoke(() => {
+                                 Application.RequestStop();
+                                 Environment.Exit(0);
+                             });
+                        });
                     }
                 };
 

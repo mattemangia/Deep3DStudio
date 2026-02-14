@@ -188,6 +188,7 @@ namespace Deep3DStudio
 
         // Project State
         private bool _isDirty = false;
+        private bool _isCleaningUp = false;
         private string _currentProjectPath = "";
         private bool _showUnsavedChangesPrompt = false;
         private PendingUnsavedAction _pendingUnsavedAction = PendingUnsavedAction.None;
@@ -489,6 +490,12 @@ namespace Deep3DStudio
 
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
         {
+            if (_isCleaningUp)
+            {
+                base.OnClosing(e);
+                return;
+            }
+
             if (_showUnsavedChangesPrompt)
             {
                 e.Cancel = true;
@@ -501,7 +508,30 @@ namespace Deep3DStudio
                 e.Cancel = true;
                 _pendingUnsavedAction = PendingUnsavedAction.Exit;
                 _showUnsavedChangesPrompt = true;
+                base.OnClosing(e);
+                return;
             }
+
+            // Start cleanup
+            e.Cancel = true;
+            _isCleaningUp = true;
+
+            UI.ProgressDialog.Instance.Start("Cleaning up temporary files", UI.OperationType.Processing);
+
+            Task.Run(async () => {
+                IO.TemporaryFileManager.Cleanup((msg, prog) => {
+                    UI.ProgressDialog.Instance.Update(prog, msg);
+                });
+                
+                // Small delay to let user see "Cleanup complete"
+                await Task.Delay(500);
+                
+                UI.ProgressDialog.Instance.Complete();
+                
+                // Now close the window for real
+                Close();
+            });
+
             base.OnClosing(e);
         }
 

@@ -14,6 +14,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using SkiaSharp;
 using Deep3DStudio.Model;
+using Deep3DStudio.IO;
 
 namespace Deep3DStudio
 {
@@ -127,7 +128,15 @@ namespace Deep3DStudio
             try
             {
                 var runner = new CLIRunner(options);
-                return runner.Run();
+                int result = runner.Run();
+
+                // Final cleanup for CLI mode
+                Console.WriteLine("Cleaning up temporary files...");
+                TemporaryFileManager.Cleanup((msg, prog) => {
+                    if (options.Verbose) Console.WriteLine($"[{prog:P0}] {msg}");
+                });
+
+                return result;
             }
             catch (Exception ex)
             {

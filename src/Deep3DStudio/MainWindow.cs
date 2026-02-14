@@ -377,8 +377,24 @@ namespace Deep3DStudio
                 args.RetVal = true; // Cancel close
                 return;
             }
+            
+            args.RetVal = true; // Always cancel initial delete to show cleanup progress
+            
             SaveWindowState();
-            Application.Quit();
+            
+            // Show cleanup progress
+            UI.ProgressDialog.Instance.Start("Cleaning up temporary files", UI.OperationType.Processing);
+            
+            System.Threading.Tasks.Task.Run(() => {
+                IO.TemporaryFileManager.Cleanup((msg, prog) => {
+                    UI.ProgressDialog.Instance.Update(prog, msg);
+                });
+                
+                Application.Invoke((s, e) => {
+                    UI.ProgressDialog.Instance.Complete();
+                    Application.Quit();
+                });
+            });
         }
 
         private void UpdateTitle()
