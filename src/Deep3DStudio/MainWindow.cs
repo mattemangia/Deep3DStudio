@@ -346,14 +346,25 @@ namespace Deep3DStudio
 
             _mainHPaned.Position = settings.LastPanelWidth;
 
+            // Status Bar - Definitive fix for size and visibility
+            _statusLabel = new Label("Ready");
             _statusLabel.Halign = Align.Start;
+            _statusLabel.Xalign = 0;
+            _statusLabel.MarginStart = 10;
             _statusLabel.Ellipsize = Pango.EllipsizeMode.None;
-            _statusLabel.Visible = true;
-            var statusBox = new Box(Orientation.Horizontal, 5);
+            _statusLabel.HeightRequest = 30;
+            _statusLabel.Markup = "<span size='large'>Ready</span>";
+
+            var statusBox = new Box(Orientation.Horizontal, 0);
             statusBox.Visible = true;
-            statusBox.SetSizeRequest(-1, 25); // Minimum height
-            statusBox.PackStart(_statusLabel, true, true, 5);
-            mainVBox.PackStart(statusBox, false, false, 2);
+            statusBox.HeightRequest = 35;
+            // Pack without forcing fill, but allowing expansion
+            statusBox.PackStart(_statusLabel, false, false, 0);
+            
+            var statusEventBox = new EventBox();
+            statusEventBox.Add(statusBox);
+            statusEventBox.OverrideBackgroundColor(StateFlags.Normal, new RGBA(0.1, 0.1, 0.1, 1.0));
+            mainVBox.PackStart(statusEventBox, false, false, 0);
             Console.WriteLine("MainWindow: Status bar created");
 
             // Load Initial Settings

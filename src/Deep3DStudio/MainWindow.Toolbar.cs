@@ -30,26 +30,55 @@ namespace Deep3DStudio
             _originalToolbarItems[toolbar] = items;
         }
 
+        private void ApplyStatusBarFeedback(Widget widget, string text)
+        {
+            if (widget == null) return;
+
+            // Use a stack for non-recursive traversal to avoid any overhead, 
+            // though the tree is shallow.
+            var stack = new Stack<Widget>();
+            stack.Push(widget);
+
+            while (stack.Count > 0)
+            {
+                var w = stack.Pop();
+                
+                // Set the events we care about
+                w.Events |= EventMask.EnterNotifyMask | EventMask.LeaveNotifyMask;
+                
+                // Hook events. We use a capture-safe approach for the text.
+                string statusText = text;
+                w.EnterNotifyEvent += (o, args) => {
+                    if (_statusLabel != null)
+                        _statusLabel.Markup = $"<span size='large' weight='bold' foreground='#4A90E2'>{System.Security.SecurityElement.Escape(statusText)}</span>";
+                };
+                
+                w.LeaveNotifyEvent += (o, args) => {
+                    if (_statusLabel != null)
+                        _statusLabel.Markup = "<span size='large'>Ready</span>";
+                };
+
+                // Traverse children
+                if (w is Container container)
+                {
+                    foreach (var child in container.Children)
+                        stack.Push(child);
+                }
+                
+                // Special GTK ToolButton internal widgets that are not in 'Children'
+                if (w is ToolButton tb)
+                {
+                    if (tb.IconWidget != null) stack.Push(tb.IconWidget);
+                    if (tb.LabelWidget != null) stack.Push(tb.LabelWidget);
+                }
+            }
+        }
+
         private void SetTooltip(Widget widget, string text)
         {
             widget.TooltipText = text;
             widget.HasTooltip = true;
-            
-            // Connect to the main widget
-            widget.EnterNotifyEvent += (o, args) => _statusLabel.Text = text;
-            widget.LeaveNotifyEvent += (o, args) => _statusLabel.Text = "Ready";
-
-            // For ToolButtons, we must also hook the internal child (usually an EventBox or Align)
-            if (widget is Bin bin && bin.Child != null)
-            {
-                bin.Child.EnterNotifyEvent += (o, args) => _statusLabel.Text = text;
-                bin.Child.LeaveNotifyEvent += (o, args) => _statusLabel.Text = "Ready";
-            }
-
-            widget.QueryTooltip += (o, args) => {
-                args.Tooltip.Text = text;
-                args.RetVal = true;
-            };
+            ApplyStatusBarFeedback(widget, text);
         }
 
         private void UpdateAllToolbarsOverflow()
@@ -126,6 +155,14 @@ namespace Deep3DStudio
                             ((ImageMenuItem)mi).Image = menuImg;
                         }
                         mi.Activated += (s, e) => tb.Activate();
+                        
+                        string menuText = tb.TooltipText;
+                        mi.EnterNotifyEvent += (s, e) => {
+                            _statusLabel.Markup = $"<span size='large' weight='bold' foreground='#4A90E2'>{System.Security.SecurityElement.Escape(menuText)}</span>";
+                        };
+                        mi.LeaveNotifyEvent += (s, e) => {
+                            _statusLabel.Markup = "<span size='large'>Ready</span>";
+                        };
                     }
                     else if (item is ToggleToolButton ttb)
                     {
@@ -133,6 +170,14 @@ namespace Deep3DStudio
                         mi.TooltipText = ttb.TooltipText;
                         ((CheckMenuItem)mi).Active = ttb.Active;
                         mi.Activated += (s, e) => { ttb.Active = ((CheckMenuItem)mi).Active; };
+                        
+                        string menuText = ttb.TooltipText;
+                        mi.EnterNotifyEvent += (s, e) => {
+                            _statusLabel.Markup = $"<span size='large' weight='bold' foreground='#4A90E2'>{System.Security.SecurityElement.Escape(menuText)}</span>";
+                        };
+                        mi.LeaveNotifyEvent += (s, e) => {
+                            _statusLabel.Markup = "<span size='large'>Ready</span>";
+                        };
                     }
                     else
                     {
