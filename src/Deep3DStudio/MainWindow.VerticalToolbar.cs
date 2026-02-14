@@ -105,7 +105,8 @@ namespace Deep3DStudio
         private Button CreateIconButton(string iconType, string tooltip, int size, Action onClick, Action? onRightClick = null)
         {
             var btn = new Button();
-            btn.TooltipText = onRightClick == null ? tooltip : $"{tooltip} (Right click for options)";
+            string finalTooltip = onRightClick == null ? tooltip : $"{tooltip} (Right click for options)";
+            SetTooltip(btn, finalTooltip);
             btn.SetSizeRequest(size, size);
             btn.Relief = ReliefStyle.None;
 

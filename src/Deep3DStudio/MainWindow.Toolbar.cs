@@ -34,6 +34,31 @@ namespace Deep3DStudio
         {
             widget.TooltipText = text;
             widget.HasTooltip = true;
+            
+            // Internal helper to hook events
+            void HookEvents(Widget w)
+            {
+                w.EnterNotifyEvent += (o, args) => {
+                    if (_statusLabel != null) _statusLabel.Text = text;
+                };
+                
+                w.LeaveNotifyEvent += (o, args) => {
+                    if (_statusLabel != null) _statusLabel.Text = "Ready";
+                };
+
+                if (w is Container container)
+                {
+                    foreach (var child in container.Children)
+                        HookEvents(child);
+                }
+            }
+
+            HookEvents(widget);
+
+            // Also check for special ToolButton child (the icon/label)
+            if (widget is ToolButton tb && tb.IconWidget != null)
+                HookEvents(tb.IconWidget);
+
             widget.QueryTooltip += (o, args) => {
                 args.Tooltip.Text = text;
                 args.RetVal = true;
@@ -438,6 +463,7 @@ namespace Deep3DStudio
             var wfBox = new Box(Orientation.Horizontal, 5);
             wfBox.PackStart(new Label("Workflow: "), false, false, 0);
             _workflowCombo = new ComboBoxText();
+            SetTooltip(_workflowCombo, "Select the reconstruction pipeline to use");
             _workflowCombo.AppendText($"Multi-View ({GetCurrentEngineName()})"); // Uses Settings engine
             _workflowCombo.AppendText("Feature Matching (SfM)");
             _workflowCombo.AppendText("TripoSR (Single Image)");
