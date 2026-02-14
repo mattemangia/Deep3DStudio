@@ -92,6 +92,7 @@ namespace Deep3DStudio
                     if (item is ToolButton tb)
                     {
                         mi = new ImageMenuItem(tb.Label);
+                        mi.TooltipText = tb.TooltipText;
                         if (tb.IconWidget is Image img)
                         {
                             // Clone icon for menu
@@ -105,6 +106,7 @@ namespace Deep3DStudio
                     else if (item is ToggleToolButton ttb)
                     {
                         mi = new CheckMenuItem(ttb.Label);
+                        mi.TooltipText = ttb.TooltipText;
                         ((CheckMenuItem)mi).Active = ttb.Active;
                         mi.Activated += (s, e) => { ttb.Active = ((CheckMenuItem)mi).Active; };
                     }
@@ -137,6 +139,7 @@ namespace Deep3DStudio
         {
             var btn = new ToolButton(AppIconFactory.GenerateIcon(iconKey, iconSize), label);
             btn.TooltipText = onRightClickOptions == null ? tooltip : $"{tooltip} (Right click for options)";
+            btn.HasTooltip = true;
             btn.Clicked += onClick;
 
             if (onRightClickOptions != null)
@@ -276,6 +279,7 @@ namespace Deep3DStudio
             // Select Tool
             var selectBtn = new ToolButton(AppIconFactory.GenerateIcon("select", iconSize), "Select");
             selectBtn.TooltipText = "Select Objects (Q)";
+            selectBtn.HasTooltip = true;
             selectBtn.Clicked += (s, e) => _viewport.SetGizmoMode(GizmoMode.Select);
             toolbar.Insert(selectBtn, -1);
 
@@ -284,6 +288,7 @@ namespace Deep3DStudio
             // Open Files
             var openBtn = new ToolButton(AppIconFactory.GenerateIcon("open", iconSize), "Open Images");
             openBtn.TooltipText = "Load input images for reconstruction";
+            openBtn.HasTooltip = true;
             openBtn.Clicked += OnAddImages;
             toolbar.Insert(openBtn, -1);
 
@@ -292,6 +297,7 @@ namespace Deep3DStudio
             // Settings
             var settingsBtn = new ToolButton(AppIconFactory.GenerateIcon("settings", iconSize), "Settings");
             settingsBtn.TooltipText = "Configure Processing, Meshing, and GPU";
+            settingsBtn.HasTooltip = true;
             settingsBtn.Clicked += OnOpenSettings;
             toolbar.Insert(settingsBtn, -1);
 
@@ -302,6 +308,7 @@ namespace Deep3DStudio
             _meshToggle.IconWidget = AppIconFactory.GenerateIcon("mesh", iconSize);
             _meshToggle.Label = "Mesh";
             _meshToggle.TooltipText = "Show Solid Mesh";
+            _meshToggle.HasTooltip = true;
             _meshToggle.Active = IniSettings.Instance.ShowMesh;
             _meshToggle.Toggled += (s, e) => {
                 IniSettings.Instance.ShowMesh = _meshToggle.Active;
@@ -313,6 +320,7 @@ namespace Deep3DStudio
             _pointsToggle.IconWidget = AppIconFactory.GenerateIcon("pointcloud", iconSize);
             _pointsToggle.Label = "Points";
             _pointsToggle.TooltipText = "Show Point Cloud";
+            _pointsToggle.HasTooltip = true;
             _pointsToggle.Active = IniSettings.Instance.ShowPointCloud;
             _pointsToggle.Toggled += (s, e) => {
                 IniSettings.Instance.ShowPointCloud = _pointsToggle.Active;
@@ -324,6 +332,7 @@ namespace Deep3DStudio
             _wireToggle.IconWidget = AppIconFactory.GenerateIcon("wireframe", iconSize);
             _wireToggle.Label = "Wireframe";
             _wireToggle.TooltipText = "Toggle Wireframe Overlay";
+            _wireToggle.HasTooltip = true;
             _wireToggle.Active = IniSettings.Instance.ShowWireframe;
             _wireToggle.Toggled += (s, e) => {
                 IniSettings.Instance.ShowWireframe = _wireToggle.Active;
@@ -335,6 +344,7 @@ namespace Deep3DStudio
             _textureToggle.IconWidget = AppIconFactory.GenerateIcon("texture", iconSize);
             _textureToggle.Label = "Texture";
             _textureToggle.TooltipText = "Toggle Texture Display";
+            _textureToggle.HasTooltip = true;
             _textureToggle.Active = IniSettings.Instance.ShowTexture;
             _textureToggle.Toggled += (s, e) => {
                 IniSettings.Instance.ShowTexture = _textureToggle.Active;
@@ -346,6 +356,7 @@ namespace Deep3DStudio
             _camerasToggle.IconWidget = AppIconFactory.GenerateIcon("camera", iconSize);
             _camerasToggle.Label = "Cameras";
             _camerasToggle.TooltipText = "Toggle Camera Frustums";
+            _camerasToggle.HasTooltip = true;
             _camerasToggle.Active = IniSettings.Instance.ShowCameras;
             _camerasToggle.Toggled += (s, e) => {
                 IniSettings.Instance.ShowCameras = _camerasToggle.Active;
@@ -361,6 +372,7 @@ namespace Deep3DStudio
             _rgbColorToggle.IconWidget = AppIconFactory.GenerateIcon("rgb", iconSize);
             _rgbColorToggle.Label = "RGB";
             _rgbColorToggle.TooltipText = "Show original RGB colors";
+            _rgbColorToggle.HasTooltip = true;
             _rgbColorToggle.Active = IniSettings.Instance.PointCloudColor == PointCloudColorMode.RGB;
             _rgbColorToggle.Toggled += (s, e) => {
                 if (_updatingPointCloudColorToggles) return;
@@ -373,6 +385,7 @@ namespace Deep3DStudio
             _depthColorToggle.IconWidget = AppIconFactory.GenerateIcon("depthmap", iconSize);
             _depthColorToggle.Label = "Depth";
             _depthColorToggle.TooltipText = "Show distance map with colormap";
+            _depthColorToggle.HasTooltip = true;
             _depthColorToggle.Active = IniSettings.Instance.PointCloudColor == PointCloudColorMode.DistanceMap;
             _depthColorToggle.Toggled += (s, e) => {
                 if (_updatingPointCloudColorToggles) return;
@@ -385,6 +398,7 @@ namespace Deep3DStudio
             _confidenceColorToggle.IconWidget = AppIconFactory.GenerateIcon("confidence", iconSize);
             _confidenceColorToggle.Label = "Conf";
             _confidenceColorToggle.TooltipText = "Show confidence map with colormap";
+            _confidenceColorToggle.HasTooltip = true;
             _confidenceColorToggle.Active = IniSettings.Instance.PointCloudColor == PointCloudColorMode.Confidence;
             _confidenceColorToggle.Toggled += (s, e) => {
                 if (_updatingPointCloudColorToggles) return;
@@ -401,6 +415,7 @@ namespace Deep3DStudio
             _autoWorkflowToggle.IconWidget = AppIconFactory.GenerateIcon("link", iconSize);
             _autoWorkflowToggle.Label = "Auto";
             _autoWorkflowToggle.TooltipText = "Auto Workflow: When ON, Play runs full pipeline. When OFF, run each step manually.";
+            _autoWorkflowToggle.HasTooltip = true;
             _autoWorkflowToggle.Active = _autoWorkflowEnabled;
             _autoWorkflowToggle.Toggled += (s, e) => {
                 _autoWorkflowEnabled = _autoWorkflowToggle.Active;
@@ -676,7 +691,9 @@ namespace Deep3DStudio
                 DrawValue = false,
                 Value = 100,
                 WidthRequest = 140,
-                Sensitive = false
+                Sensitive = false,
+                HasTooltip = true,
+                TooltipText = "Adjust Point Cloud visibility (0-100%)"
             };
             _pcVisibilityScale.ValueChanged += OnPointCloudVisibilitySliderChanged;
             visibilityBox.PackStart(_pcVisibilityScale, false, false, 0);
@@ -702,26 +719,31 @@ namespace Deep3DStudio
 
             var geoEditorBtn = new ToolButton(AppIconFactory.GenerateIcon("georef", iconSize), "GCP");
             geoEditorBtn.TooltipText = "Apri editor GCP / Georeferenziazione";
+            geoEditorBtn.HasTooltip = true;
             geoEditorBtn.Clicked += (s, e) => OnOpenGeoreferenceEditor();
             toolbar.Insert(geoEditorBtn, -1);
 
             var solveBtn = new ToolButton(AppIconFactory.GenerateIcon("residuals", iconSize), "Solve");
             solveBtn.TooltipText = "Risolvi trasformazione Model -> CRS dai GCP";
+            solveBtn.HasTooltip = true;
             solveBtn.Clicked += (s, e) => OnSolveGeoreferenceFromCurrentGcps();
             toolbar.Insert(solveBtn, -1);
 
             var resolvePendingBtn = new ToolButton(AppIconFactory.GenerateIcon("residuals", iconSize), "Resolve Pending");
             resolvePendingBtn.TooltipText = "Risolvi i GCP pending (2D+World) campionando il punto modello dalla scena";
+            resolvePendingBtn.HasTooltip = true;
             resolvePendingBtn.Clicked += (s, e) => OnResolvePendingGcpsFromCurrentScene();
             toolbar.Insert(resolvePendingBtn, -1);
 
             var demBtn = new ToolButton(AppIconFactory.GenerateIcon("dem", iconSize), "DEM");
             demBtn.TooltipText = "Esporta DEM (GeoTIFF + ASCII Grid)";
+            demBtn.HasTooltip = true;
             demBtn.Clicked += (s, e) => OnExportDem(null, EventArgs.Empty);
             toolbar.Insert(demBtn, -1);
 
             var geoExportBtn = new ToolButton(AppIconFactory.GenerateIcon("geo_export", iconSize), "Geo Export");
             geoExportBtn.TooltipText = "Esporta mesh/point cloud georeferenziati";
+            geoExportBtn.HasTooltip = true;
             geoExportBtn.Clicked += (s, e) => OnExportGeoreferencedSelection();
             toolbar.Insert(geoExportBtn, -1);
 
