@@ -86,6 +86,15 @@ namespace Deep3DStudio.Viewport
         private int _frameCount = 0;
         private float _fps = 0;
         private DateTime _lastFpsUpdate = DateTime.Now;
+
+        // Point cloud buffers (key = object Id)
+        private Dictionary<int, (int vao, int vbo, int count, PointCloudColorMode colorMode)> _pointCloudBuffers
+            = new Dictionary<int, (int, int, int, PointCloudColorMode)>();
+
+        // Mesh buffers (key = object Id)
+        private Dictionary<int, (int vao, int vbo, int ebo, int indexCount, bool hasTexture)> _meshBuffers
+            = new Dictionary<int, (int, int, int, int, bool)>();
+
         private bool _hasPointCloudLegend = false;
         private PointCloudColorMode _legendMode = PointCloudColorMode.RGB;
         private float _legendMin = 0.0f;
@@ -141,6 +150,24 @@ namespace Deep3DStudio.Viewport
             GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
             GL.PointSize(5.0f);
             GL.LineWidth(1.0f);
+        }
+
+        public void Cleanup()
+        {
+            foreach (var kvp in _pointCloudBuffers)
+            {
+                if (kvp.Value.vao != 0) GL.DeleteVertexArray(kvp.Value.vao);
+                if (kvp.Value.vbo != 0) GL.DeleteBuffer(kvp.Value.vbo);
+            }
+            _pointCloudBuffers.Clear();
+
+            foreach (var kvp in _meshBuffers)
+            {
+                if (kvp.Value.vao != 0) GL.DeleteVertexArray(kvp.Value.vao);
+                if (kvp.Value.vbo != 0) GL.DeleteBuffer(kvp.Value.vbo);
+                if (kvp.Value.ebo != 0) GL.DeleteBuffer(kvp.Value.ebo);
+            }
+            _meshBuffers.Clear();
         }
 
         public void Render(int width, int height)
@@ -1146,53 +1173,7 @@ namespace Deep3DStudio.Viewport
 
                     if (!bboxOnly && ShouldDrawMeshSurface(mesh, s) && mesh.MeshData != null)
                     {
-                         bool useTexture = ResolveTexture(mesh, s) && mesh.MeshData.Texture != null;
-                         if (useTexture)
-                         {
-                             if (mesh.MeshData.TextureId == -1) UploadTexture(mesh.MeshData);
-                             if (mesh.MeshData.TextureId != -1)
-                             {
-                                 GL.Enable(EnableCap.Texture2D);
-                                 GL.BindTexture(TextureTarget.Texture2D, mesh.MeshData.TextureId);
-                                 GL.Color3(1.0f, 1.0f, 1.0f);
-                             }
-                             else useTexture = false;
-                         }
-
-                         GL.Begin(PrimitiveType.Triangles);
-                         bool hasColors = mesh.MeshData.Colors.Count >= mesh.MeshData.Vertices.Count;
-                         bool hasUVs = useTexture && mesh.MeshData.UVs.Count >= mesh.MeshData.Vertices.Count;
-
-                         for(int i=0; i < mesh.MeshData.Indices.Count; i++)
-                         {
-                             int idx = mesh.MeshData.Indices[i];
-                             if (idx < mesh.MeshData.Vertices.Count)
-                             {
-                                 if (useTexture && hasUVs)
-                                 {
-                                     var uv = mesh.MeshData.UVs[idx];
-                                     GL.TexCoord2(uv.X, uv.Y);
-                                 }
-                                 else if (hasColors)
-                                 {
-                                     var c = mesh.MeshData.Colors[idx];
-                                     if(isSelected) GL.Color3(Math.Min(1, c.X + 0.2f), Math.Min(1, c.Y+0.2f), c.Z);
-                                     else GL.Color3(c.X, c.Y, c.Z);
-                                 }
-                                 else
-                                 {
-                                     GL.Color3(isSelected ? 0.9f : 0.7f, 0.7f, 0.7f);
-                                 }
-                                 GL.Vertex3(mesh.MeshData.Vertices[idx]);
-                             }
-                         }
-                         GL.End();
-
-                         if (useTexture)
-                         {
-                             GL.BindTexture(TextureTarget.Texture2D, 0);
-                             GL.Disable(EnableCap.Texture2D);
-                         }
+                        DrawMeshVBO(mesh, isSelected, ResolveTexture(mesh, s));
                     }
                     GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
 
@@ -1203,6 +1184,112 @@ namespace Deep3DStudio.Viewport
                 }
 
                 GL.PopMatrix();
+            }
+        }
+
+        private void DrawMeshVBO(MeshObject mesh, bool isSelected, bool allowTexture)
+        {
+            if (mesh.MeshData == null || mesh.MeshData.Vertices.Count == 0) return;
+
+            bool useTexture = allowTexture && mesh.MeshData.Texture != null;
+            if (useTexture && mesh.MeshData.TextureId == -1) UploadTexture(mesh.MeshData);
+
+            // Rebuild buffer if count changed or texture mode toggled (UVs needed vs Colors needed)
+            if (!_meshBuffers.TryGetValue(mesh.Id, out var buffers)
+                || buffers.indexCount != mesh.MeshData.Indices.Count
+                || buffers.hasTexture != useTexture)
+            {
+                if (buffers.vao != 0) GL.DeleteVertexArray(buffers.vao);
+                if (buffers.vbo != 0) GL.DeleteBuffer(buffers.vbo);
+                if (buffers.ebo != 0) GL.DeleteBuffer(buffers.ebo);
+
+                // Interleaved: Pos(3) + Color(3) + UV(2) = 8 floats per vertex
+                float[] data = new float[mesh.MeshData.Vertices.Count * 8];
+                bool hasColors = mesh.MeshData.Colors.Count >= mesh.MeshData.Vertices.Count;
+                bool hasUVs = mesh.MeshData.UVs.Count >= mesh.MeshData.Vertices.Count;
+
+                for (int i = 0; i < mesh.MeshData.Vertices.Count; i++)
+                {
+                    var p = mesh.MeshData.Vertices[i];
+                    data[i * 8 + 0] = p.X;
+                    data[i * 8 + 1] = p.Y;
+                    data[i * 8 + 2] = p.Z;
+
+                    if (hasColors)
+                    {
+                        var c = mesh.MeshData.Colors[i];
+                        data[i * 8 + 3] = c.X;
+                        data[i * 8 + 4] = c.Y;
+                        data[i * 8 + 5] = c.Z;
+                    }
+                    else
+                    {
+                        data[i * 8 + 3] = 0.7f;
+                        data[i * 8 + 4] = 0.7f;
+                        data[i * 8 + 5] = 0.7f;
+                    }
+
+                    if (hasUVs)
+                    {
+                        var uv = mesh.MeshData.UVs[i];
+                        data[i * 8 + 6] = uv.X;
+                        data[i * 8 + 7] = uv.Y;
+                    }
+                    else
+                    {
+                        data[i * 8 + 6] = 0;
+                        data[i * 8 + 7] = 0;
+                    }
+                }
+
+                int vao = GL.GenVertexArray();
+                int vbo = GL.GenBuffer();
+                int ebo = GL.GenBuffer();
+
+                GL.BindVertexArray(vao);
+
+                GL.BindBuffer(BufferTarget.ArrayBuffer, vbo);
+                GL.BufferData(BufferTarget.ArrayBuffer, data.Length * sizeof(float), data, BufferUsageHint.StaticDraw);
+
+                GL.BindBuffer(BufferTarget.ElementArrayBuffer, ebo);
+                GL.BufferData(BufferTarget.ElementArrayBuffer, mesh.MeshData.Indices.Count * sizeof(int), mesh.MeshData.Indices.ToArray(), BufferUsageHint.StaticDraw);
+
+                // Attributes
+                GL.EnableClientState(ArrayCap.VertexArray);
+                GL.VertexPointer(3, VertexPointerType.Float, 8 * sizeof(float), 0);
+
+                GL.EnableClientState(ArrayCap.ColorArray);
+                GL.ColorPointer(3, ColorPointerType.Float, 8 * sizeof(float), 3 * sizeof(float));
+
+                GL.EnableClientState(ArrayCap.TextureCoordArray);
+                GL.TexCoordPointer(2, TexCoordPointerType.Float, 8 * sizeof(float), 6 * sizeof(float));
+
+                GL.BindVertexArray(0);
+                _meshBuffers[mesh.Id] = (vao, vbo, ebo, mesh.MeshData.Indices.Count, useTexture);
+                buffers = (vao, vbo, ebo, mesh.MeshData.Indices.Count, useTexture);
+            }
+
+            if (useTexture && mesh.MeshData.TextureId != -1)
+            {
+                GL.Enable(EnableCap.Texture2D);
+                GL.BindTexture(TextureTarget.Texture2D, mesh.MeshData.TextureId);
+                GL.Color3(1.0f, 1.0f, 1.0f);
+            }
+
+            // Apply selection tint if selected (using fixed-function color tinting)
+            if (isSelected && !useTexture)
+            {
+                GL.Color3(1.0f, 0.9f, 0.7f); // Warm tint for selection
+            }
+
+            GL.BindVertexArray(buffers.vao);
+            GL.DrawElements(PrimitiveType.Triangles, buffers.indexCount, DrawElementsType.UnsignedInt, 0);
+            GL.BindVertexArray(0);
+
+            if (useTexture)
+            {
+                GL.BindTexture(TextureTarget.Texture2D, 0);
+                GL.Disable(EnableCap.Texture2D);
             }
         }
 
@@ -1369,15 +1456,48 @@ namespace Deep3DStudio.Viewport
                 UpdatePointCloudLegend(colorMode, min, max, depthFallback);
             }
 
-            GL.PointSize(pointSize);
-            GL.Begin(PrimitiveType.Points);
-            for (int i = 0; i < points.Count; i++)
+            // Simple ID for non-scene-object clouds (use negative hash to avoid collision)
+            int cloudId = -Math.Abs(points.GetHashCode());
+
+            if (!_pointCloudBuffers.TryGetValue(cloudId, out var buffers)
+                || buffers.count != points.Count
+                || buffers.colorMode != colorMode)
             {
-                var c = GetPointColor(i, points, colors, confidence, colorMode, minValue, range, depthFallback);
-                GL.Color3(c.X, c.Y, c.Z);
-                GL.Vertex3(points[i]);
+                if (buffers.vao != 0) GL.DeleteVertexArray(buffers.vao);
+                if (buffers.vbo != 0) GL.DeleteBuffer(buffers.vbo);
+
+                float[] data = new float[points.Count * 6];
+                for (int i = 0; i < points.Count; i++)
+                {
+                    var c = GetPointColor(i, points, colors, confidence, colorMode, minValue, range, depthFallback);
+                    data[i * 6 + 0] = points[i].X;
+                    data[i * 6 + 1] = points[i].Y;
+                    data[i * 6 + 2] = points[i].Z;
+                    data[i * 6 + 3] = c.X;
+                    data[i * 6 + 4] = c.Y;
+                    data[i * 6 + 5] = c.Z;
+                }
+
+                int vao = GL.GenVertexArray();
+                int vbo = GL.GenBuffer();
+                GL.BindVertexArray(vao);
+                GL.BindBuffer(BufferTarget.ArrayBuffer, vbo);
+                GL.BufferData(BufferTarget.ArrayBuffer, data.Length * sizeof(float), data, BufferUsageHint.StaticDraw);
+
+                GL.EnableClientState(ArrayCap.VertexArray);
+                GL.VertexPointer(3, VertexPointerType.Float, 6 * sizeof(float), 0);
+                GL.EnableClientState(ArrayCap.ColorArray);
+                GL.ColorPointer(3, ColorPointerType.Float, 6 * sizeof(float), 3 * sizeof(float));
+
+                GL.BindVertexArray(0);
+                _pointCloudBuffers[cloudId] = (vao, vbo, points.Count, colorMode);
+                buffers = (vao, vbo, points.Count, colorMode);
             }
-            GL.End();
+
+            GL.PointSize(pointSize);
+            GL.BindVertexArray(buffers.vao);
+            GL.DrawArrays(PrimitiveType.Points, 0, buffers.count);
+            GL.BindVertexArray(0);
         }
 
         private void DrawPointCloud(PointCloudObject pointCloud)
@@ -1408,29 +1528,58 @@ namespace Deep3DStudio.Viewport
                 UpdatePointCloudLegend(colorMode, min, max, depthFallback);
             }
 
-            GL.PointSize(pointCloud.PointSize);
-            GL.Begin(PrimitiveType.Points);
-            for (int i = 0; i < visibleCount; i++)
+            if (!_pointCloudBuffers.TryGetValue(pointCloud.Id, out var buffers)
+                || buffers.count != visibleCount
+                || buffers.colorMode != colorMode)
             {
-                int sourceIndex = pointCloud.GetSourcePointIndex(i, visibleCount);
-                if (sourceIndex < 0 || sourceIndex >= totalPoints)
-                    continue;
+                if (buffers.vao != 0) GL.DeleteVertexArray(buffers.vao);
+                if (buffers.vbo != 0) GL.DeleteBuffer(buffers.vbo);
 
-                var c = GetPointColor(
-                    sourceIndex,
-                    pointCloud.Points,
-                    pointCloud.Colors,
-                    pointCloud.Confidence,
-                    colorMode,
-                    minValue,
-                    range,
-                    depthFallback);
-                GL.Color3(c.X, c.Y, c.Z);
+                float[] data = new float[visibleCount * 6];
+                for (int i = 0; i < visibleCount; i++)
+                {
+                    int sourceIndex = pointCloud.GetSourcePointIndex(i, visibleCount);
+                    if (sourceIndex < 0 || sourceIndex >= totalPoints)
+                        continue;
 
-                GL.Vertex3(pointCloud.Points[sourceIndex]);
+                    var c = GetPointColor(
+                        sourceIndex,
+                        pointCloud.Points,
+                        pointCloud.Colors,
+                        pointCloud.Confidence,
+                        colorMode,
+                        minValue,
+                        range,
+                        depthFallback);
+
+                    data[i * 6 + 0] = pointCloud.Points[sourceIndex].X;
+                    data[i * 6 + 1] = pointCloud.Points[sourceIndex].Y;
+                    data[i * 6 + 2] = pointCloud.Points[sourceIndex].Z;
+                    data[i * 6 + 3] = c.X;
+                    data[i * 6 + 4] = c.Y;
+                    data[i * 6 + 5] = c.Z;
+                }
+
+                int vao = GL.GenVertexArray();
+                int vbo = GL.GenBuffer();
+                GL.BindVertexArray(vao);
+                GL.BindBuffer(BufferTarget.ArrayBuffer, vbo);
+                GL.BufferData(BufferTarget.ArrayBuffer, data.Length * sizeof(float), data, BufferUsageHint.StaticDraw);
+
+                GL.EnableClientState(ArrayCap.VertexArray);
+                GL.VertexPointer(3, VertexPointerType.Float, 6 * sizeof(float), 0);
+                GL.EnableClientState(ArrayCap.ColorArray);
+                GL.ColorPointer(3, ColorPointerType.Float, 6 * sizeof(float), 3 * sizeof(float));
+
+                GL.BindVertexArray(0);
+                _pointCloudBuffers[pointCloud.Id] = (vao, vbo, visibleCount, colorMode);
+                buffers = (vao, vbo, visibleCount, colorMode);
             }
 
-            GL.End();
+            GL.PointSize(pointCloud.PointSize);
+            GL.BindVertexArray(buffers.vao);
+            GL.DrawArrays(PrimitiveType.Points, 0, buffers.count);
+            GL.BindVertexArray(0);
         }
 
         private void UploadTexture(MeshData mesh)

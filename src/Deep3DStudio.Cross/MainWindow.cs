@@ -366,6 +366,9 @@ namespace Deep3DStudio
             // Init Viewport GL state
             _viewport.InitGL();
 
+            // Enable VSync to reduce CPU usage
+            VSync = VSyncMode.On;
+
             // Init Icons
             _iconFactory = new ImGuiIconFactory();
 
@@ -984,6 +987,7 @@ namespace Deep3DStudio
             if (_geoPreviewTexture > 0)
                 TextureLoader.DeleteTexture(_geoPreviewTexture);
 
+            _viewport.Cleanup();
             _iconFactory?.Dispose();
         }
 

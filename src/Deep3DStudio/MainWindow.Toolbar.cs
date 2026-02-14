@@ -20,6 +20,113 @@ namespace Deep3DStudio
 {
     public partial class MainWindow
     {
+        private Dictionary<Toolbar, List<ToolItem>> _originalToolbarItems = new Dictionary<Toolbar, List<ToolItem>>();
+
+        private void RegisterToolbarItems(Toolbar toolbar)
+        {
+            var items = new List<ToolItem>();
+            for (int i = 0; i < toolbar.NItems; i++)
+                items.Add(toolbar.GetNthItem(i));
+            _originalToolbarItems[toolbar] = items;
+        }
+
+        private void UpdateAllToolbarsOverflow()
+        {
+            if (_topToolbar is Toolbar top) UpdateToolbarOverflow(top);
+            if (_meshEditorToolbar is Toolbar mesh) UpdateToolbarOverflow(mesh);
+            if (_pointCloudToolbar is Toolbar pc) UpdateToolbarOverflow(pc);
+            if (_georeferenceToolbar is Toolbar geo) UpdateToolbarOverflow(geo);
+        }
+
+        private void UpdateToolbarOverflow(Toolbar toolbar)
+        {
+            if (!_originalToolbarItems.TryGetValue(toolbar, out var originalItems))
+                return;
+
+            int windowWidth = this.Allocation.Width;
+            
+            // Estimated padding and vertical toolbar/sidebar allowance
+            int availableWidth = windowWidth - 60; 
+            if (_verticalToolbar.Visible) availableWidth -= 40;
+            
+            // Track used width
+            int currentWidth = 20; // Start padding
+            int lastVisibleIndex = -1;
+
+            // First, clear current toolbar (but don't destroy items!)
+            for (int i = toolbar.NItems - 1; i >= 0; i--)
+                toolbar.Remove(toolbar.GetNthItem(i));
+
+            var overflowItems = new List<ToolItem>();
+
+            for (int i = 0; i < originalItems.Count; i++)
+            {
+                var item = originalItems[i];
+                int itemWidth = item.SizeRequest().Width;
+                if (itemWidth <= 0) itemWidth = 32; // Fallback for toolbuttons
+
+                if (currentWidth + itemWidth + 40 < availableWidth)
+                {
+                    toolbar.Insert(item, -1);
+                    currentWidth += itemWidth + 4;
+                    lastVisibleIndex = i;
+                }
+                else
+                {
+                    overflowItems.Add(item);
+                }
+            }
+
+            if (overflowItems.Count > 0)
+            {
+                var overflowMenu = new Menu();
+                foreach (var item in overflowItems)
+                {
+                    if (item is SeparatorToolItem)
+                    {
+                        overflowMenu.Append(new SeparatorMenuItem());
+                        continue;
+                    }
+
+                    MenuItem mi;
+                    if (item is ToolButton tb)
+                    {
+                        mi = new ImageMenuItem(tb.Label);
+                        if (tb.IconWidget is Image img)
+                        {
+                            // Clone icon for menu
+                            var menuImg = new Image();
+                            if (img.Pixbuf != null) menuImg.Pixbuf = img.Pixbuf.ScaleSimple(16, 16, InterpType.Bilinear);
+                            else if (!string.IsNullOrEmpty(img.IconName)) menuImg.IconName = img.IconName;
+                            ((ImageMenuItem)mi).Image = menuImg;
+                        }
+                        mi.Activated += (s, e) => tb.EmitClicked();
+                    }
+                    else if (item is ToggleToolButton ttb)
+                    {
+                        mi = new CheckMenuItem(ttb.Label);
+                        ((CheckMenuItem)mi).Active = ttb.Active;
+                        mi.Activated += (s, e) => { ttb.Active = ((CheckMenuItem)mi).Active; };
+                    }
+                    else
+                    {
+                        // Fallback for custom tool items (like workflows combo)
+                        mi = new MenuItem(item.GetType().Name);
+                    }
+                    
+                    overflowMenu.Append(mi);
+                }
+
+                var overflowBtn = new MenuToolButton(AppIconFactory.GenerateIcon("settings", 20), "More...");
+                overflowBtn.Menu = overflowMenu;
+                overflowBtn.TooltipText = "More tools";
+                toolbar.Insert(overflowBtn, -1);
+                overflowMenu.ShowAll();
+            }
+
+            toolbar.ShowAll();
+        }
+
         private ToolButton CreateActionButton(
             string iconKey,
             int iconSize,
@@ -408,6 +515,7 @@ namespace Deep3DStudio
                 ConfigureAiModelOptions);
             toolbar.Insert(aiRigBtn, -1);
 
+            RegisterToolbarItems(toolbar);
             return toolbar;
         }
 
@@ -505,6 +613,7 @@ namespace Deep3DStudio
                 OnBridgeSelectedTriangles, null);
             toolbar.Insert(bridgeBtn, -1);
 
+            RegisterToolbarItems(toolbar);
             return toolbar;
         }
 
@@ -581,6 +690,7 @@ namespace Deep3DStudio
             visibilityItem.Add(visibilityBox);
             toolbar.Insert(visibilityItem, -1);
 
+            RegisterToolbarItems(toolbar);
             return toolbar;
         }
 
@@ -615,6 +725,7 @@ namespace Deep3DStudio
             geoExportBtn.Clicked += (s, e) => OnExportGeoreferencedSelection();
             toolbar.Insert(geoExportBtn, -1);
 
+            RegisterToolbarItems(toolbar);
             return toolbar;
         }
     }

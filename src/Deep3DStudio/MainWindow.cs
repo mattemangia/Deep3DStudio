@@ -362,6 +362,8 @@ namespace Deep3DStudio
             Gtk.Drag.DestSet(this, DestDefaults.All, new TargetEntry[] { new TargetEntry("text/uri-list", 0, 0) }, Gdk.DragAction.Copy);
             this.DragDataReceived += OnDragDataReceived;
 
+            this.SizeAllocated += (s, e) => UpdateAllToolbarsOverflow();
+
             Console.WriteLine("MainWindow: Calling ShowAll()");
             this.ShowAll();
             Console.WriteLine("MainWindow: ShowAll() completed");

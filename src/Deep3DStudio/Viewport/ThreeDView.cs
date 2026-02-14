@@ -157,8 +157,9 @@ namespace Deep3DStudio.Viewport
             // while maintaining support for fixed-function pipeline commands.
             this.SetRequiredVersion(3, 3);
 
-            // Enable automatic rendering - critical for GLArea to work on macOS
-            this.AutoRender = true;
+            // Disable automatic rendering to save CPU.
+            // QueueRender() is called manually when scene or camera changes.
+            this.AutoRender = false;
 
             this.HasFocus = true;
             this.CanFocus = true;
