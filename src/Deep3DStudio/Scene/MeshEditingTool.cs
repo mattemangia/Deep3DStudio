@@ -949,6 +949,88 @@ namespace Deep3DStudio.Scene
         }
 
         /// <summary>
+        /// Shrink selection by removing boundary triangles (those with adjacent unselected triangles)
+        /// </summary>
+        public void ShrinkSelection()
+        {
+            if (_selectedTriangles.Count == 0) return;
+
+            var toRemove = new HashSet<(MeshObject mesh, int triangleIndex)>();
+
+            foreach (var (mesh, triIdx) in _selectedTriangles)
+            {
+                var adjacent = GetAdjacentTriangles(mesh, triIdx);
+                bool hasBoundary = adjacent.Any(adj => !_selectedTriangles.Contains((mesh, adj)));
+                if (hasBoundary)
+                {
+                    toRemove.Add((mesh, triIdx));
+                }
+            }
+
+            foreach (var item in toRemove)
+                _selectedTriangles.Remove(item);
+
+            SelectionChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        /// <summary>
+        /// Copy selected triangles into a new MeshData with remapped vertices
+        /// </summary>
+        public MeshData? CopySelectedTriangles()
+        {
+            if (_selectedTriangles.Count == 0) return null;
+
+            var result = new MeshData();
+            var vertexMap = new Dictionary<(MeshObject, int), int>();
+
+            foreach (var (mesh, triIdx) in _selectedTriangles)
+            {
+                var meshData = mesh.MeshData;
+                if (meshData == null) continue;
+
+                int baseIdx = triIdx * 3;
+                if (baseIdx + 2 >= meshData.Indices.Count) continue;
+
+                var worldTransform = mesh.GetWorldTransform();
+
+                for (int i = 0; i < 3; i++)
+                {
+                    int vIdx = meshData.Indices[baseIdx + i];
+                    var key = (mesh, vIdx);
+
+                    if (!vertexMap.TryGetValue(key, out int newIdx))
+                    {
+                        newIdx = result.Vertices.Count;
+                        vertexMap[key] = newIdx;
+
+                        if (vIdx < meshData.Vertices.Count)
+                            result.Vertices.Add(Vector3.TransformPosition(meshData.Vertices[vIdx], worldTransform));
+                        if (vIdx < meshData.Normals.Count)
+                            result.Normals.Add(meshData.Normals[vIdx]);
+                        if (vIdx < meshData.Colors.Count)
+                            result.Colors.Add(meshData.Colors[vIdx]);
+                        if (vIdx < meshData.UVs.Count)
+                            result.UVs.Add(meshData.UVs[vIdx]);
+                    }
+
+                    result.Indices.Add(newIdx);
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Cut selected triangles: copies then deletes
+        /// </summary>
+        public MeshData? CutSelectedTriangles()
+        {
+            var copy = CopySelectedTriangles();
+            if (copy != null) DeleteSelectedTriangles();
+            return copy;
+        }
+
+        /// <summary>
         /// Get triangle vertices for rendering highlights
         /// </summary>
         public List<Vector3> GetSelectedTriangleVertices()

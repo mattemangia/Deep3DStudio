@@ -18,8 +18,10 @@ namespace Deep3DStudio.Viewport
         Rotate,
         Scale,
         Select,
-        Pen,     // Triangle editing mode
-        Rigging  // Skeleton rigging mode
+        Pen,          // Triangle editing mode
+        Rigging,      // Skeleton rigging mode
+        LassoSelect,  // Lasso selection for points/triangles
+        RectSelect    // Rectangle selection for points/triangles
     }
 
     public class ThreeDView
@@ -68,6 +70,14 @@ namespace Deep3DStudio.Viewport
 
         // Triangle selection events
         public event EventHandler? TriangleSelectionChanged;
+
+        // Lasso/Rect selection state
+        private List<Vector2> _lassoPoints = new List<Vector2>();
+        private Vector2 _rectStart, _rectEnd;
+        private bool _isDrawingSelection = false;
+        private HashSet<(PointCloudObject pc, int pointIndex)> _selectedPoints = new HashSet<(PointCloudObject, int)>();
+        public IReadOnlyCollection<(PointCloudObject pc, int pointIndex)> SelectedPoints => _selectedPoints;
+        public event EventHandler? SelectionChanged;
 
         // Viewport dimensions for ray casting
         private int _viewportX, _viewportY, _viewportWidth, _viewportHeight;
@@ -195,18 +205,27 @@ namespace Deep3DStudio.Viewport
             DrawScene();
             CheckError("DrawScene");
 
-            // Draw gizmo - hide in Select, Pen, and Rigging modes
+            // Draw gizmo - hide in Select, Pen, Rigging, Lasso, Rect modes
             if (s.ShowGizmo && _sceneGraph.SelectedObjects.Count > 0 &&
                 _gizmoMode != GizmoMode.Select && _gizmoMode != GizmoMode.None &&
-                _gizmoMode != GizmoMode.Pen && _gizmoMode != GizmoMode.Rigging)
+                _gizmoMode != GizmoMode.Pen && _gizmoMode != GizmoMode.Rigging &&
+                _gizmoMode != GizmoMode.LassoSelect && _gizmoMode != GizmoMode.RectSelect)
             {
                 DrawGizmo();
             }
 
-            // Draw selected triangles highlight (Pen mode)
-            if (_gizmoMode == GizmoMode.Pen && _meshEditingTool.SelectedTriangles.Count > 0)
+            // Draw selected triangles highlight (Pen mode or selection modes)
+            if ((_gizmoMode == GizmoMode.Pen || _gizmoMode == GizmoMode.LassoSelect || _gizmoMode == GizmoMode.RectSelect)
+                && _meshEditingTool.SelectedTriangles.Count > 0)
             {
                 DrawSelectedTriangles();
+            }
+
+            // Draw selected points highlight
+            if ((_gizmoMode == GizmoMode.LassoSelect || _gizmoMode == GizmoMode.RectSelect)
+                && _selectedPoints.Count > 0)
+            {
+                DrawSelectedPoints();
             }
         }
 
@@ -277,6 +296,29 @@ namespace Deep3DStudio.Viewport
                          return;
                      }
 
+                     // Lasso/Rect selection modes
+                     if (_gizmoMode == GizmoMode.LassoSelect || _gizmoMode == GizmoMode.RectSelect)
+                     {
+                         int localX = (int)mouse.X - _viewportX;
+                         int localY = (int)mouse.Y - _viewportY;
+                         _isDrawingSelection = true;
+
+                         if (_gizmoMode == GizmoMode.LassoSelect)
+                         {
+                             _lassoPoints.Clear();
+                             _lassoPoints.Add(new Vector2(localX, localY));
+                         }
+                         else
+                         {
+                             _rectStart = new Vector2(localX, localY);
+                             _rectEnd = _rectStart;
+                         }
+
+                         _isDragging = true;
+                         _lastMousePos = mouse.Position;
+                         return;
+                     }
+
                      // Check Gizmo Intersection first (but not for Pen/Rigging modes)
                      if (_gizmoMode != GizmoMode.Select && _gizmoMode != GizmoMode.None &&
                          _gizmoMode != GizmoMode.Pen && _gizmoMode != GizmoMode.Rigging &&
@@ -331,6 +373,22 @@ namespace Deep3DStudio.Viewport
                  {
                      HandleGizmoDrag(mouse.X, mouse.Y);
                  }
+                 else if (_isDragging && _isDrawingSelection)
+                 {
+                     int localX = (int)mouse.X - _viewportX;
+                     int localY = (int)mouse.Y - _viewportY;
+
+                     if (_gizmoMode == GizmoMode.LassoSelect)
+                     {
+                         var newPoint = new Vector2(localX, localY);
+                         if (_lassoPoints.Count == 0 || (newPoint - _lassoPoints[^1]).Length > 3f)
+                             _lassoPoints.Add(newPoint);
+                     }
+                     else if (_gizmoMode == GizmoMode.RectSelect)
+                     {
+                         _rectEnd = new Vector2(localX, localY);
+                     }
+                 }
                  else if (_isDragging && _gizmoMode != GizmoMode.Pen)
                  {
                      var delta = mouse.Position - _lastMousePos;
@@ -342,6 +400,20 @@ namespace Deep3DStudio.Viewport
              }
              else
              {
+                 if (_isDrawingSelection)
+                 {
+                     bool addToSelection = keyboard.IsKeyDown(Keys.LeftShift) || keyboard.IsKeyDown(Keys.RightShift) ||
+                                           keyboard.IsKeyDown(Keys.LeftControl) || keyboard.IsKeyDown(Keys.RightControl);
+                     if (_gizmoMode == GizmoMode.LassoSelect && _lassoPoints.Count >= 3)
+                     {
+                         SelectGeometryInLasso(addToSelection);
+                     }
+                     else if (_gizmoMode == GizmoMode.RectSelect)
+                     {
+                         SelectGeometryInRect(addToSelection);
+                     }
+                     _isDrawingSelection = false;
+                 }
                  _isDragging = false;
                  _isDraggingGizmo = false;
                  _gizmoStartStates.Clear();
@@ -510,6 +582,379 @@ namespace Deep3DStudio.Viewport
             GL.LineWidth(1.0f);
             GL.Disable(EnableCap.Blend);
             GL.Enable(EnableCap.DepthTest);
+        }
+
+        /// <summary>
+        /// Draw highlight for selected points in point clouds
+        /// </summary>
+        private void DrawSelectedPoints()
+        {
+            if (_selectedPoints.Count == 0) return;
+
+            GL.Disable(EnableCap.DepthTest);
+            GL.PointSize(8.0f);
+            GL.Begin(PrimitiveType.Points);
+            GL.Color4(0.0f, 1.0f, 0.3f, 1.0f); // Bright green
+
+            foreach (var (pc, idx) in _selectedPoints)
+            {
+                if (idx >= 0 && idx < pc.Points.Count)
+                {
+                    var worldPos = Vector3.TransformPosition(pc.Points[idx], pc.GetWorldTransform());
+                    GL.Vertex3(worldPos);
+                }
+            }
+
+            GL.End();
+            GL.PointSize(1.0f);
+            GL.Enable(EnableCap.DepthTest);
+        }
+
+        /// <summary>
+        /// Project world position to viewport screen coordinates
+        /// </summary>
+        private Vector2 ProjectToScreen(Vector3 worldPos)
+        {
+            Matrix4 viewProj = _finalViewMatrix * _projectionMatrix;
+            Vector4 clip = new Vector4(worldPos, 1.0f) * viewProj;
+
+            if (Math.Abs(clip.W) < 0.0001f)
+                return new Vector2(-10000, -10000);
+
+            float ndcX = clip.X / clip.W;
+            float ndcY = clip.Y / clip.W;
+
+            float screenX = (ndcX + 1.0f) * 0.5f * _viewportWidth;
+            float screenY = (1.0f - ndcY) * 0.5f * _viewportHeight;
+
+            return new Vector2(screenX, screenY);
+        }
+
+        /// <summary>
+        /// Test if a 2D point is inside a polygon (lasso) using ray casting
+        /// </summary>
+        private static bool IsPointInLasso(Vector2 point, List<Vector2> lasso)
+        {
+            int count = lasso.Count;
+            if (count < 3) return false;
+
+            bool inside = false;
+            for (int i = 0, j = count - 1; i < count; j = i++)
+            {
+                if ((lasso[i].Y > point.Y) != (lasso[j].Y > point.Y) &&
+                    point.X < (lasso[j].X - lasso[i].X) * (point.Y - lasso[i].Y) / (lasso[j].Y - lasso[i].Y) + lasso[i].X)
+                {
+                    inside = !inside;
+                }
+            }
+            return inside;
+        }
+
+        /// <summary>
+        /// Test if a 2D point is inside a rectangle
+        /// </summary>
+        private static bool IsPointInRect(Vector2 point, Vector2 rectMin, Vector2 rectMax)
+        {
+            return point.X >= rectMin.X && point.X <= rectMax.X &&
+                   point.Y >= rectMin.Y && point.Y <= rectMax.Y;
+        }
+
+        /// <summary>
+        /// Select geometry (triangles + points) that falls within the lasso region
+        /// </summary>
+        private void SelectGeometryInLasso(bool addToSelection)
+        {
+            if (!addToSelection)
+            {
+                _meshEditingTool.ClearSelection();
+                _selectedPoints.Clear();
+            }
+
+            SelectGeometryInRegion(pt => IsPointInLasso(pt, _lassoPoints));
+        }
+
+        /// <summary>
+        /// Select geometry (triangles + points) that falls within the rectangle region
+        /// </summary>
+        private void SelectGeometryInRect(bool addToSelection)
+        {
+            if (!addToSelection)
+            {
+                _meshEditingTool.ClearSelection();
+                _selectedPoints.Clear();
+            }
+
+            var rectMin = new Vector2(Math.Min(_rectStart.X, _rectEnd.X), Math.Min(_rectStart.Y, _rectEnd.Y));
+            var rectMax = new Vector2(Math.Max(_rectStart.X, _rectEnd.X), Math.Max(_rectStart.Y, _rectEnd.Y));
+
+            // Minimum size to avoid accidental clicks
+            if (Math.Abs(rectMax.X - rectMin.X) < 5 && Math.Abs(rectMax.Y - rectMin.Y) < 5)
+                return;
+
+            SelectGeometryInRegion(pt => IsPointInRect(pt, rectMin, rectMax));
+        }
+
+        /// <summary>
+        /// Core selection logic: tests projected geometry against a 2D region predicate
+        /// </summary>
+        private void SelectGeometryInRegion(Func<Vector2, bool> isInRegion)
+        {
+            if (_sceneGraph == null) return;
+
+            var visibleObjects = _sceneGraph.GetVisibleObjects();
+
+            // Select triangles from meshes
+            foreach (var obj in visibleObjects.OfType<MeshObject>())
+            {
+                if (obj.MeshData == null) continue;
+                var meshData = obj.MeshData;
+                var worldTransform = obj.GetWorldTransform();
+                int triCount = meshData.Indices.Count / 3;
+
+                for (int t = 0; t < triCount; t++)
+                {
+                    int i0 = meshData.Indices[t * 3];
+                    int i1 = meshData.Indices[t * 3 + 1];
+                    int i2 = meshData.Indices[t * 3 + 2];
+
+                    if (i0 >= meshData.Vertices.Count || i1 >= meshData.Vertices.Count || i2 >= meshData.Vertices.Count)
+                        continue;
+
+                    var s0 = ProjectToScreen(Vector3.TransformPosition(meshData.Vertices[i0], worldTransform));
+                    var s1 = ProjectToScreen(Vector3.TransformPosition(meshData.Vertices[i1], worldTransform));
+                    var s2 = ProjectToScreen(Vector3.TransformPosition(meshData.Vertices[i2], worldTransform));
+
+                    // Select if all 3 vertices are in the region
+                    if (isInRegion(s0) && isInRegion(s1) && isInRegion(s2))
+                    {
+                        _meshEditingTool.SelectTriangle(obj, t, true);
+                    }
+                }
+            }
+
+            // Select points from point clouds
+            foreach (var pc in visibleObjects.OfType<PointCloudObject>())
+            {
+                var worldTransform = pc.GetWorldTransform();
+                int visibleCount = pc.VisiblePointCount;
+
+                for (int i = 0; i < visibleCount; i++)
+                {
+                    var screenPos = ProjectToScreen(Vector3.TransformPosition(pc.Points[i], worldTransform));
+                    if (isInRegion(screenPos))
+                    {
+                        _selectedPoints.Add((pc, i));
+                    }
+                }
+            }
+
+            TriangleSelectionChanged?.Invoke(this, EventArgs.Empty);
+            SelectionChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        /// <summary>
+        /// Get the current lasso points for rendering overlay
+        /// </summary>
+        public IReadOnlyList<Vector2> GetLassoPoints() => _lassoPoints;
+
+        /// <summary>
+        /// Get the current rectangle selection for rendering overlay
+        /// </summary>
+        public (Vector2 start, Vector2 end) GetRectSelection() => (_rectStart, _rectEnd);
+
+        /// <summary>
+        /// Whether a selection drag is in progress
+        /// </summary>
+        public bool IsDrawingSelection => _isDrawingSelection;
+
+        /// <summary>
+        /// Clear all point selections
+        /// </summary>
+        public void ClearPointSelection()
+        {
+            _selectedPoints.Clear();
+            SelectionChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        /// <summary>
+        /// Delete selected points from their point clouds
+        /// </summary>
+        public int DeleteSelectedPoints()
+        {
+            if (_selectedPoints.Count == 0) return 0;
+
+            // Group by point cloud
+            var byCloud = _selectedPoints.GroupBy(x => x.pc).ToList();
+            int totalRemoved = 0;
+
+            foreach (var group in byCloud)
+            {
+                var pc = group.Key;
+                var indicesToRemove = group.Select(x => x.pointIndex).OrderByDescending(i => i).Distinct().ToList();
+
+                foreach (int idx in indicesToRemove)
+                {
+                    if (idx < pc.Points.Count)
+                    {
+                        pc.Points.RemoveAt(idx);
+                        if (idx < pc.Colors.Count) pc.Colors.RemoveAt(idx);
+                        if (idx < pc.Normals.Count) pc.Normals.RemoveAt(idx);
+                        if (idx < pc.Confidence.Count) pc.Confidence.RemoveAt(idx);
+                        totalRemoved++;
+                    }
+                }
+
+                pc.UpdateBounds();
+            }
+
+            _selectedPoints.Clear();
+            SelectionChanged?.Invoke(this, EventArgs.Empty);
+            return totalRemoved;
+        }
+
+        /// <summary>
+        /// Copy selected points into a new PointCloudObject
+        /// </summary>
+        public PointCloudObject? CopySelectedPoints()
+        {
+            if (_selectedPoints.Count == 0) return null;
+
+            var result = new PointCloudObject("Selection Copy");
+
+            foreach (var (pc, idx) in _selectedPoints)
+            {
+                if (idx >= 0 && idx < pc.Points.Count)
+                {
+                    var worldTransform = pc.GetWorldTransform();
+                    result.Points.Add(Vector3.TransformPosition(pc.Points[idx], worldTransform));
+                    if (idx < pc.Colors.Count) result.Colors.Add(pc.Colors[idx]);
+                    if (idx < pc.Normals.Count) result.Normals.Add(pc.Normals[idx]);
+                    if (idx < pc.Confidence.Count) result.Confidence.Add(pc.Confidence[idx]);
+                }
+            }
+
+            result.UpdateBounds();
+            return result;
+        }
+
+        /// <summary>
+        /// Grow point selection by adding nearby points within a radius
+        /// </summary>
+        public void GrowPointSelection(float radiusFactor = 2.0f)
+        {
+            if (_selectedPoints.Count == 0) return;
+
+            var newSelections = new HashSet<(PointCloudObject, int)>();
+
+            var byCloud = _selectedPoints.GroupBy(x => x.pc).ToList();
+            foreach (var group in byCloud)
+            {
+                var pc = group.Key;
+                var selectedIndices = new HashSet<int>(group.Select(x => x.pointIndex));
+                var worldTransform = pc.GetWorldTransform();
+
+                // Estimate average spacing from selected points
+                float avgSpacing = 0;
+                int count = 0;
+                var selList = selectedIndices.Take(100).ToList();
+                foreach (int idx in selList)
+                {
+                    if (idx >= pc.Points.Count) continue;
+                    var p = pc.Points[idx];
+                    float minDist = float.MaxValue;
+                    for (int j = Math.Max(0, idx - 50); j < Math.Min(pc.Points.Count, idx + 50); j++)
+                    {
+                        if (j == idx) continue;
+                        float d = (pc.Points[j] - p).LengthSquared;
+                        if (d < minDist) minDist = d;
+                    }
+                    if (minDist < float.MaxValue) { avgSpacing += MathF.Sqrt(minDist); count++; }
+                }
+                float radius = count > 0 ? (avgSpacing / count) * radiusFactor : 0.01f;
+                float radiusSq = radius * radius;
+
+                // Find neighbors
+                int visibleCount = pc.VisiblePointCount;
+                foreach (int selIdx in selectedIndices)
+                {
+                    if (selIdx >= pc.Points.Count) continue;
+                    var selPoint = pc.Points[selIdx];
+
+                    for (int i = 0; i < visibleCount; i++)
+                    {
+                        if (selectedIndices.Contains(i)) continue;
+                        if ((pc.Points[i] - selPoint).LengthSquared <= radiusSq)
+                        {
+                            newSelections.Add((pc, i));
+                        }
+                    }
+                }
+            }
+
+            foreach (var sel in newSelections)
+                _selectedPoints.Add(sel);
+
+            SelectionChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        /// <summary>
+        /// Shrink point selection by removing boundary points
+        /// </summary>
+        public void ShrinkPointSelection(float radiusFactor = 2.0f)
+        {
+            if (_selectedPoints.Count == 0) return;
+
+            var toRemove = new HashSet<(PointCloudObject, int)>();
+            var byCloud = _selectedPoints.GroupBy(x => x.pc).ToList();
+
+            foreach (var group in byCloud)
+            {
+                var pc = group.Key;
+                var selectedIndices = new HashSet<int>(group.Select(x => x.pointIndex));
+
+                // Estimate average spacing
+                float avgSpacing = 0;
+                int count = 0;
+                var selList = selectedIndices.Take(100).ToList();
+                foreach (int idx in selList)
+                {
+                    if (idx >= pc.Points.Count) continue;
+                    var p = pc.Points[idx];
+                    float minDist = float.MaxValue;
+                    for (int j = Math.Max(0, idx - 50); j < Math.Min(pc.Points.Count, idx + 50); j++)
+                    {
+                        if (j == idx) continue;
+                        float d = (pc.Points[j] - p).LengthSquared;
+                        if (d < minDist) minDist = d;
+                    }
+                    if (minDist < float.MaxValue) { avgSpacing += MathF.Sqrt(minDist); count++; }
+                }
+                float radius = count > 0 ? (avgSpacing / count) * radiusFactor : 0.01f;
+                float radiusSq = radius * radius;
+
+                // Remove boundary points (those with unselected neighbors within radius)
+                foreach (int selIdx in selectedIndices)
+                {
+                    if (selIdx >= pc.Points.Count) continue;
+                    var selPoint = pc.Points[selIdx];
+                    int visibleCount = pc.VisiblePointCount;
+
+                    for (int i = 0; i < visibleCount; i++)
+                    {
+                        if (selectedIndices.Contains(i)) continue;
+                        if ((pc.Points[i] - selPoint).LengthSquared <= radiusSq)
+                        {
+                            toRemove.Add((pc, selIdx));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            foreach (var sel in toRemove)
+                _selectedPoints.Remove(sel);
+
+            SelectionChanged?.Invoke(this, EventArgs.Empty);
         }
 
         public void OnMouseWheel(float offset)

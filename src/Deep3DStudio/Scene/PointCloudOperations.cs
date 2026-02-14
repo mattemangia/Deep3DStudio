@@ -356,7 +356,8 @@ namespace Deep3DStudio.Scene
             float neighborRadius,
             int pointsPerSeed,
             CancellationToken cancellationToken = default,
-            IProgress<string>? progress = null)
+            IProgress<string>? progress = null,
+            IProgress<float>? progressFactor = null)
         {
             return await Task.Run(() =>
             {
@@ -364,6 +365,7 @@ namespace Deep3DStudio.Scene
                     return 0;
 
                 progress?.Report("Computing scene bounds...");
+                progressFactor?.Report(0.05f);
                 neighborRadius = Math.Max(0.0001f, neighborRadius);
                 pointsPerSeed = Math.Clamp(pointsPerSeed, 1, 8);
 
@@ -391,6 +393,7 @@ namespace Deep3DStudio.Scene
                 }
 
                 progress?.Report("Building spatial grid...");
+                progressFactor?.Report(0.1f);
                 float cellSize = neighborRadius;
                 var buckets = new ConcurrentDictionary<(int x, int y, int z), ConcurrentBag<int>>();
 
@@ -405,13 +408,15 @@ namespace Deep3DStudio.Scene
                 });
 
                 progress?.Report("Creating dense points...");
+                progressFactor?.Report(0.2f);
                 var outPoints = new ConcurrentBag<Vector3>();
                 var outColors = sourceColors != null ? new ConcurrentBag<Vector3>() : null;
                 var outNormals = sourceNormals != null ? new ConcurrentBag<Vector3>() : null;
                 var outConfidence = new ConcurrentBag<float>();
 
-                var reportInterval = Math.Max(1, sourcePoints.Length / 20);
+                var reportInterval = Math.Max(1, sourcePoints.Length / 100);
                 int lastReport = 0;
+                int processedCount = 0;
 
                 Parallel.For(0, sourcePoints.Length, new ParallelOptions { CancellationToken = cancellationToken }, i =>
                 {
@@ -448,38 +453,43 @@ namespace Deep3DStudio.Scene
                     if (outNormals != null && sourceNormals != null) outNormals.Add(sourceNormals[i]);
                     outConfidence.Add(sourceConfidence != null ? sourceConfidence[i] : 1.0f);
 
-                    if (nearest.Count == 0)
-                        return;
-
-                    nearest.Sort((a, b) => a.dist2.CompareTo(b.dist2));
-                    int take = Math.Min(pointsPerSeed, nearest.Count);
-                    for (int n = 0; n < take; n++)
+                    if (nearest.Count > 0)
                     {
-                        int j = nearest[n].idx;
-                        var q = sourcePoints[j];
-                        var mid = (p + q) * 0.5f;
+                        nearest.Sort((a, b) => a.dist2.CompareTo(b.dist2));
+                        int take = Math.Min(pointsPerSeed, nearest.Count);
+                        for (int n = 0; n < take; n++)
+                        {
+                            int j = nearest[n].idx;
+                            var q = sourcePoints[j];
+                            var mid = (p + q) * 0.5f;
 
-                        outPoints.Add(mid);
-                        if (outColors != null && sourceColors != null)
-                        {
-                            outColors.Add((sourceColors[i] + sourceColors[j]) * 0.5f);
+                            outPoints.Add(mid);
+                            if (outColors != null && sourceColors != null)
+                            {
+                                outColors.Add((sourceColors[i] + sourceColors[j]) * 0.5f);
+                            }
+                            if (outNormals != null && sourceNormals != null)
+                            {
+                                var avg = sourceNormals[i] + sourceNormals[j];
+                                if (avg.LengthSquared > 1e-10f)
+                                    avg.Normalize();
+                                outNormals.Add(avg);
+                            }
+                            outConfidence.Add(sourceConfidence != null ? (sourceConfidence[i] + sourceConfidence[j]) * 0.5f : 1.0f);
                         }
-                        if (outNormals != null && sourceNormals != null)
-                        {
-                            var avg = sourceNormals[i] + sourceNormals[j];
-                            if (avg.LengthSquared > 1e-10f)
-                                avg.Normalize();
-                            outNormals.Add(avg);
-                        }
-                        outConfidence.Add(sourceConfidence != null ? (sourceConfidence[i] + sourceConfidence[j]) * 0.5f : 1.0f);
                     }
 
-                    if (Interlocked.CompareExchange(ref lastReport, i, lastReport) == lastReport && i % reportInterval == 0)
+                    int currentProcessed = Interlocked.Increment(ref processedCount);
+                    if (currentProcessed % reportInterval == 0)
                     {
-                        progress?.Report($"Densifying... {i * 100 / sourcePoints.Length}%");
+                        float pFactor = 0.2f + (currentProcessed / (float)sourcePoints.Length) * 0.75f;
+                        progressFactor?.Report(pFactor);
+                        progress?.Report($"Densifying... {currentProcessed * 100 / sourcePoints.Length}% ({outPoints.Count:N0} total points)");
                     }
                 });
 
+                progress?.Report("Finalizing point cloud...");
+                progressFactor?.Report(0.95f);
                 var finalPoints = outPoints.ToList();
                 var finalColors = outColors?.ToList();
                 var finalNormals = outNormals?.ToList();
@@ -508,6 +518,7 @@ namespace Deep3DStudio.Scene
                 pointCloud.Confidence = finalConfidence;
                 pointCloud.UpdateBounds();
 
+                progressFactor?.Report(1.0f);
                 progress?.Report($"Dense cloud added {finalPoints.Count - sourcePoints.Length:N0} points");
                 return finalPoints.Count - sourcePoints.Length;
             }, cancellationToken);
@@ -700,6 +711,8 @@ namespace Deep3DStudio.Scene
             bool fullCloud = visibleCount >= totalPoints;
             bool hasFullColors = pointCloud.Colors.Count >= totalPoints;
 
+            bool hasFullNormals = pointCloud.Normals.Count >= totalPoints;
+
             if (fullCloud)
             {
                 mesh.Vertices.AddRange(pointCloud.Points);
@@ -714,6 +727,10 @@ namespace Deep3DStudio.Scene
                         if (i < pointCloud.Colors.Count) mesh.Colors.Add(pointCloud.Colors[i]);
                         else mesh.Colors.Add(new Vector3(1f, 1f, 1f));
                     }
+                }
+                if (hasFullNormals)
+                {
+                    mesh.Normals.AddRange(pointCloud.Normals.Take(totalPoints));
                 }
                 if (pointCloud.Confidence.Count >= totalPoints)
                 {
@@ -737,6 +754,8 @@ namespace Deep3DStudio.Scene
                 mesh.Vertices.Add(pointCloud.Points[sourceIndex]);
                 if (sourceIndex < pointCloud.Colors.Count) mesh.Colors.Add(pointCloud.Colors[sourceIndex]);
                 else mesh.Colors.Add(new Vector3(1f, 1f, 1f));
+                if (hasFullNormals && sourceIndex < pointCloud.Normals.Count)
+                    mesh.Normals.Add(pointCloud.Normals[sourceIndex]);
                 if (sourceIndex < pointCloud.Confidence.Count) mesh.Confidence.Add(pointCloud.Confidence[sourceIndex]);
                 else mesh.Confidence.Add(1.0f);
             }

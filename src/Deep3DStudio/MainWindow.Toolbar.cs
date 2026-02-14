@@ -478,6 +478,10 @@ namespace Deep3DStudio
                 OnOptimizeClicked, ConfigureOptimizeOptions);
             toolbar.Insert(optimizeBtn, -1);
 
+            var fillHolesBtn = CreateActionButton("fill_holes", iconSize, "Fill Holes", "Fill Holes in Selected Mesh",
+                OnFillHolesClicked, null);
+            toolbar.Insert(fillHolesBtn, -1);
+
             var mergeMeshesBtn = CreateActionButton("merge_meshes", iconSize, "Merge", "Merge selected meshes (Merge / Align+Merge)",
                 OnMergeMeshesToolbarClicked, null);
             toolbar.Insert(mergeMeshesBtn, -1);

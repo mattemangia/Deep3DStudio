@@ -110,6 +110,7 @@ namespace Deep3DStudio.Configuration
         // Settings values with defaults
         public ComputeDevice Device { get; set; } = ComputeDevice.CPU;
         public MeshingAlgorithm MeshingAlgo { get; set; } = MeshingAlgorithm.MarchingCubes;
+        public int MeshingResolution { get; set; } = 256;
         public CoordinateSystem CoordSystem { get; set; } = CoordinateSystem.RightHanded_Y_Up;
         public BoundingBoxMode BoundingBoxStyle { get; set; } = BoundingBoxMode.Full;
         public ReconstructionMethod ReconstructionMethod { get; set; } = ReconstructionMethod.Dust3r;
@@ -362,6 +363,7 @@ namespace Deep3DStudio.Configuration
                     writer.WriteLine("[General]");
                     writer.WriteLine($"Device={Device}");
                     writer.WriteLine($"MeshingAlgorithm={MeshingAlgo}");
+                    writer.WriteLine($"MeshingResolution={MeshingResolution}");
                     writer.WriteLine($"CoordinateSystem={CoordSystem}");
                     writer.WriteLine($"BoundingBoxStyle={BoundingBoxStyle}");
                     writer.WriteLine($"ReconstructionMethod={ReconstructionMethod}");
@@ -517,6 +519,8 @@ namespace Deep3DStudio.Configuration
                 Device = device;
             if (TryGetValue("General", "MeshingAlgorithm", out string? meshStr) && Enum.TryParse<MeshingAlgorithm>(meshStr, out var mesh))
                 MeshingAlgo = mesh;
+            if (TryGetValue("General", "MeshingResolution", out string? meshResStr) && int.TryParse(meshResStr, out int meshRes))
+                MeshingResolution = Math.Clamp(meshRes, 128, 512);
             if (TryGetValue("General", "CoordinateSystem", out string? coordStr) && Enum.TryParse<CoordinateSystem>(coordStr, out var coord))
                 CoordSystem = coord;
             if (TryGetValue("General", "BoundingBoxStyle", out string? bboxStr) && Enum.TryParse<BoundingBoxMode>(bboxStr, out var bbox))

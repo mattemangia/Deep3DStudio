@@ -81,7 +81,11 @@ namespace Deep3DStudio.Viewport
         Georef,
         Residuals,
         Dem,
-        GeoExport
+        GeoExport,
+        FillHoles,
+        LassoSelect,
+        RectSelect,
+        ShrinkSelection
     }
 
     public class ImGuiIconFactory : IDisposable

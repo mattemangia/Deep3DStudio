@@ -615,6 +615,33 @@ namespace Deep3DStudio
             dlg.Destroy();
         }
 
+        private void OnFillHolesClicked(object? sender, EventArgs e)
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count == 0)
+            {
+                ShowMessage("Please select a mesh first.");
+                return;
+            }
+
+            _statusLabel.Text = "Filling holes...";
+            while (Application.EventsPending()) Application.RunIteration();
+
+            int filled = 0;
+            foreach (var meshObj in selectedMeshes)
+            {
+                int oldTris = meshObj.TriangleCount;
+                meshObj.MeshData = MeshCleaningTools.FillHoles(meshObj.MeshData);
+                meshObj.UpdateBounds();
+                filled += meshObj.TriangleCount - oldTris;
+            }
+
+            _viewport.QueueDraw();
+            _statusLabel.Text = $"Filled holes in {selectedMeshes.Count} mesh(es): +{filled} triangles";
+            _sceneTreeView.RefreshTree();
+            _isDirty = true;
+        }
+
         private void OnMeshCleanupClicked(object? sender, EventArgs e)
         {
             var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
@@ -1476,7 +1503,8 @@ namespace Deep3DStudio
                             radius,
                             seeds,
                             ProgressDialog.Instance.CancellationTokenSource!.Token,
-                            progress).Result;
+                            progress,
+                            cloudProgress).Result;
 
                         totalAdded += added;
                     }

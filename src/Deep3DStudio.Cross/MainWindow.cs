@@ -706,31 +706,59 @@ namespace Deep3DStudio
                     case Keys.R: _viewport.CurrentGizmoMode = GizmoMode.Scale; break;
                     case Keys.P: _viewport.CurrentGizmoMode = GizmoMode.Pen; break;
                     case Keys.T: _viewport.CurrentGizmoMode = GizmoMode.Rigging; break;
+                    case Keys.L: _viewport.CurrentGizmoMode = GizmoMode.LassoSelect; break;
+                    case Keys.B: _viewport.CurrentGizmoMode = GizmoMode.RectSelect; break;
                     case Keys.F: _viewport.FocusOnSelection(); break;
                     case Keys.F11: ToggleFullscreen(); break;
                     case Keys.Delete:
-                        // In Pen mode, delete selected triangles
-                        if (_viewport.CurrentGizmoMode == GizmoMode.Pen && _viewport.MeshEditingTool.SelectedTriangles.Count > 0)
+                    {
+                        // In selection modes, delete selected geometry
+                        bool inSelMode = _viewport.CurrentGizmoMode == GizmoMode.Pen ||
+                                         _viewport.CurrentGizmoMode == GizmoMode.LassoSelect ||
+                                         _viewport.CurrentGizmoMode == GizmoMode.RectSelect;
+                        bool hasTris = _viewport.MeshEditingTool.SelectedTriangles.Count > 0;
+                        bool hasPoints = _viewport.SelectedPoints.Count > 0;
+
+                        if (inSelMode && (hasTris || hasPoints))
                         {
-                            _viewport.MeshEditingTool.DeleteSelectedTriangles();
-                            _logBuffer += "Deleted selected triangles.\n";
+                            if (hasTris)
+                            {
+                                int count = _viewport.MeshEditingTool.SelectedTriangles.Count;
+                                _viewport.MeshEditingTool.DeleteSelectedTriangles();
+                                _logBuffer += $"Deleted {count} selected triangles.\n";
+                            }
+                            if (hasPoints)
+                            {
+                                int count = _viewport.DeleteSelectedPoints();
+                                _logBuffer += $"Deleted {count} selected points.\n";
+                            }
                         }
                         else
                         {
                             OnDeleteSelected();
                         }
                         break;
+                    }
                     case Keys.Escape:
-                        // In Pen mode, clear triangle selection first
-                        if (_viewport.CurrentGizmoMode == GizmoMode.Pen && _viewport.MeshEditingTool.SelectedTriangles.Count > 0)
+                    {
+                        // In selection modes, clear selection first
+                        bool inSelMode2 = _viewport.CurrentGizmoMode == GizmoMode.Pen ||
+                                          _viewport.CurrentGizmoMode == GizmoMode.LassoSelect ||
+                                          _viewport.CurrentGizmoMode == GizmoMode.RectSelect;
+                        bool hasSel = _viewport.MeshEditingTool.SelectedTriangles.Count > 0 ||
+                                      _viewport.SelectedPoints.Count > 0;
+
+                        if (inSelMode2 && hasSel)
                         {
                             _viewport.MeshEditingTool.ClearSelection();
+                            _viewport.ClearPointSelection();
                         }
                         else
                         {
                             _sceneGraph.ClearSelection();
                         }
                         break;
+                    }
                 }
 
                 // Ctrl shortcuts
@@ -743,6 +771,18 @@ namespace Deep3DStudio
                         case Keys.S: OnSaveProject(); break;
                         case Keys.A: _sceneGraph.SelectAll(); break;
                         case Keys.D: OnDuplicateSelected(); break;
+                        case Keys.C:
+                            if (_viewport.MeshEditingTool.SelectedTriangles.Count > 0 || _viewport.SelectedPoints.Count > 0)
+                                CopySelection();
+                            break;
+                        case Keys.X:
+                            if (_viewport.MeshEditingTool.SelectedTriangles.Count > 0 || _viewport.SelectedPoints.Count > 0)
+                                CutSelection();
+                            break;
+                        case Keys.V:
+                            if (_clipboardMesh != null || _clipboardPoints != null)
+                                PasteSelection();
+                            break;
                     }
                 }
             }
@@ -1028,6 +1068,12 @@ namespace Deep3DStudio
 
         private void RenderUI()
         {
+            // Draw selection overlays (lasso/rect) on foreground
+            DrawSelectionOverlay();
+
+            // Viewport right-click context menu
+            RenderViewportContextMenu();
+
             // Progress Dialog (renders on top)
             ProgressDialog.Instance.Draw();
 
@@ -1151,6 +1197,7 @@ namespace Deep3DStudio
             if (_showDecimateDialog) DrawDecimateDialog();
             if (_showSmoothDialog) DrawSmoothDialog();
             if (_showOptimizeDialog) DrawOptimizeDialog();
+            if (_showFillHolesDialog) DrawFillHolesDialog();
             if (_showMergeDialog) DrawMergeDialog();
             if (_showAlignDialog) DrawAlignDialog();
             if (_showMeshToolbarMergeDialog) DrawMeshToolbarMergeDialog();
@@ -1433,6 +1480,12 @@ namespace Deep3DStudio
                 ImGui.SameLine();
                 DrawToolbarButton("##Rigging", IconType.Skeleton, _viewport.CurrentGizmoMode == GizmoMode.Rigging,
                     () => _viewport.CurrentGizmoMode = GizmoMode.Rigging, "Rigging (T)", size);
+                ImGui.SameLine();
+                DrawToolbarButton("##Lasso", IconType.LassoSelect, _viewport.CurrentGizmoMode == GizmoMode.LassoSelect,
+                    () => _viewport.CurrentGizmoMode = GizmoMode.LassoSelect, "Lasso Select (L)", size);
+                ImGui.SameLine();
+                DrawToolbarButton("##RectSel", IconType.RectSelect, _viewport.CurrentGizmoMode == GizmoMode.RectSelect,
+                    () => _viewport.CurrentGizmoMode = GizmoMode.RectSelect, "Rectangle Select (B)", size);
 
                 ImGui.SameLine();
                 ImGui.Text("|");
@@ -1598,6 +1651,9 @@ namespace Deep3DStudio
                 ImGui.SameLine();
                 DrawToolbarButton("##MeshOpt", IconType.Optimize, false, ApplyOptimizePreset, "Optimize", size,
                     OnOptimize);
+                ImGui.SameLine();
+                DrawToolbarButton("##MeshFill", IconType.FillHoles, false, ApplyFillHoles, "Fill Holes", size,
+                    OnFillHolesOptions);
                 ImGui.SameLine();
                 DrawToolbarButton("##PenMove", IconType.VertexMove, false, ApplyPenMoveVertices, "Move selected vertices", size,
                     OpenPenMoveOptionsDialog);
@@ -1861,6 +1917,11 @@ namespace Deep3DStudio
                     ApplyOptimizePreset();
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Optimize Mesh");
                 if (IsLastItemRightClicked()) OnOptimize();
+
+                if (ImGui.ImageButton("##FillHoles", _iconFactory.GetIcon(IconType.FillHoles), size))
+                    ApplyFillHoles();
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Fill Holes\nRight click for options");
+                if (IsLastItemRightClicked()) OnFillHolesOptions();
 
                 if (ImGui.ImageButton("##Clean", _iconFactory.GetIcon(IconType.Clean), size))
                     OnCleanup();
@@ -2657,12 +2718,154 @@ namespace Deep3DStudio
                 {
                     RenderRiggingPanel();
                 }
+                else if (_viewport.CurrentGizmoMode == GizmoMode.LassoSelect || _viewport.CurrentGizmoMode == GizmoMode.RectSelect)
+                {
+                    RenderSelectionModePanel();
+                }
                 else
                 {
                     RenderProperties();
                 }
             }
             ImGui.End();
+        }
+
+        private bool _openViewportContextMenu = false;
+
+        private void RenderViewportContextMenu()
+        {
+            // Detect right-click in viewport area (not captured by ImGui)
+            if (!ImGui.GetIO().WantCaptureMouse && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+            {
+                _openViewportContextMenu = true;
+            }
+
+            if (_openViewportContextMenu)
+            {
+                ImGui.OpenPopup("ViewportContextMenu");
+                _openViewportContextMenu = false;
+            }
+
+            if (ImGui.BeginPopup("ViewportContextMenu"))
+            {
+                bool hasMeshSel = _viewport.MeshEditingTool.SelectedTriangles.Count > 0;
+                bool hasPointSel = _viewport.SelectedPoints.Count > 0;
+                bool hasSelection = hasMeshSel || hasPointSel;
+                bool hasClipboard = _clipboardMesh != null || _clipboardPoints != null;
+
+                if (ImGui.MenuItem("Delete Selection", "Del", false, hasSelection))
+                {
+                    if (hasMeshSel)
+                    {
+                        int count = _viewport.MeshEditingTool.SelectedTriangles.Count;
+                        _viewport.MeshEditingTool.DeleteSelectedTriangles();
+                        _logBuffer += $"Deleted {count} triangles.\n";
+                    }
+                    if (hasPointSel)
+                    {
+                        int count = _viewport.DeleteSelectedPoints();
+                        _logBuffer += $"Deleted {count} points.\n";
+                    }
+                }
+
+                if (ImGui.MenuItem("Copy", "Ctrl+C", false, hasSelection))
+                    CopySelection();
+
+                if (ImGui.MenuItem("Cut", "Ctrl+X", false, hasSelection))
+                    CutSelection();
+
+                if (ImGui.MenuItem("Paste", "Ctrl+V", false, hasClipboard))
+                    PasteSelection();
+
+                ImGui.Separator();
+
+                if (ImGui.MenuItem("Grow Selection", "", false, hasSelection))
+                {
+                    _viewport.MeshEditingTool.GrowSelection();
+                    _viewport.GrowPointSelection();
+                }
+
+                if (ImGui.MenuItem("Shrink Selection", "", false, hasSelection))
+                {
+                    _viewport.MeshEditingTool.ShrinkSelection();
+                    _viewport.ShrinkPointSelection();
+                }
+
+                var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+
+                if (ImGui.MenuItem("Invert Selection", "", false, meshes.Count > 0))
+                {
+                    foreach (var m in meshes)
+                        _viewport.MeshEditingTool.InvertSelection(m);
+                }
+
+                if (ImGui.MenuItem("Select All", "Ctrl+A", false, meshes.Count > 0))
+                {
+                    foreach (var m in meshes)
+                        _viewport.MeshEditingTool.SelectAll(m);
+                }
+
+                if (ImGui.MenuItem("Clear Selection", "Esc", false, hasSelection))
+                {
+                    _viewport.MeshEditingTool.ClearSelection();
+                    _viewport.ClearPointSelection();
+                }
+
+                ImGui.Separator();
+
+                if (ImGui.MenuItem("Fill Holes", "", false, meshes.Count > 0))
+                    ApplyFillHoles();
+
+                if (ImGui.MenuItem("Focus", "F"))
+                    _viewport.FocusOnSelection();
+
+                if (ImGui.MenuItem("Delete Object", "Del", false, _sceneGraph.SelectedObjects.Count > 0 && !hasSelection))
+                    OnDeleteSelected();
+
+                ImGui.EndPopup();
+            }
+        }
+
+        private void DrawSelectionOverlay()
+        {
+            if (!_viewport.IsDrawingSelection) return;
+
+            var drawList = ImGui.GetForegroundDrawList();
+            uint lineColor = 0xFFFFFF00; // Yellow
+            uint fillColor = 0x30FFFF00; // Semi-transparent yellow
+
+            // Get viewport offset to convert local coords to screen coords
+            float topHeight = GetTopUiHeight();
+            var vpOffset = new System.Numerics.Vector2(0, topHeight);
+
+            if (_viewport.CurrentGizmoMode == GizmoMode.LassoSelect)
+            {
+                var points = _viewport.GetLassoPoints();
+                if (points.Count >= 2)
+                {
+                    for (int i = 0; i < points.Count - 1; i++)
+                    {
+                        drawList.AddLine(
+                            new System.Numerics.Vector2(points[i].X, points[i].Y) + vpOffset,
+                            new System.Numerics.Vector2(points[i + 1].X, points[i + 1].Y) + vpOffset,
+                            lineColor, 2.0f);
+                    }
+                    // Close the lasso
+                    drawList.AddLine(
+                        new System.Numerics.Vector2(points[^1].X, points[^1].Y) + vpOffset,
+                        new System.Numerics.Vector2(points[0].X, points[0].Y) + vpOffset,
+                        lineColor, 1.0f);
+                }
+            }
+            else if (_viewport.CurrentGizmoMode == GizmoMode.RectSelect)
+            {
+                var (start, end) = _viewport.GetRectSelection();
+                var min = new System.Numerics.Vector2(Math.Min(start.X, end.X), Math.Min(start.Y, end.Y)) + vpOffset;
+                var max = new System.Numerics.Vector2(Math.Max(start.X, end.X), Math.Max(start.Y, end.Y)) + vpOffset;
+
+                drawList.AddRectFilled(min, max, fillColor);
+                drawList.AddRect(min, max, lineColor, 0, ImDrawFlags.None, 2.0f);
+            }
         }
 
         private void RenderPenModePanel()
@@ -2812,6 +3015,102 @@ namespace Deep3DStudio
             ImGui.TextDisabled("Tip: Shift+Click to multi-select");
             ImGui.TextDisabled("Press Escape to clear selection");
             ImGui.TextDisabled("Press Delete to remove triangles");
+        }
+
+        private void RenderSelectionModePanel()
+        {
+            string modeName = _viewport.CurrentGizmoMode == GizmoMode.LassoSelect ? "Lasso" : "Rectangle";
+            ImGui.TextColored(new System.Numerics.Vector4(0.2f, 0.8f, 1f, 1f), $"{modeName} Selection Mode");
+            ImGui.Separator();
+
+            var tool = _viewport.MeshEditingTool;
+            var (triCount, vertCount, meshCount) = tool.GetSelectionStats();
+            int pointCount = _viewport.SelectedPoints.Count;
+
+            ImGui.Text($"Triangles: {triCount}");
+            ImGui.Text($"Points: {pointCount}");
+            if (triCount > 0) ImGui.Text($"Vertices: {vertCount} ({meshCount} meshes)");
+
+            ImGui.Separator();
+            ImGui.Text("Actions:");
+            var iconSize = new System.Numerics.Vector2(20, 20);
+
+            bool hasAnySel = triCount > 0 || pointCount > 0;
+
+            if (hasAnySel)
+            {
+                if (DrawIconTextButton("##SelDel", IconType.Delete, "Delete Selection", iconSize))
+                {
+                    if (triCount > 0)
+                    {
+                        tool.DeleteSelectedTriangles();
+                        _logBuffer += $"Deleted {triCount} triangles.\n";
+                    }
+                    if (pointCount > 0)
+                    {
+                        int removed = _viewport.DeleteSelectedPoints();
+                        _logBuffer += $"Deleted {removed} points.\n";
+                    }
+                }
+
+                if (DrawIconTextButton("##SelCopy", IconType.Select, "Copy Selection", iconSize))
+                {
+                    CopySelection();
+                }
+
+                if (DrawIconTextButton("##SelCut", IconType.Delete, "Cut Selection", iconSize))
+                {
+                    CutSelection();
+                }
+            }
+
+            if (_clipboardMesh != null || _clipboardPoints != null)
+            {
+                if (DrawIconTextButton("##SelPaste", IconType.Select, "Paste", iconSize))
+                {
+                    PasteSelection();
+                }
+            }
+
+            ImGui.Separator();
+            ImGui.Text("Selection:");
+
+            if (DrawIconTextButton("##SelGrow", IconType.GrowSelection, "Grow Selection", iconSize))
+            {
+                tool.GrowSelection();
+                _viewport.GrowPointSelection();
+            }
+
+            if (DrawIconTextButton("##SelShrink", IconType.ShrinkSelection, "Shrink Selection", iconSize))
+            {
+                tool.ShrinkSelection();
+                _viewport.ShrinkPointSelection();
+            }
+
+            var meshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (meshes.Count > 0)
+            {
+                if (DrawIconTextButton("##SelAll", IconType.SelectAll, "Select All", iconSize))
+                {
+                    foreach (var m in meshes) tool.SelectAll(m);
+                }
+
+                if (DrawIconTextButton("##SelInvert", IconType.InvertSelection, "Invert Selection", iconSize))
+                {
+                    foreach (var m in meshes) tool.InvertSelection(m);
+                }
+            }
+
+            if (DrawIconTextButton("##SelClear", IconType.ClearSelection, "Clear Selection", iconSize))
+            {
+                tool.ClearSelection();
+                _viewport.ClearPointSelection();
+            }
+
+            ImGui.Separator();
+            ImGui.TextDisabled("Draw to select geometry");
+            ImGui.TextDisabled("Hold Shift to add to selection");
+            ImGui.TextDisabled("Del to delete, Esc to clear");
         }
 
         private void RenderRiggingPanel()
@@ -4552,6 +4851,13 @@ namespace Deep3DStudio
                     settings.MeshingAlgo = (MeshingAlgorithm)algo;
                 }
 
+                int meshRes = settings.MeshingResolution;
+                if (ImGui.SliderInt("Resolution", ref meshRes, 128, 512))
+                {
+                    settings.MeshingResolution = meshRes;
+                }
+                ImGui.SetItemTooltip("Higher values preserve more detail but use more memory and time");
+
                 ImGui.Separator();
                 if (ImGui.Button("Apply", new System.Numerics.Vector2(120, 0)))
                 {
@@ -5179,7 +5485,8 @@ namespace Deep3DStudio
                             radius,
                             seeds,
                             ProgressDialog.Instance.CancellationTokenSource!.Token,
-                            progress).Result;
+                            progress,
+                            cloudProgress).Result;
 
                         totalAdded += added;
                     }
@@ -5236,6 +5543,137 @@ namespace Deep3DStudio
             }
 
             PerformOptimize();
+        }
+
+        private void ApplyFillHoles()
+        {
+            var objects = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (objects.Count == 0)
+            {
+                _logBuffer += "No mesh selected.\n";
+                return;
+            }
+
+            int maxEdges = _fillHolesMaxEdges;
+            ProgressDialog.Instance.Start("Filling holes...", OperationType.Processing);
+            Task.Run(() => {
+                try {
+                    var results = new List<(MeshObject obj, MeshData newData)>();
+                    foreach (var mo in objects) {
+                        var newData = MeshCleaningTools.FillHoles(mo.MeshData, maxEdges);
+                        results.Add((mo, newData));
+                    }
+                    EnqueueAction(() => {
+                        foreach (var res in results) {
+                            int oldTris = res.obj.TriangleCount;
+                            res.obj.MeshData = res.newData;
+                            res.obj.UpdateBounds();
+                            int filled = res.obj.TriangleCount - oldTris;
+                            ProgressDialog.Instance.Log($"Filled holes in {res.obj.Name}: +{filled} triangles");
+                        }
+                        ProgressDialog.Instance.Complete();
+                        _isDirty = true;
+                    });
+                } catch (Exception ex) {
+                    EnqueueAction(() => ProgressDialog.Instance.Fail(ex));
+                }
+            });
+        }
+
+        private bool _showFillHolesDialog = false;
+        private int _fillHolesMaxEdges = 100;
+
+        // Selection clipboard
+        private MeshData? _clipboardMesh = null;
+        private PointCloudObject? _clipboardPoints = null;
+
+        private void OnFillHolesOptions()
+        {
+            _showFillHolesDialog = true;
+            _popupToOpen = "Fill Holes";
+        }
+
+        private void DrawFillHolesDialog()
+        {
+            if (!_showFillHolesDialog) return;
+            if (ImGui.BeginPopup("Fill Holes", ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                bool hasMesh = _sceneGraph.SelectedObjects.OfType<MeshObject>().Any();
+
+                ImGui.Text("Max hole size (edges):");
+                ImGui.SliderInt("##FillHolesMax", ref _fillHolesMaxEdges, 3, 500);
+                ImGui.SetItemTooltip("Holes with more edges than this will be skipped");
+
+                ImGui.Separator();
+
+                if (!hasMesh)
+                {
+                    ImGui.TextColored(new System.Numerics.Vector4(1, 0.5f, 0.5f, 1), "No mesh selected");
+                    ImGui.BeginDisabled();
+                }
+
+                if (ImGui.Button("Fill Holes", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showFillHolesDialog = false;
+                    ApplyFillHoles();
+                }
+
+                if (!hasMesh)
+                {
+                    ImGui.EndDisabled();
+                }
+
+                ImGui.SameLine();
+                if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0))) _showFillHolesDialog = false;
+                ImGui.EndPopup();
+            }
+        }
+
+        private void CopySelection()
+        {
+            _clipboardMesh = _viewport.MeshEditingTool.CopySelectedTriangles();
+            _clipboardPoints = _viewport.CopySelectedPoints();
+
+            int triCount = _clipboardMesh?.Indices.Count / 3 ?? 0;
+            int ptCount = _clipboardPoints?.Points.Count ?? 0;
+            _logBuffer += $"Copied {triCount} triangles, {ptCount} points.\n";
+        }
+
+        private void CutSelection()
+        {
+            _clipboardMesh = _viewport.MeshEditingTool.CutSelectedTriangles();
+            _clipboardPoints = _viewport.CopySelectedPoints();
+            if (_clipboardPoints != null)
+                _viewport.DeleteSelectedPoints();
+
+            int triCount = _clipboardMesh?.Indices.Count / 3 ?? 0;
+            int ptCount = _clipboardPoints?.Points.Count ?? 0;
+            _logBuffer += $"Cut {triCount} triangles, {ptCount} points.\n";
+        }
+
+        private void PasteSelection()
+        {
+            if (_clipboardMesh != null && _clipboardMesh.Vertices.Count > 0)
+            {
+                var meshObj = new MeshObject("Pasted Mesh", _clipboardMesh);
+                meshObj.UpdateBounds();
+                _sceneGraph.AddObject(meshObj);
+                _logBuffer += $"Pasted mesh: {_clipboardMesh.Vertices.Count} vertices.\n";
+            }
+
+            if (_clipboardPoints != null && _clipboardPoints.Points.Count > 0)
+            {
+                var pcObj = new PointCloudObject("Pasted Points");
+                pcObj.Points.AddRange(_clipboardPoints.Points);
+                pcObj.Colors.AddRange(_clipboardPoints.Colors);
+                pcObj.Normals.AddRange(_clipboardPoints.Normals);
+                pcObj.Confidence.AddRange(_clipboardPoints.Confidence);
+                pcObj.UpdateBounds();
+                _sceneGraph.AddObject(pcObj);
+                _logBuffer += $"Pasted point cloud: {_clipboardPoints.Points.Count} points.\n";
+            }
+
+            _isDirty = true;
         }
 
         private bool _showDecimateDialog = false;
@@ -6927,34 +7365,45 @@ namespace Deep3DStudio
                 {
                     var cancellationToken = ProgressDialog.Instance.CancellationTokenSource?.Token ?? System.Threading.CancellationToken.None;
                     Action<string, float> pipelineProgress = (msg, p) => ProgressDialog.Instance.Update(p, msg);
-                    var baseMesh = GenerateMeshFromPointClouds(selectedPointClouds, MeshingAlgorithm.MarchingCubes, 256, pipelineProgress);
-                    MeshData? finalMesh = baseMesh;
+                    int maxRes = IniSettings.Instance.MeshingResolution;
+                    MeshData? finalMesh;
 
                     switch (meshingAlgo)
                     {
                         case MeshingAlgorithm.DeepMeshPrior:
-                            var deep = new Deep3DStudio.Meshing.DeepMeshPriorMesher();
-                            finalMesh = await deep.RefineMeshAsync(
-                                baseMesh,
-                                (status, progress) => ProgressDialog.Instance.Update(progress, status),
-                                cancellationToken);
-                            break;
                         case MeshingAlgorithm.TripoSF:
-                            using (var triposf = new Deep3DStudio.Model.AIModels.TripoSFInference())
+                        case MeshingAlgorithm.GaussianSDF:
+                        {
+                            // AI refinement algorithms need a base mesh first
+                            var baseMesh = GenerateMeshFromPointClouds(selectedPointClouds, MeshingAlgorithm.MarchingCubes, maxRes, pipelineProgress);
+                            finalMesh = baseMesh;
+
+                            if (meshingAlgo == MeshingAlgorithm.DeepMeshPrior)
                             {
+                                var deep = new Deep3DStudio.Meshing.DeepMeshPriorMesher();
+                                finalMesh = await deep.RefineMeshAsync(
+                                    baseMesh,
+                                    (status, progress) => ProgressDialog.Instance.Update(progress, status),
+                                    cancellationToken);
+                            }
+                            else if (meshingAlgo == MeshingAlgorithm.TripoSF)
+                            {
+                                using var triposf = new Deep3DStudio.Model.AIModels.TripoSFInference();
                                 cancellationToken.ThrowIfCancellationRequested();
                                 finalMesh = triposf.RefineMesh(baseMesh, cancellationToken);
                             }
+                            else // GaussianSDF
+                            {
+                                var gaussian = new Deep3DStudio.Meshing.GaussianSDFRefiner();
+                                finalMesh = await gaussian.RefineMeshAsync(
+                                    baseMesh,
+                                    (status, progress) => ProgressDialog.Instance.Update(progress, status),
+                                    cancellationToken);
+                            }
                             break;
-                        case MeshingAlgorithm.GaussianSDF:
-                            var gaussian = new Deep3DStudio.Meshing.GaussianSDFRefiner();
-                            finalMesh = await gaussian.RefineMeshAsync(
-                                baseMesh,
-                                (status, progress) => ProgressDialog.Instance.Update(progress, status),
-                                cancellationToken);
-                            break;
+                        }
                         default:
-                            finalMesh = GenerateMeshFromPointClouds(selectedPointClouds, meshingAlgo, 256, pipelineProgress);
+                            finalMesh = GenerateMeshFromPointClouds(selectedPointClouds, meshingAlgo, maxRes, pipelineProgress);
                             break;
                     }
 

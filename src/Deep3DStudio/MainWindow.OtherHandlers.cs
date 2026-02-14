@@ -473,7 +473,7 @@ namespace Deep3DStudio
                         meshingAlgo == MeshingAlgorithm.GaussianSDF)
                     {
                         // Use Poisson reconstruction for better topology before refinement
-                        var baseMesh = await Task.Run(() => GenerateMeshFromPointClouds(selectedPointClouds, MeshingAlgorithm.Poisson, 256, pipelineProgress));
+                        var baseMesh = await Task.Run(() => GenerateMeshFromPointClouds(selectedPointClouds, MeshingAlgorithm.Poisson, IniSettings.Instance.MeshingResolution, pipelineProgress));
                         if (baseMesh == null || baseMesh.Vertices.Count == 0)
                         {
                             _statusLabel.Text = "Base meshing failed.";
@@ -498,7 +498,7 @@ namespace Deep3DStudio
                         return;
                     }
 
-                    int maxRes = 256;
+                    int maxRes = IniSettings.Instance.MeshingResolution;
                     _statusLabel.Text = $"Meshing using {meshingAlgo}...";
 
                     var meshedResult = await Task.Run(() => GenerateMeshFromPointClouds(selectedPointClouds, meshingAlgo, maxRes, pipelineProgress));
