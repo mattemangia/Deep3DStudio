@@ -180,6 +180,9 @@ namespace Deep3DStudio
         {
             this.Title = "Deep3D Studio";
 
+            // Enable tooltips globally
+            Gtk.Settings.Default.HasTooltip = true;
+
             // Restore window size from settings
             var settings = IniSettings.Instance;
             this.SetDefaultSize(settings.LastWindowWidth, settings.LastWindowHeight);
