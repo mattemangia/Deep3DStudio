@@ -347,6 +347,7 @@ namespace Deep3DStudio
             _mainHPaned.Position = settings.LastPanelWidth;
 
             _statusLabel.Halign = Align.Start;
+            _statusLabel.Ellipsize = Pango.EllipsizeMode.None;
             _statusLabel.Visible = true;
             var statusBox = new Box(Orientation.Horizontal, 5);
             statusBox.Visible = true;

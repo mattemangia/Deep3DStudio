@@ -35,29 +35,16 @@ namespace Deep3DStudio
             widget.TooltipText = text;
             widget.HasTooltip = true;
             
-            // Internal helper to hook events
-            void HookEvents(Widget w)
+            // Connect to the main widget
+            widget.EnterNotifyEvent += (o, args) => _statusLabel.Text = text;
+            widget.LeaveNotifyEvent += (o, args) => _statusLabel.Text = "Ready";
+
+            // For ToolButtons, we must also hook the internal child (usually an EventBox or Align)
+            if (widget is Bin bin && bin.Child != null)
             {
-                w.EnterNotifyEvent += (o, args) => {
-                    if (_statusLabel != null) _statusLabel.Text = text;
-                };
-                
-                w.LeaveNotifyEvent += (o, args) => {
-                    if (_statusLabel != null) _statusLabel.Text = "Ready";
-                };
-
-                if (w is Container container)
-                {
-                    foreach (var child in container.Children)
-                        HookEvents(child);
-                }
+                bin.Child.EnterNotifyEvent += (o, args) => _statusLabel.Text = text;
+                bin.Child.LeaveNotifyEvent += (o, args) => _statusLabel.Text = "Ready";
             }
-
-            HookEvents(widget);
-
-            // Also check for special ToolButton child (the icon/label)
-            if (widget is ToolButton tb && tb.IconWidget != null)
-                HookEvents(tb.IconWidget);
 
             widget.QueryTooltip += (o, args) => {
                 args.Tooltip.Text = text;
