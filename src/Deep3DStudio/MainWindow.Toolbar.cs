@@ -21,6 +21,62 @@ namespace Deep3DStudio
     public partial class MainWindow
     {
         private Dictionary<Toolbar, List<ToolItem>> _originalToolbarItems = new Dictionary<Toolbar, List<ToolItem>>();
+        private Widget? _currentTooltipTarget = null;
+        private HashSet<Widget> _hookedWidgets = new HashSet<Widget>();
+
+        private void UpdateStatusText(string text)
+        {
+            if (_statusLabel == null) return;
+            string escaped = System.Security.SecurityElement.Escape(text);
+            _statusLabel.Markup = $"<span foreground='#60B0FF'><b>{escaped}</b></span>";
+        }
+
+        private void ResetStatusText()
+        {
+            if (_statusLabel == null) return;
+            _statusLabel.Markup = "<span foreground='#AAAAAA'><b>Ready</b></span>";
+        }
+
+        private void ApplyStatusBarFeedback(Widget widget, string text)
+        {
+            if (widget == null) return;
+
+            void Hook(Widget w)
+            {
+                if (_hookedWidgets.Contains(w)) return;
+                _hookedWidgets.Add(w);
+
+                w.Events |= EventMask.EnterNotifyMask | EventMask.LeaveNotifyMask;
+                
+                string targetText = text;
+                w.EnterNotifyEvent += (o, args) => {
+                    _currentTooltipTarget = widget; 
+                    UpdateStatusText(targetText);
+                };
+                
+                w.LeaveNotifyEvent += (o, args) => {
+                    if (_currentTooltipTarget == widget)
+                    {
+                        _currentTooltipTarget = null;
+                        ResetStatusText();
+                    }
+                };
+
+                if (w is Container container)
+                {
+                    foreach (var child in container.Children)
+                        Hook(child);
+                }
+                
+                if (w is ToolButton tb)
+                {
+                    if (tb.IconWidget != null) Hook(tb.IconWidget);
+                    if (tb.LabelWidget != null) Hook(tb.LabelWidget);
+                }
+            }
+
+            Hook(widget);
+        }
 
         private void RegisterToolbarItems(Toolbar toolbar)
         {
@@ -28,50 +84,6 @@ namespace Deep3DStudio
             for (int i = 0; i < toolbar.NItems; i++)
                 items.Add(toolbar.GetNthItem(i));
             _originalToolbarItems[toolbar] = items;
-        }
-
-        private void ApplyStatusBarFeedback(Widget widget, string text)
-        {
-            if (widget == null) return;
-
-            // Use a stack for non-recursive traversal to avoid any overhead, 
-            // though the tree is shallow.
-            var stack = new Stack<Widget>();
-            stack.Push(widget);
-
-            while (stack.Count > 0)
-            {
-                var w = stack.Pop();
-                
-                // Set the events we care about
-                w.Events |= EventMask.EnterNotifyMask | EventMask.LeaveNotifyMask;
-                
-                // Hook events. We use a capture-safe approach for the text.
-                string statusText = text;
-                w.EnterNotifyEvent += (o, args) => {
-                    if (_statusLabel != null)
-                        _statusLabel.Markup = $"<span size='large' weight='bold' foreground='#4A90E2'>{System.Security.SecurityElement.Escape(statusText)}</span>";
-                };
-                
-                w.LeaveNotifyEvent += (o, args) => {
-                    if (_statusLabel != null)
-                        _statusLabel.Markup = "<span size='large'>Ready</span>";
-                };
-
-                // Traverse children
-                if (w is Container container)
-                {
-                    foreach (var child in container.Children)
-                        stack.Push(child);
-                }
-                
-                // Special GTK ToolButton internal widgets that are not in 'Children'
-                if (w is ToolButton tb)
-                {
-                    if (tb.IconWidget != null) stack.Push(tb.IconWidget);
-                    if (tb.LabelWidget != null) stack.Push(tb.LabelWidget);
-                }
-            }
         }
 
         private void SetTooltip(Widget widget, string text)
@@ -94,40 +106,38 @@ namespace Deep3DStudio
             if (!_originalToolbarItems.TryGetValue(toolbar, out var originalItems))
                 return;
 
-            foreach (var item in originalItems) item.HasTooltip = true;
-
             int windowWidth = this.Allocation.Width;
-            
-            // Estimated padding and vertical toolbar/sidebar allowance
             int availableWidth = windowWidth - 60; 
             if (_verticalToolbar.Visible) availableWidth -= 40;
             
-            // Track used width
-            int currentWidth = 20; // Start padding
-            int lastVisibleIndex = -1;
+            int currentWidth = 20;
 
-            // First, clear current toolbar (but don't destroy items!)
             for (int i = toolbar.NItems - 1; i >= 0; i--)
                 toolbar.Remove(toolbar.GetNthItem(i));
 
             var overflowItems = new List<ToolItem>();
 
-            for (int i = 0; i < originalItems.Count; i++)
+            foreach (var item in originalItems)
             {
-                var item = originalItems[i];
                 int itemWidth = item.SizeRequest().Width;
-                if (itemWidth <= 0) itemWidth = 32; // Fallback for toolbuttons
+                if (itemWidth <= 0) itemWidth = 32;
 
-                if (currentWidth + itemWidth + 40 < availableWidth)
+                if (currentWidth + itemWidth + 45 < availableWidth)
                 {
                     toolbar.Insert(item, -1);
                     currentWidth += itemWidth + 4;
-                    lastVisibleIndex = i;
                 }
                 else
                 {
                     overflowItems.Add(item);
                 }
+            }
+
+            // Ensure events are always active (but protection logic prevents duplicates)
+            foreach (var item in originalItems)
+            {
+                if (!string.IsNullOrEmpty(item.TooltipText))
+                    ApplyStatusBarFeedback(item, item.TooltipText);
             }
 
             if (overflowItems.Count > 0)
@@ -142,47 +152,35 @@ namespace Deep3DStudio
                     }
 
                     MenuItem mi;
+                    string menuText = item.TooltipText ?? "";
+                    
                     if (item is ToolButton tb)
                     {
                         mi = new ImageMenuItem(tb.Label);
-                        mi.TooltipText = tb.TooltipText;
                         if (tb.IconWidget is Image img)
                         {
-                            // Clone icon for menu
                             var menuImg = new Image();
                             if (img.Pixbuf != null) menuImg.Pixbuf = img.Pixbuf.ScaleSimple(16, 16, InterpType.Bilinear);
                             else if (!string.IsNullOrEmpty(img.IconName)) menuImg.IconName = img.IconName;
                             ((ImageMenuItem)mi).Image = menuImg;
                         }
                         mi.Activated += (s, e) => tb.Activate();
-                        
-                        string menuText = tb.TooltipText;
-                        mi.EnterNotifyEvent += (s, e) => {
-                            _statusLabel.Markup = $"<span size='large' weight='bold' foreground='#4A90E2'>{System.Security.SecurityElement.Escape(menuText)}</span>";
-                        };
-                        mi.LeaveNotifyEvent += (s, e) => {
-                            _statusLabel.Markup = "<span size='large'>Ready</span>";
-                        };
                     }
                     else if (item is ToggleToolButton ttb)
                     {
                         mi = new CheckMenuItem(ttb.Label);
-                        mi.TooltipText = ttb.TooltipText;
                         ((CheckMenuItem)mi).Active = ttb.Active;
                         mi.Activated += (s, e) => { ttb.Active = ((CheckMenuItem)mi).Active; };
-                        
-                        string menuText = ttb.TooltipText;
-                        mi.EnterNotifyEvent += (s, e) => {
-                            _statusLabel.Markup = $"<span size='large' weight='bold' foreground='#4A90E2'>{System.Security.SecurityElement.Escape(menuText)}</span>";
-                        };
-                        mi.LeaveNotifyEvent += (s, e) => {
-                            _statusLabel.Markup = "<span size='large'>Ready</span>";
-                        };
                     }
                     else
                     {
-                        // Fallback for custom tool items (like workflows combo)
                         mi = new MenuItem(item.GetType().Name);
+                    }
+                    
+                    if (!string.IsNullOrEmpty(menuText))
+                    {
+                        mi.EnterNotifyEvent += (s, e) => UpdateStatusText(menuText);
+                        mi.LeaveNotifyEvent += (s, e) => ResetStatusText();
                     }
                     
                     overflowMenu.Append(mi);
@@ -190,7 +188,6 @@ namespace Deep3DStudio
 
                 var overflowBtn = new MenuToolButton(AppIconFactory.GenerateIcon("settings", 20), "More...");
                 overflowBtn.Menu = overflowMenu;
-                overflowBtn.TooltipText = "More tools";
                 toolbar.Insert(overflowBtn, -1);
                 overflowMenu.ShowAll();
             }
@@ -208,15 +205,7 @@ namespace Deep3DStudio
         {
             var btn = new ToolButton(AppIconFactory.GenerateIcon(iconKey, iconSize), label);
             string finalTooltip = onRightClickOptions == null ? tooltip : $"{tooltip} (Right click for options)";
-            btn.TooltipText = finalTooltip;
-            btn.HasTooltip = true;
-            
-            // Fallback: manually handle tooltip query
-            btn.QueryTooltip += (o, args) => {
-                args.Tooltip.Text = finalTooltip;
-                args.RetVal = true;
-            };
-
+            SetTooltip(btn, finalTooltip);
             btn.Clicked += onClick;
 
             if (onRightClickOptions != null)
@@ -793,8 +782,7 @@ namespace Deep3DStudio
             toolbar.Insert(solveBtn, -1);
 
             var resolvePendingBtn = new ToolButton(AppIconFactory.GenerateIcon("residuals", iconSize), "Resolve Pending");
-            SetTooltip(resolvePendingBtn, "Risolvi i GCP pending (2D+World) campionando il punto modello dalla scena");
-            resolvePendingBtn.HasTooltip = true;
+            SetTooltip(resolvePendingBtn, "Resolve Pending GCPs by sampling model points from scene");
             resolvePendingBtn.Clicked += (s, e) => OnResolvePendingGcpsFromCurrentScene();
             toolbar.Insert(resolvePendingBtn, -1);
 
