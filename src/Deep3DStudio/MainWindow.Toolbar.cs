@@ -47,16 +47,24 @@ namespace Deep3DStudio
 
             int windowWidth = this.Allocation.Width;
             
-            // ... (keeping existing logic for brevity)
+            // Estimated padding and vertical toolbar/sidebar allowance
+            int availableWidth = windowWidth - 60; 
+            if (_verticalToolbar.Visible) availableWidth -= 40;
             
+            // Track used width
+            int currentWidth = 20; // Start padding
+            int lastVisibleIndex = -1;
+
+            // First, clear current toolbar (but don't destroy items!)
+            for (int i = toolbar.NItems - 1; i >= 0; i--)
+                toolbar.Remove(toolbar.GetNthItem(i));
+
+            var overflowItems = new List<ToolItem>();
+
             for (int i = 0; i < originalItems.Count; i++)
             {
                 var item = originalItems[i];
-                // Ensure tooltips are always enabled for the item itself
-                item.HasTooltip = true; 
-                
                 int itemWidth = item.SizeRequest().Width;
-                // ...
                 if (itemWidth <= 0) itemWidth = 32; // Fallback for toolbuttons
 
                 if (currentWidth + itemWidth + 40 < availableWidth)
