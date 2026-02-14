@@ -363,7 +363,9 @@ namespace Deep3DStudio
             
             var statusEventBox = new EventBox();
             statusEventBox.Add(statusBox);
-            statusEventBox.OverrideBackgroundColor(StateFlags.Normal, new RGBA(0.1, 0.1, 0.1, 1.0));
+            var bgColor = new RGBA();
+            bgColor.Red = 0.1; bgColor.Green = 0.1; bgColor.Blue = 0.1; bgColor.Alpha = 1.0;
+            statusEventBox.OverrideBackgroundColor(StateFlags.Normal, bgColor);
             mainVBox.PackStart(statusEventBox, false, false, 0);
             Console.WriteLine("MainWindow: Status bar created");
 
