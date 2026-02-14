@@ -100,7 +100,7 @@ namespace Deep3DStudio
                             else if (!string.IsNullOrEmpty(img.IconName)) menuImg.IconName = img.IconName;
                             ((ImageMenuItem)mi).Image = menuImg;
                         }
-                        mi.Activated += (s, e) => tb.EmitClicked();
+                        mi.Activated += (s, e) => tb.Activate();
                     }
                     else if (item is ToggleToolButton ttb)
                     {
