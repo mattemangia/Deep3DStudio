@@ -224,27 +224,23 @@ namespace Deep3DStudio
 
             // 2. Toolbar (Top)
             _topToolbar = CreateToolbar();
-            _topToolbar.Visible = settings.ShowTopToolbar;
             _topToolbar.SetSizeRequest(-1, 35); // Minimum height
             mainVBox.PackStart(_topToolbar, false, false, 0);
             Console.WriteLine("MainWindow: Toolbar created");
 
             // 2b. Mesh editor toolbar
             _meshEditorToolbar = CreateMeshEditorToolbar();
-            _meshEditorToolbar.Visible = settings.ShowMeshEditorToolbar;
             _meshEditorToolbar.SetSizeRequest(-1, 35);
             mainVBox.PackStart(_meshEditorToolbar, false, false, 0);
 
             // 2c. Point cloud toolbar
             _pointCloudToolbar = CreatePointCloudToolbar();
-            _pointCloudToolbar.Visible = settings.ShowPointCloudToolbar;
             _pointCloudToolbar.SetSizeRequest(-1, 35);
             mainVBox.PackStart(_pointCloudToolbar, false, false, 0);
             UpdatePointCloudVisibilityControls();
 
             // 2d. Georeferencing toolbar
             _georeferenceToolbar = CreateGeoreferenceToolbar();
-            _georeferenceToolbar.Visible = settings.ShowGeoreferenceToolbar;
             _georeferenceToolbar.SetSizeRequest(-1, 35);
             mainVBox.PackStart(_georeferenceToolbar, false, false, 0);
 
@@ -254,7 +250,6 @@ namespace Deep3DStudio
 
             // Vertical Toolbar (Left of viewport)
             _verticalToolbar = CreateVerticalToolbar();
-            _verticalToolbar.Visible = settings.ShowVerticalToolbar;
             contentBox.PackStart(_verticalToolbar, false, false, 0);
 
             // Main Paned (Tree + Viewport)
@@ -375,9 +370,6 @@ namespace Deep3DStudio
             mainVBox.PackStart(statusEventBox, false, false, 0);
             Console.WriteLine("MainWindow: Status bar created");
 
-            // Load Initial Settings
-            ApplyViewSettings();
-
             // Enable Drag and Drop
             Gtk.Drag.DestSet(this, DestDefaults.All, new TargetEntry[] { new TargetEntry("text/uri-list", 0, 0) }, Gdk.DragAction.Copy);
             this.DragDataReceived += OnDragDataReceived;
@@ -387,6 +379,9 @@ namespace Deep3DStudio
             Console.WriteLine("MainWindow: Calling ShowAll()");
             this.ShowAll();
             Console.WriteLine("MainWindow: ShowAll() completed");
+
+            // Load Initial Settings - Apply AFTER ShowAll to override visibility
+            ApplyViewSettings();
         }
 
         /// <summary>

@@ -63,6 +63,7 @@ namespace Deep3DStudio
             if (_showSceneTreeMenuItem != null && _leftPanel != null)
             {
                 _leftPanel.Visible = _showSceneTreeMenuItem.Active;
+                _mainHPaned.QueueResize();
             }
         }
 
@@ -72,6 +73,8 @@ namespace Deep3DStudio
             {
                 _verticalToolbar.Visible = _showVerticalToolbarMenuItem.Active;
                 IniSettings.Instance.ShowVerticalToolbar = _showVerticalToolbarMenuItem.Active;
+                UpdateAllToolbarsOverflow();
+                this.QueueResize();
             }
         }
 
@@ -81,6 +84,7 @@ namespace Deep3DStudio
             {
                 _topToolbar.Visible = _showTopToolbarMenuItem.Active;
                 IniSettings.Instance.ShowTopToolbar = _showTopToolbarMenuItem.Active;
+                this.QueueResize();
             }
         }
 
@@ -90,6 +94,7 @@ namespace Deep3DStudio
             {
                 _meshEditorToolbar.Visible = _showMeshEditorToolbarMenuItem.Active;
                 IniSettings.Instance.ShowMeshEditorToolbar = _showMeshEditorToolbarMenuItem.Active;
+                this.QueueResize();
             }
         }
 
@@ -99,6 +104,7 @@ namespace Deep3DStudio
             {
                 _pointCloudToolbar.Visible = _showPointCloudToolbarMenuItem.Active;
                 IniSettings.Instance.ShowPointCloudToolbar = _showPointCloudToolbarMenuItem.Active;
+                this.QueueResize();
             }
         }
 
@@ -108,6 +114,7 @@ namespace Deep3DStudio
             {
                 _georeferenceToolbar.Visible = _showGeoreferenceToolbarMenuItem.Active;
                 IniSettings.Instance.ShowGeoreferenceToolbar = _showGeoreferenceToolbarMenuItem.Active;
+                this.QueueResize();
             }
         }
 
@@ -126,6 +133,8 @@ namespace Deep3DStudio
             if (_showMeshEditorToolbarMenuItem != null) _showMeshEditorToolbarMenuItem.Active = false;
             if (_showPointCloudToolbarMenuItem != null) _showPointCloudToolbarMenuItem.Active = false;
             if (_showGeoreferenceToolbarMenuItem != null) _showGeoreferenceToolbarMenuItem.Active = false;
+            
+            this.QueueResize();
         }
 
         private void OnRestoreAllPanels(object? sender, EventArgs e)
@@ -143,6 +152,8 @@ namespace Deep3DStudio
             if (_showMeshEditorToolbarMenuItem != null) _showMeshEditorToolbarMenuItem.Active = true;
             if (_showPointCloudToolbarMenuItem != null) _showPointCloudToolbarMenuItem.Active = true;
             if (_showGeoreferenceToolbarMenuItem != null) _showGeoreferenceToolbarMenuItem.Active = true;
+            
+            this.QueueResize();
         }
     }
 }

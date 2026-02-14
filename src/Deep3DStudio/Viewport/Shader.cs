@@ -54,6 +54,18 @@ namespace Deep3DStudio.Viewport
             GL.Uniform1(location, data);
         }
 
+        public void SetVector4(string name, OpenTK.Mathematics.Vector4 data)
+        {
+            int location = GL.GetUniformLocation(Handle, name);
+            GL.Uniform4(location, data);
+        }
+
+        public void SetBool(string name, bool data)
+        {
+            int location = GL.GetUniformLocation(Handle, name);
+            GL.Uniform1(location, data ? 1 : 0);
+        }
+
         private void CheckShaderCompileStatus(int shader)
         {
             GL.GetShader(shader, ShaderParameter.CompileStatus, out int success);

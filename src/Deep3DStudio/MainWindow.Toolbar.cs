@@ -97,10 +97,10 @@ namespace Deep3DStudio
 
         private void UpdateAllToolbarsOverflow()
         {
-            if (_topToolbar is Toolbar top) UpdateToolbarOverflow(top);
-            if (_meshEditorToolbar is Toolbar mesh) UpdateToolbarOverflow(mesh);
-            if (_pointCloudToolbar is Toolbar pc) UpdateToolbarOverflow(pc);
-            if (_georeferenceToolbar is Toolbar geo) UpdateToolbarOverflow(geo);
+            if (_topToolbar is Toolbar top && top.Visible) UpdateToolbarOverflow(top);
+            if (_meshEditorToolbar is Toolbar mesh && mesh.Visible) UpdateToolbarOverflow(mesh);
+            if (_pointCloudToolbar is Toolbar pc && pc.Visible) UpdateToolbarOverflow(pc);
+            if (_georeferenceToolbar is Toolbar geo && geo.Visible) UpdateToolbarOverflow(geo);
         }
 
         private void UpdateToolbarOverflow(Toolbar toolbar)

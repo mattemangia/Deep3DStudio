@@ -91,6 +91,10 @@ namespace Deep3DStudio.Viewport
         private Dictionary<int, (int vao, int vbo, int count, PointCloudColorMode colorMode)> _pointCloudBuffers
             = new Dictionary<int, (int, int, int, PointCloudColorMode)>();
 
+        // Mesh modern GL buffers (key = object Id)
+        private Dictionary<int, (int vao, int vbo, int ebo, int indexCount)> _meshBuffers
+            = new Dictionary<int, (int, int, int, int)>();
+
         private enum ColorLegendMode
         {
             None,
@@ -153,9 +157,10 @@ namespace Deep3DStudio.Viewport
         {
             this.HasDepthBuffer = true;
             this.HasStencilBuffer = false;
-            // Requesting version 3.3 (Compatibility Profile) to satisfy GDK requirements
-            // while maintaining support for fixed-function pipeline commands.
-            this.SetRequiredVersion(3, 3);
+            // Requesting version 2.1 to favor a Compatibility Profile / Legacy context
+            // while still allowing modern GL features if available.
+            // On Windows, requesting 3.3 often forces a strict Core Profile.
+            this.SetRequiredVersion(2, 1);
 
             // Disable automatic rendering to save CPU.
             // QueueRender() is called manually when scene or camera changes.
@@ -465,9 +470,15 @@ namespace Deep3DStudio.Viewport
                 string fs = @"
                     #version 330 core
                     in vec3 vertexColor;
+                    uniform vec4 uniformColor;
+                    uniform bool useUniformColor;
                     out vec4 FragColor;
                     void main() {
-                        FragColor = vec4(vertexColor, 1.0);
+                        if (useUniformColor) {
+                            FragColor = uniformColor;
+                        } else {
+                            FragColor = vec4(vertexColor, 1.0);
+                        }
                     }";
 
                 _shader = new Shader(vs, fs);
@@ -512,17 +523,17 @@ namespace Deep3DStudio.Viewport
                 GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 3 * sizeof(float));
                 GL.EnableVertexAttribArray(1);
 
-                // Axes Buffers
+                // Axes Buffers - Longer and clearer axes
                 float[] axesVerts = {
                     // X (Red)
                     0,0,0, 1,0,0,
-                    1.5f,0,0, 1,0,0,
+                    2.0f,0,0, 1,0,0,
                     // Y (Green)
                     0,0,0, 0,1,0,
-                    0,1.5f,0, 0,1,0,
+                    0,2.0f,0, 0,1,0,
                     // Z (Blue)
                     0,0,0, 0,0,1,
-                    0,0,1.5f, 0,0,1
+                    0,0,2.0f, 0,0,1
                 };
 
                 _axesVao = GL.GenVertexArray();
@@ -564,6 +575,15 @@ namespace Deep3DStudio.Viewport
                 GL.DeleteBuffer(kvp.Value.vbo);
             }
             _pointCloudBuffers.Clear();
+
+            foreach (var kvp in _meshBuffers)
+            {
+                GL.DeleteVertexArray(kvp.Value.vao);
+                GL.DeleteBuffer(kvp.Value.vbo);
+                GL.DeleteBuffer(kvp.Value.ebo);
+            }
+            _meshBuffers.Clear();
+
             _overlayTextRenderer.Dispose();
         }
 
@@ -636,6 +656,26 @@ namespace Deep3DStudio.Viewport
 
             _finalViewMatrix = coordTransform * _viewMatrix;
 
+            // Ensure clean state for fixed-function and modern rendering
+            GL.Disable(EnableCap.Texture2D);
+            GL.Disable(EnableCap.Lighting);
+            GL.Disable(EnableCap.CullFace);
+            GL.Disable(EnableCap.ScissorTest);
+            GL.DepthMask(true);
+            GL.Enable(EnableCap.DepthTest);
+            GL.Enable(EnableCap.Blend);
+            GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            GL.UseProgram(0);
+
+            // Disable all client-side arrays to prevent interference with legacy/immediate mode
+            GL.DisableClientState(ArrayCap.VertexArray);
+            GL.DisableClientState(ArrayCap.ColorArray);
+            GL.DisableClientState(ArrayCap.TextureCoordArray);
+            GL.DisableClientState(ArrayCap.NormalArray);
+
+            // Disable vertex attributes on VAO 0 to avoid interference with legacy rendering
+            for (int i = 0; i < 16; i++) GL.DisableVertexAttribArray(i);
+
             // Only use legacy matrix stack if legacy is supported
             if (_legacySupported)
             {
@@ -656,6 +696,9 @@ namespace Deep3DStudio.Viewport
                 _shader.SetMatrix4("projection", _projectionMatrix);
                 _shader.SetMatrix4("view", _finalViewMatrix);
                 _shader.SetMatrix4("model", Matrix4.Identity);
+                
+                // Ensure we start without uniform color override
+                _shader.SetBool("useUniformColor", false);
 
                 if (ShowGrid && _gridVao != 0)
                 {
@@ -664,8 +707,6 @@ namespace Deep3DStudio.Viewport
                 }
                 if (ShowAxes && _axesVao != 0)
                 {
-                    // Note: GL.LineWidth > 1.0 is deprecated in Core profile and may not work
-                    // On macOS Metal, only 1.0 line width is supported
                     GL.BindVertexArray(_axesVao);
                     GL.DrawArrays(PrimitiveType.Lines, 0, 6);
                 }
@@ -681,14 +722,46 @@ namespace Deep3DStudio.Viewport
                 if (_sceneGraph != null)
                 {
                     DrawPointCloudsModernGL();
+                    DrawMeshesModernGL();
+
+                    // Draw transform handles in modern mode
+                    if (ShowGizmo && _sceneGraph.SelectedObjects.Count > 0 &&
+                        _gizmoMode != GizmoMode.Select && _gizmoMode != GizmoMode.Pen)
+                    {
+                        DrawGizmoModern();
+                    }
+
+                    // Draw cameras in modern mode
+                    if (ShowCameras)
+                    {
+                        DrawCamerasModern();
+                    }
+
+                    // Draw selected triangles highlight in modern mode
+                    if (_gizmoMode == GizmoMode.Pen && _meshEditingTool.SelectedTriangles.Count > 0)
+                    {
+                        DrawSelectedTrianglesModern();
+                    }
+                }
+
+                // Draw orientation gizmo in the corner (always visible)
+                if (ShowAxes)
+                {
+                    DrawOrientationGizmoModern(w, h);
                 }
 
                 GL.BindVertexArray(0);
                 GL.UseProgram(0);
             }
-            else if (_legacySupported)
+            // Legacy rendering path
+            if (_legacySupported)
             {
-                // Legacy rendering path
+                // Ensure no VAO is bound for immediate mode rendering
+                GL.BindVertexArray(0);
+                
+                // Clear any potential errors from modern GL setup
+                while (GL.GetError() != ErrorCode.NoError) { }
+
                 if (ShowGrid) DrawGrid();
                 if (ShowAxes) DrawAxesEnhanced();
             }
@@ -696,6 +769,8 @@ namespace Deep3DStudio.Viewport
             // Draw scene graph objects (only if legacy is supported - these use GL.Begin/End)
             if (_legacySupported)
             {
+                // Ensure no VAO is bound
+                GL.BindVertexArray(0);
                 if (_sceneGraph != null)
                 {
                     DrawSceneGraph();
@@ -754,20 +829,162 @@ namespace Deep3DStudio.Viewport
             {
                 if (obj is PointCloudObject pcObj)
                 {
-                    // Apply object transform
-                    var transform = obj.GetWorldTransform();
-                    _shader.SetMatrix4("model", transform);
-                    _shader.SetFloat("pointSize", pcObj.PointSize);
+                    bool bboxOnly = pcObj.RenderMode == ObjectRenderMode.BoundingBoxOnly;
+                    
+                    if (!bboxOnly)
+                    {
+                        // Apply object transform
+                        var transform = obj.GetWorldTransform();
+                        _shader.SetMatrix4("model", transform);
+                        _shader.SetFloat("pointSize", pcObj.PointSize);
 
-                    // Enable point size control from shader
-                    GL.Enable(EnableCap.ProgramPointSize);
+                        // Enable point size control from shader
+                        GL.Enable(EnableCap.ProgramPointSize);
 
-                    DrawPointCloudModern(pcObj);
+                        DrawPointCloudModern(pcObj);
+                    }
+
+                    // Draw bounding box if enabled or selected
+                    if (bboxOnly || pcObj.Selected || IniSettings.Instance.ShowPointCloudBounds)
+                    {
+                        var color = pcObj.Selected ? ColorPalette[pcObj.Id % ColorPalette.Length] : new Vector3(0.0f, 0.8f, 0.9f);
+                        DrawBoundingBoxModern(pcObj.BoundsMin, pcObj.BoundsMax, color, pcObj.GetWorldTransform());
+                    }
                 }
             }
 
             // Reset model matrix
             _shader.SetMatrix4("model", Matrix4.Identity);
+        }
+
+        /// <summary>
+        /// Draws meshes using modern OpenGL (for Core profile compatibility)
+        /// </summary>
+        private void DrawMeshesModernGL()
+        {
+            if (_sceneGraph == null || _shader == null) return;
+
+            var settings = IniSettings.Instance;
+            if (!settings.ShowMesh) return;
+
+            foreach (var obj in _sceneGraph.GetVisibleObjects())
+            {
+                if (obj is MeshObject meshObj && meshObj.MeshData != null)
+                {
+                    bool bboxOnly = meshObj.RenderMode == ObjectRenderMode.BoundingBoxOnly;
+                    bool isSelected = meshObj.Selected;
+
+                    if (!bboxOnly && ShouldDrawMeshSurface(meshObj, settings))
+                    {
+                        DrawMeshModern(meshObj);
+                    }
+
+                    // Draw selection highlight in modern mode
+                    if (isSelected || bboxOnly)
+                    {
+                        var color = ColorPalette[meshObj.Id % ColorPalette.Length];
+                        DrawBoundingBoxModern(meshObj.BoundsMin, meshObj.BoundsMax, color, meshObj.GetWorldTransform());
+                    }
+                }
+            }
+        }
+
+        private void DrawMeshModern(MeshObject mesh)
+        {
+            if (mesh.MeshData == null || mesh.MeshData.Vertices.Count == 0) return;
+
+            // Simple vertex format for now: Pos(3) + Color(3) = 6 floats per vertex
+            // We use the same shader as point clouds
+            
+            bool isSelected = mesh.Selected;
+
+            // Rebuild buffer if count changed
+            if (!_meshBuffers.TryGetValue(mesh.Id, out var buffers)
+                || buffers.indexCount != mesh.MeshData.Indices.Count)
+            {
+                if (buffers.vao != 0)
+                {
+                    GL.DeleteVertexArray(buffers.vao);
+                    GL.DeleteBuffer(buffers.vbo);
+                    GL.DeleteBuffer(buffers.ebo);
+                }
+
+                float[] data = new float[mesh.MeshData.Vertices.Count * 6];
+                bool hasColors = mesh.MeshData.Colors.Count >= mesh.MeshData.Vertices.Count;
+
+                for (int i = 0; i < mesh.MeshData.Vertices.Count; i++)
+                {
+                    var p = mesh.MeshData.Vertices[i];
+                    data[i * 6 + 0] = p.X;
+                    data[i * 6 + 1] = p.Y;
+                    data[i * 6 + 2] = p.Z;
+
+                    if (hasColors)
+                    {
+                        var c = mesh.MeshData.Colors[i];
+                        data[i * 6 + 3] = c.X;
+                        data[i * 6 + 4] = c.Y;
+                        data[i * 6 + 5] = c.Z;
+                    }
+                    else
+                    {
+                        data[i * 6 + 3] = 0.7f;
+                        data[i * 6 + 4] = 0.7f;
+                        data[i * 6 + 5] = 0.7f;
+                    }
+                }
+
+                int vao = GL.GenVertexArray();
+                int vbo = GL.GenBuffer();
+                int ebo = GL.GenBuffer();
+
+                GL.BindVertexArray(vao);
+
+                GL.BindBuffer(BufferTarget.ArrayBuffer, vbo);
+                GL.BufferData(BufferTarget.ArrayBuffer, data.Length * sizeof(float), data, BufferUsageHint.StaticDraw);
+
+                GL.BindBuffer(BufferTarget.ElementArrayBuffer, ebo);
+                GL.BufferData(BufferTarget.ElementArrayBuffer, mesh.MeshData.Indices.Count * sizeof(int), mesh.MeshData.Indices.ToArray(), BufferUsageHint.StaticDraw);
+
+                // Attributes (Location 0 = Pos, Location 1 = Color)
+                GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 0);
+                GL.EnableVertexAttribArray(0);
+
+                GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 3 * sizeof(float));
+                GL.EnableVertexAttribArray(1);
+
+                GL.BindVertexArray(0);
+                _meshBuffers[mesh.Id] = (vao, vbo, ebo, mesh.MeshData.Indices.Count);
+                buffers = (vao, vbo, ebo, mesh.MeshData.Indices.Count);
+            }
+
+            _shader!.Use();
+            _shader.SetMatrix4("projection", _projectionMatrix);
+            _shader.SetMatrix4("view", _finalViewMatrix);
+            _shader.SetMatrix4("model", mesh.GetWorldTransform());
+            _shader.SetFloat("pointSize", 0.0f);
+
+            // Handle selection tint
+            if (isSelected)
+            {
+                _shader.SetVector4("uniformColor", new Vector4(1.0f, 0.9f, 0.7f, 1.0f));
+                _shader.SetBool("useUniformColor", true);
+            }
+            else
+            {
+                _shader.SetBool("useUniformColor", false);
+            }
+
+            // Handle wireframe mode
+            bool wireframe = ResolveWireframe(mesh, IniSettings.Instance);
+            if (wireframe) GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Line);
+            
+            GL.BindVertexArray(buffers.vao);
+            GL.DrawElements(PrimitiveType.Triangles, buffers.indexCount, DrawElementsType.UnsignedInt, 0);
+            GL.BindVertexArray(0);
+
+            if (wireframe) GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
+            _shader.SetBool("useUniformColor", false);
         }
 
         #endregion
@@ -3224,6 +3441,216 @@ namespace Deep3DStudio.Viewport
         }
 
         #endregion
+
+        private int _gizmoVao = 0;
+        private int _gizmoVbo = 0;
+
+        private int _selectionVao = 0;
+        private int _selectionVbo = 0;
+
+        private void DrawSelectedTrianglesModern()
+        {
+            var vertices = _meshEditingTool.GetSelectedTriangleVertices();
+            if (vertices.Count == 0 || _shader == null) return;
+
+            List<float> data = new List<float>();
+            Vector3 color = new Vector3(1.0f, 0.5f, 0.0f); // Orange
+            foreach (var v in vertices)
+            {
+                data.Add(v.X); data.Add(v.Y); data.Add(v.Z);
+                data.Add(color.X); data.Add(color.Y); data.Add(color.Z);
+            }
+
+            if (_selectionVao == 0)
+            {
+                _selectionVao = GL.GenVertexArray();
+                _selectionVbo = GL.GenBuffer();
+            }
+
+            GL.BindVertexArray(_selectionVao);
+            GL.BindBuffer(BufferTarget.ArrayBuffer, _selectionVbo);
+            GL.BufferData(BufferTarget.ArrayBuffer, data.Count * sizeof(float), data.ToArray(), BufferUsageHint.DynamicDraw);
+
+            GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 0);
+            GL.EnableVertexAttribArray(0);
+            GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 3 * sizeof(float));
+            GL.EnableVertexAttribArray(1);
+
+            _shader.Use();
+            _shader.SetMatrix4("projection", _projectionMatrix);
+            _shader.SetMatrix4("view", _finalViewMatrix);
+            _shader.SetMatrix4("model", Matrix4.Identity);
+            
+            GL.Enable(EnableCap.Blend);
+            GL.Disable(EnableCap.DepthTest);
+
+            // Draw faces
+            _shader.SetVector4("uniformColor", new Vector4(color.X, color.Y, color.Z, 0.4f));
+            _shader.SetBool("useUniformColor", true);
+            GL.DrawArrays(PrimitiveType.Triangles, 0, vertices.Count);
+
+            // Draw edges
+            GL.LineWidth(2.0f);
+            _shader.SetVector4("uniformColor", new Vector4(color.X, color.Y, color.Z, 1.0f));
+            GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Line);
+            GL.DrawArrays(PrimitiveType.Triangles, 0, vertices.Count);
+            GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
+            GL.LineWidth(1.0f);
+
+            _shader.SetBool("useUniformColor", false);
+            GL.Enable(EnableCap.DepthTest);
+            GL.Disable(EnableCap.Blend);
+            GL.BindVertexArray(0);
+        }
+
+        private void DrawGizmoModern()
+        {
+            if (_sceneGraph == null || _sceneGraph.SelectedObjects.Count == 0 || _shader == null) return;
+
+            Vector3 center = Vector3.Zero;
+            foreach (var obj in _sceneGraph.SelectedObjects) center += obj.Position;
+            center /= _sceneGraph.SelectedObjects.Count;
+
+            float distToCamera = Math.Abs(_zoom);
+            _gizmoSize = distToCamera * 0.15f;
+            float len = _gizmoSize;
+
+            List<float> lines = new List<float>();
+            void AddLine(Vector3 p1, Vector3 p2, Vector3 color)
+            {
+                lines.Add(p1.X); lines.Add(p1.Y); lines.Add(p1.Z);
+                lines.Add(color.X); lines.Add(color.Y); lines.Add(color.Z);
+                lines.Add(p2.X); lines.Add(p2.Y); lines.Add(p2.Z);
+                lines.Add(color.X); lines.Add(color.Y); lines.Add(color.Z);
+            }
+
+            Vector3 red = _activeGizmoAxis == 0 ? new Vector3(1, 1, 0) : new Vector3(1, 0, 0);
+            Vector3 green = _activeGizmoAxis == 1 ? new Vector3(1, 1, 0) : new Vector3(0, 1, 0);
+            Vector3 blue = _activeGizmoAxis == 2 ? new Vector3(1, 1, 0) : new Vector3(0, 0, 1);
+
+            if (_gizmoMode == GizmoMode.Translate || _gizmoMode == GizmoMode.Scale)
+            {
+                AddLine(center, center + new Vector3(len, 0, 0), red);
+                AddLine(center, center + new Vector3(0, len, 0), green);
+                AddLine(center, center + new Vector3(0, 0, len), blue);
+            }
+            else if (_gizmoMode == GizmoMode.Rotate)
+            {
+                float r = len * 0.8f;
+                for (int i = 0; i < 4; i++)
+                {
+                    float a1 = i * MathF.PI / 2;
+                    float a2 = (i + 1) * MathF.PI / 2;
+                    AddLine(center + new Vector3(0, MathF.Cos(a1) * r, MathF.Sin(a1) * r), center + new Vector3(0, MathF.Cos(a2) * r, MathF.Sin(a2) * r), red);
+                    AddLine(center + new Vector3(MathF.Cos(a1) * r, 0, MathF.Sin(a1) * r), center + new Vector3(MathF.Cos(a2) * r, 0, MathF.Sin(a2) * r), green);
+                    AddLine(center + new Vector3(MathF.Cos(a1) * MathF.Sin(a1) * r, MathF.Sin(a1) * r, 0), center + new Vector3(MathF.Cos(a2) * r, MathF.Sin(a2) * r, 0), blue);
+                }
+            }
+
+            if (_gizmoVao == 0)
+            {
+                _gizmoVao = GL.GenVertexArray();
+                _gizmoVbo = GL.GenBuffer();
+            }
+
+            GL.BindVertexArray(_gizmoVao);
+            GL.BindBuffer(BufferTarget.ArrayBuffer, _gizmoVbo);
+            GL.BufferData(BufferTarget.ArrayBuffer, lines.Count * sizeof(float), lines.ToArray(), BufferUsageHint.DynamicDraw);
+
+            GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 0);
+            GL.EnableVertexAttribArray(0);
+            GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 3 * sizeof(float));
+            GL.EnableVertexAttribArray(1);
+
+            _shader.Use();
+            _shader.SetMatrix4("projection", _projectionMatrix);
+            _shader.SetMatrix4("view", _finalViewMatrix);
+            _shader.SetMatrix4("model", Matrix4.Identity);
+            _shader.SetBool("useUniformColor", false);
+
+            GL.Disable(EnableCap.DepthTest);
+            GL.LineWidth(3.0f);
+            GL.DrawArrays(PrimitiveType.Lines, 0, lines.Count / 6);
+            GL.LineWidth(1.0f);
+            GL.Enable(EnableCap.DepthTest);
+
+            GL.BindVertexArray(0);
+        }
+
+        private int _orientVao = 0;
+        private int _orientVbo = 0;
+
+        private void DrawOrientationGizmoModern(int width, int height)
+        {
+            if (_shader == null) return;
+
+            // Setup a small viewport in the corner or use orthographic overlay
+            // We'll use orthographic projection for the gizmo
+            float size = 60.0f; // size in pixels
+            float margin = 20.0f;
+            
+            // Gizmo centered at (margin + size/2, margin + size/2) in screen space
+            // But we'll just use a small view matrix and a fixed projection
+            
+            Matrix4 ortho = Matrix4.CreateOrthographicOffCenter(0, width, 0, height, -100, 100);
+            
+            // Get only the rotation part of the view matrix
+            var rx = Matrix4.CreateRotationX(MathHelper.DegreesToRadians(_rotationX));
+            var ry = Matrix4.CreateRotationY(MathHelper.DegreesToRadians(_rotationY));
+            Matrix4 rotation = ry * rx;
+            
+            // For Z-up correction if needed
+            if (IniSettings.Instance.CoordSystem == CoordinateSystem.RightHanded_Z_Up)
+            {
+                rotation = Matrix4.CreateRotationX(MathHelper.DegreesToRadians(-90)) * rotation;
+            }
+
+            Vector3 center = new Vector3(margin + size, margin + size, 0);
+            float axisLen = size * 0.8f;
+
+            List<float> lines = new List<float>();
+            void AddAxis(Vector3 dir, Vector3 color)
+            {
+                Vector3 end = center + Vector3.TransformVector(dir, rotation) * axisLen;
+                lines.Add(center.X); lines.Add(center.Y); lines.Add(center.Z);
+                lines.Add(color.X); lines.Add(color.Y); lines.Add(color.Z);
+                lines.Add(end.X); lines.Add(end.Y); lines.Add(end.Z);
+                lines.Add(color.X); lines.Add(color.Y); lines.Add(color.Z);
+            }
+
+            AddAxis(Vector3.UnitX, new Vector3(1, 0, 0)); // X - Red
+            AddAxis(Vector3.UnitY, new Vector3(0, 1, 0)); // Y - Green
+            AddAxis(Vector3.UnitZ, new Vector3(0, 0, 1)); // Z - Blue
+
+            if (_orientVao == 0)
+            {
+                _orientVao = GL.GenVertexArray();
+                _orientVbo = GL.GenBuffer();
+            }
+
+            GL.BindVertexArray(_orientVao);
+            GL.BindBuffer(BufferTarget.ArrayBuffer, _orientVbo);
+            GL.BufferData(BufferTarget.ArrayBuffer, lines.Count * sizeof(float), lines.ToArray(), BufferUsageHint.DynamicDraw);
+
+            GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 0);
+            GL.EnableVertexAttribArray(0);
+            GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 3 * sizeof(float));
+            GL.EnableVertexAttribArray(1);
+
+            _shader.Use();
+            _shader.SetMatrix4("projection", ortho);
+            _shader.SetMatrix4("view", Matrix4.Identity);
+            _shader.SetMatrix4("model", Matrix4.Identity);
+            _shader.SetBool("useUniformColor", false);
+
+            GL.Disable(EnableCap.DepthTest);
+            GL.LineWidth(2.5f);
+            GL.DrawArrays(PrimitiveType.Lines, 0, 6);
+            GL.LineWidth(1.0f);
+            GL.Enable(EnableCap.DepthTest);
+
+            GL.BindVertexArray(0);
+        }
 
         struct Point
         {

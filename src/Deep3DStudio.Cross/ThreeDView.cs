@@ -193,6 +193,17 @@ namespace Deep3DStudio.Viewport
             GL.BindBuffer(BufferTarget.ArrayBuffer, 0);
             GL.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
 
+            // Disable states that might have been left on by ImGui
+            GL.Disable(EnableCap.Texture2D);
+            GL.Disable(EnableCap.Lighting);
+            GL.Disable(EnableCap.CullFace); 
+            GL.Enable(EnableCap.DepthTest);
+            GL.Enable(EnableCap.Blend);
+            GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+
+            // Disable vertex attributes that ImGui might have enabled on VAO 0
+            for (int i = 0; i < 8; i++) GL.DisableVertexAttribArray(i);
+
             // Consume potential errors from state reset on strict contexts
             while (GL.GetError() != ErrorCode.NoError) { }
 
@@ -1283,6 +1294,26 @@ namespace Deep3DStudio.Viewport
             }
 
             GL.BindVertexArray(buffers.vao);
+
+            // Re-setup pointers every frame because some drivers (and 3.3 Compat profiles) 
+            // don't reliably capture legacy client-side pointers in VAOs.
+            GL.BindBuffer(BufferTarget.ArrayBuffer, buffers.vbo);
+            GL.EnableClientState(ArrayCap.VertexArray);
+            GL.VertexPointer(3, VertexPointerType.Float, 8 * sizeof(float), 0);
+
+            GL.EnableClientState(ArrayCap.ColorArray);
+            GL.ColorPointer(3, ColorPointerType.Float, 8 * sizeof(float), 3 * sizeof(float));
+
+            if (buffers.hasTexture)
+            {
+                GL.EnableClientState(ArrayCap.TextureCoordArray);
+                GL.TexCoordPointer(2, TexCoordPointerType.Float, 8 * sizeof(float), 6 * sizeof(float));
+            }
+            else
+            {
+                GL.DisableClientState(ArrayCap.TextureCoordArray);
+            }
+
             GL.DrawElements(PrimitiveType.Triangles, buffers.indexCount, DrawElementsType.UnsignedInt, 0);
             GL.BindVertexArray(0);
 
@@ -1496,6 +1527,15 @@ namespace Deep3DStudio.Viewport
 
             GL.PointSize(pointSize);
             GL.BindVertexArray(buffers.vao);
+
+            // Re-setup pointers every frame because some drivers don't reliably capture legacy pointers in VAOs
+            GL.BindBuffer(BufferTarget.ArrayBuffer, buffers.vbo);
+            GL.EnableClientState(ArrayCap.VertexArray);
+            GL.VertexPointer(3, VertexPointerType.Float, 6 * sizeof(float), 0);
+            GL.EnableClientState(ArrayCap.ColorArray);
+            GL.ColorPointer(3, ColorPointerType.Float, 6 * sizeof(float), 3 * sizeof(float));
+            GL.DisableClientState(ArrayCap.TextureCoordArray);
+
             GL.DrawArrays(PrimitiveType.Points, 0, buffers.count);
             GL.BindVertexArray(0);
         }
@@ -1578,6 +1618,15 @@ namespace Deep3DStudio.Viewport
 
             GL.PointSize(pointCloud.PointSize);
             GL.BindVertexArray(buffers.vao);
+
+            // Re-setup pointers every frame because some drivers don't reliably capture legacy pointers in VAOs
+            GL.BindBuffer(BufferTarget.ArrayBuffer, buffers.vbo);
+            GL.EnableClientState(ArrayCap.VertexArray);
+            GL.VertexPointer(3, VertexPointerType.Float, 6 * sizeof(float), 0);
+            GL.EnableClientState(ArrayCap.ColorArray);
+            GL.ColorPointer(3, ColorPointerType.Float, 6 * sizeof(float), 3 * sizeof(float));
+            GL.DisableClientState(ArrayCap.TextureCoordArray);
+
             GL.DrawArrays(PrimitiveType.Points, 0, buffers.count);
             GL.BindVertexArray(0);
         }
