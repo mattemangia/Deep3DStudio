@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Deep3DStudio.Configuration;
+using Deep3DStudio.Meshing;
 using Deep3DStudio.Model.SfM;
 using OpenTK.Mathematics;
 
@@ -710,7 +711,28 @@ namespace Deep3DStudio.Model.AIModels
                                     }
                                 }
 
-                                if (currentResult?.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
+                                // If multi-view data with normals is available, run normal fusion meshing
+                                if (currentResult?.Meshes.Count > 0 &&
+                                    currentResult.Meshes[0].MultiViews is { Count: >= 6 } multiViews &&
+                                    multiViews.Any(v => v.Normals.Length > 0))
+                                {
+                                    Report("Running normal fusion mesh reconstruction...", 0.5f);
+                                    var normalFusion = new NormalFusionMesher();
+                                    var fusedMesh = await Task.Run(() => normalFusion.Reconstruct(
+                                        multiViews,
+                                        (msg, p) => Report(msg, 0.5f + p * 0.45f),
+                                        cancellationToken), cancellationToken);
+                                    if (fusedMesh != null && fusedMesh.Vertices.Count > 0)
+                                    {
+                                        currentResult.Meshes[0] = fusedMesh;
+                                        Report($"Wonder3D + NormalFusion complete. {fusedMesh.Vertices.Count} vertices, {fusedMesh.Indices.Count / 3} faces.", 1.0f);
+                                    }
+                                    else
+                                    {
+                                        Report($"Normal fusion failed, keeping point cloud. {currentResult.Meshes[0].Vertices.Count} vertices.", 0.95f);
+                                    }
+                                }
+                                else if (currentResult?.Meshes.Count > 0 && currentResult.Meshes.Any(m => m.Vertices.Count > 0))
                                     Report($"Wonder3D complete. {currentResult.Meshes[0].Vertices.Count} vertices.", 1.0f);
                                 else
                                     Report("Wonder3D failed - model not loaded or generation failed.", 0.9f);

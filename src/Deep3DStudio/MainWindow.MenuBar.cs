@@ -352,6 +352,10 @@ namespace Deep3DStudio
             denseCloudItem.Activated += OnPointCloudDenseClicked;
             pointCloudFilterMenu.Append(denseCloudItem);
 
+            var pcToMeshItem = new MenuItem("Point Cloud -> _Mesh");
+            pcToMeshItem.Activated += async (s, e) => await RunMeshing();
+            pointCloudFilterMenu.Append(pcToMeshItem);
+
             editMenu.Append(pointCloudFilterMenuItem);
 
             editMenu.Append(new SeparatorMenuItem());

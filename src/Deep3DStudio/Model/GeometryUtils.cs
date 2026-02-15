@@ -9,6 +9,19 @@ using System.Threading.Tasks;
 
 namespace Deep3DStudio.Model
 {
+    /// <summary>
+    /// Stores a single orthographic view with color image and normal map.
+    /// Used by Wonder3D normal-fusion mesh reconstruction.
+    /// </summary>
+    public class MultiViewData
+    {
+        public float[] Colors = Array.Empty<float>();    // H*W*3 flattened RGB [0-1]
+        public float[] Normals = Array.Empty<float>();   // H*W*3 flattened XYZ [-1,1]
+        public int Width;
+        public int Height;
+        public Matrix3 Rotation = Matrix3.Identity;      // View rotation (orthographic)
+    }
+
     public class MeshData
     {
         public List<Vector3> Vertices { get; set; } = new List<Vector3>();
@@ -17,6 +30,8 @@ namespace Deep3DStudio.Model
         public List<float> Confidence { get; set; } = new List<float>();
         public List<Vector2> UVs { get; set; } = new List<Vector2>();
         public List<int> Indices { get; set; } = new List<int>();
+
+        public List<MultiViewData>? MultiViews { get; set; }
 
         public SKBitmap? Texture { get; set; }
         public int TextureId { get; set; } = -1;

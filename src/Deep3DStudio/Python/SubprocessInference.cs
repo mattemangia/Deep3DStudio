@@ -1073,6 +1073,45 @@ namespace Deep3DStudio.Python
                                     }
                                 }
 
+                                // Parse multi-view data (Wonder3D normal maps + color)
+                                if (item.TryGetProperty("views", out var viewsProp))
+                                {
+                                    var viewsList = new List<MultiViewData>();
+                                    foreach (var viewElem in viewsProp.EnumerateArray())
+                                    {
+                                        var view = new MultiViewData();
+                                        if (viewElem.TryGetProperty("width", out var wProp))
+                                            view.Width = wProp.GetInt32();
+                                        if (viewElem.TryGetProperty("height", out var hProp))
+                                            view.Height = hProp.GetInt32();
+
+                                        if (viewElem.TryGetProperty("color", out var colorArr))
+                                            view.Colors = colorArr.EnumerateArray().Select(x => (float)x.GetDouble()).ToArray();
+                                        if (viewElem.TryGetProperty("normal", out var normalArr))
+                                            view.Normals = normalArr.EnumerateArray().Select(x => (float)x.GetDouble()).ToArray();
+
+                                        if (viewElem.TryGetProperty("rotation", out var rotArr))
+                                        {
+                                            var r = rotArr.EnumerateArray().Select(x => (float)x.GetDouble()).ToArray();
+                                            if (r.Length >= 9)
+                                            {
+                                                view.Rotation = new Matrix3(
+                                                    r[0], r[1], r[2],
+                                                    r[3], r[4], r[5],
+                                                    r[6], r[7], r[8]);
+                                            }
+                                        }
+
+                                        viewsList.Add(view);
+                                    }
+
+                                    if (viewsList.Count > 0)
+                                    {
+                                        mesh.MultiViews = viewsList;
+                                        Log($"Parsed {viewsList.Count} multi-view images (normals: {viewsList.Any(v => v.Normals.Length > 0)})");
+                                    }
+                                }
+
                                 results.Add(mesh);
                                 Log($"Loaded mesh with {mesh.Vertices.Count} vertices");
                             }

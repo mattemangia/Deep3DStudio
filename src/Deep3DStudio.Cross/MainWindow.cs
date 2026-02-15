@@ -1302,6 +1302,8 @@ namespace Deep3DStudio
                         ImGui.Separator();
                         if (ImGui.MenuItem("Cleanup Mesh...")) OnCleanup();
                         if (ImGui.MenuItem("Bake Textures...")) OnBakeTextures();
+                        ImGui.Separator();
+                        if (ImGui.MenuItem("Point Cloud to Mesh")) RunMeshFromSelectedPointClouds();
                         ImGui.EndMenu();
                     }
 
@@ -2835,6 +2837,10 @@ namespace Deep3DStudio
 
                 if (ImGui.MenuItem("Fill Holes", "", false, meshes.Count > 0))
                     ApplyFillHoles();
+
+                var contextPointClouds = _sceneGraph.SelectedObjects.OfType<PointCloudObject>().ToList();
+                if (ImGui.MenuItem("Point Cloud to Mesh", "", false, contextPointClouds.Count > 0))
+                    RunMeshFromSelectedPointClouds();
 
                 if (ImGui.MenuItem("Focus", "F"))
                     _viewport.FocusOnSelection();

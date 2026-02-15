@@ -1684,6 +1684,7 @@ def infer_wonder3d(images_data, num_steps=50, guidance_scale=3.0):
                 output = model(img, num_inference_steps=num_steps, guidance_scale=guidance_scale)
 
             # Extract multi-view images from pipeline output
+            # Wonder3D outputs 12 images: 6 color + 6 normal maps (interleaved or sequential)
             mv_images = None
             if hasattr(output, 'images') and output.images is not None:
                 imgs = output.images
@@ -1697,62 +1698,99 @@ def infer_wonder3d(images_data, num_steps=50, guidance_scale=3.0):
                     # PIL images list
                     mv_images = np.stack([np.array(im.convert('RGB')).astype(np.float32) / 255.0 for im in imgs])
 
-            if mv_images is not None and len(mv_images) >= 6:
-                log(f"Wonder3D generated {len(mv_images)} multi-view images, creating point cloud...")
-
-                # Project 6 views onto oriented planes (front, right, back, left, top, bottom)
-                rots = [
-                    np.eye(3),                                              # front
-                    np.array([[0, 0, -1], [0, 1, 0], [1, 0, 0]]),          # right
-                    np.array([[-1, 0, 0], [0, 1, 0], [0, 0, -1]]),         # back
-                    np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]]),          # left
-                    np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]]),          # top
-                    np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]])           # bottom
-                ]
-
-                vertices = []
-                colors = []
-
-                for v in range(6):
-                    img_v = mv_images[v]
-                    # Ensure values are in [0, 1]
-                    if img_v.max() > 1.0:
-                        img_v = img_v / 255.0
-                    H, W = img_v.shape[:2]
-                    grid_y, grid_x = np.mgrid[:H, :W]
-                    u = (grid_x - W / 2.0) / (W / 2.0)
-                    v_ = (grid_y - H / 2.0) / (H / 2.0)
-                    z = np.zeros_like(u)
-
-                    pts = np.stack([u, v_, z], axis=-1).reshape(-1, 3)
-                    pts = pts @ rots[v].T
-                    col = img_v[:, :, :3].reshape(-1, 3)
-
-                    vertices.append(pts)
-                    colors.append(col)
-
-                all_verts = np.concatenate(vertices, axis=0)
-                all_cols = np.concatenate(colors, axis=0)
-
-                # Subsample to manageable size
-                max_points = 100000
-                if len(all_verts) > max_points:
-                    idx = np.random.choice(len(all_verts), max_points, replace=False)
-                    all_verts = all_verts[idx]
-                    all_cols = all_cols[idx]
-
-                log(f"Wonder3D point cloud: {len(all_verts)} points from 6 views")
-
-                results.append({
-                    'vertices': all_verts.astype(np.float32).tolist(),
-                    'colors': np.clip(all_cols, 0, 1).astype(np.float32).tolist(),
-                    'faces': [],
-                    'image_index': 0
-                })
-            else:
+            if mv_images is None or len(mv_images) < 6:
                 num_views = len(mv_images) if mv_images is not None else 0
                 log(f"Wonder3D: got {num_views} views (need >= 6), no point cloud generated")
                 return {"success": False, "error": f"Wonder3D generated only {num_views} views, expected at least 6"}
+
+            # Determine color and normal images
+            # Wonder3D typically outputs 12 images: first 6 are color, last 6 are normal
+            # If only 6 images, they are color-only (no normals)
+            num_total = len(mv_images)
+            if num_total >= 12:
+                color_images = mv_images[:6]
+                normal_images = mv_images[6:12]
+                has_normals = True
+                log(f"Wonder3D generated {num_total} images: 6 color + 6 normal maps")
+            else:
+                color_images = mv_images[:6]
+                normal_images = None
+                has_normals = False
+                log(f"Wonder3D generated {num_total} color images (no normal maps)")
+
+            # 6 orthographic view rotations: front, right, back, left, top, bottom
+            rots = [
+                np.eye(3),                                              # front
+                np.array([[0, 0, -1], [0, 1, 0], [1, 0, 0]]),          # right
+                np.array([[-1, 0, 0], [0, 1, 0], [0, 0, -1]]),         # back
+                np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]]),          # left
+                np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]]),          # top
+                np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]])           # bottom
+            ]
+
+            # Build structured views data for C# NormalFusionMesher
+            views = []
+            for v in range(6):
+                img_c = color_images[v]
+                if img_c.max() > 1.0:
+                    img_c = img_c / 255.0
+                H, W = img_c.shape[:2]
+
+                view_data = {
+                    'color': np.clip(img_c[:, :, :3], 0, 1).astype(np.float32).flatten().tolist(),
+                    'width': int(W),
+                    'height': int(H),
+                    'rotation': rots[v].flatten().tolist()
+                }
+
+                if has_normals:
+                    img_n = normal_images[v]
+                    if img_n.max() > 1.0:
+                        img_n = img_n / 255.0
+                    # Convert normal map from [0,1] to [-1,1] range
+                    normals = (img_n[:, :, :3] * 2.0 - 1.0).astype(np.float32)
+                    view_data['normal'] = normals.flatten().tolist()
+                else:
+                    view_data['normal'] = []
+
+                views.append(view_data)
+
+            # Also build point cloud as fallback
+            vertices = []
+            colors = []
+            for v in range(6):
+                img_v = color_images[v]
+                if img_v.max() > 1.0:
+                    img_v = img_v / 255.0
+                H, W = img_v.shape[:2]
+                grid_y, grid_x = np.mgrid[:H, :W]
+                u = (grid_x - W / 2.0) / (W / 2.0)
+                v_ = (grid_y - H / 2.0) / (H / 2.0)
+                z = np.zeros_like(u)
+                pts = np.stack([u, v_, z], axis=-1).reshape(-1, 3)
+                pts = pts @ rots[v].T
+                col = img_v[:, :, :3].reshape(-1, 3)
+                vertices.append(pts)
+                colors.append(col)
+
+            all_verts = np.concatenate(vertices, axis=0)
+            all_cols = np.concatenate(colors, axis=0)
+
+            max_points = 100000
+            if len(all_verts) > max_points:
+                idx = np.random.choice(len(all_verts), max_points, replace=False)
+                all_verts = all_verts[idx]
+                all_cols = all_cols[idx]
+
+            log(f"Wonder3D: {len(all_verts)} point cloud vertices, {len(views)} views (normals={has_normals})")
+
+            results.append({
+                'vertices': all_verts.astype(np.float32).tolist(),
+                'colors': np.clip(all_cols, 0, 1).astype(np.float32).tolist(),
+                'faces': [],
+                'views': views,
+                'image_index': 0
+            })
 
         clear_gpu()
         for img_pil in pil_images:
