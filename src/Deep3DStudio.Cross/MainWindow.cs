@@ -65,7 +65,7 @@ namespace Deep3DStudio
             "Multi-View (Settings)", // Uses IniSettings.ReconstructionMethod
             "Feature Matching (SfM)",
             "TripoSR (Single Image)",
-            "LGM (Single Image)",
+            "LGM (4 Images)",
             "Wonder3D (Single Image)"
         };
 
@@ -1395,7 +1395,7 @@ namespace Deep3DStudio
                     if (ImGui.BeginMenu("Image to 3D"))
                     {
                         if (ImGui.MenuItem("TripoSR (Fast)")) RunAIModel("TripoSR");
-                        if (ImGui.MenuItem("LGM (Single Image)")) RunAIModel("LGM");
+                        if (ImGui.MenuItem("LGM (4 Images)")) RunAIModel("LGM");
                         if (ImGui.MenuItem("Wonder3D (Single-Image Multi-View)")) RunAIModel("Wonder3D");
                         ImGui.EndMenu();
                     }
@@ -1877,7 +1877,7 @@ namespace Deep3DStudio
 
                 if (ImGui.ImageButton("##LGM", _iconFactory.GetIcon(IconType.LGM), size))
                     RunSingleStep(WorkflowStep.LGMGeneration);
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("LGM Gaussian (Single Image)");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("LGM Gaussian (4 Images)");
                 if (IsLastItemRightClicked()) OpenRunOptionsDialog();
 
                 if (ImGui.ImageButton("##Wonder3D", _iconFactory.GetIcon(IconType.Wonder3D), size))
@@ -6866,7 +6866,7 @@ namespace Deep3DStudio
                     RunReconstruction();
                     break;
                 case "LGM":
-                    _selectedWorkflow = 3; // LGM (Single Image)
+                    _selectedWorkflow = 3; // LGM (4 Images)
                     RunReconstruction();
                     break;
                 case "Wonder3D":
@@ -7046,6 +7046,14 @@ namespace Deep3DStudio
                 return;
             }
 
+            // LGM requires 4 images
+            var currentWorkflowNames = GetWorkflowNames();
+            if (currentWorkflowNames[_selectedWorkflow].Contains("LGM") && _loadedImages.Count < 4)
+            {
+                ShowError("Insufficient Images", "LGM requires exactly 4 images (front, left, back, right views).");
+                return;
+            }
+
             _workflowInProgress = true;
             var workflowNames = GetWorkflowNames();
             string resultLabel = "Reconstruction";
@@ -7211,11 +7219,18 @@ namespace Deep3DStudio
                     break;
 
                 case WorkflowStep.TripoSRGeneration:
-                case WorkflowStep.LGMGeneration:
                 case WorkflowStep.Wonder3DGeneration:
                     if (_loadedImages.Count == 0)
                     {
                         ShowError("No Images", "Please load at least one image.");
+                        return;
+                    }
+                    break;
+
+                case WorkflowStep.LGMGeneration:
+                    if (_loadedImages.Count < 4)
+                    {
+                        ShowError("Insufficient Images", "LGM requires exactly 4 images (front, left, back, right views).");
                         return;
                     }
                     break;

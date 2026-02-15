@@ -256,7 +256,7 @@ namespace Deep3DStudio
             wfCombo.AppendText($"Multi-View ({GetCurrentEngineName()})");
             wfCombo.AppendText("Feature Matching (SfM)");
             wfCombo.AppendText("TripoSR (Single Image)");
-            wfCombo.AppendText("LGM (Single Image)");
+            wfCombo.AppendText("LGM (4 Images)");
             wfCombo.AppendText("Wonder3D (Single Image)");
             wfCombo.Active = _workflowCombo.Active;
             area.PackStart(wfCombo, false, false, 0);
@@ -490,7 +490,7 @@ namespace Deep3DStudio
             _workflowCombo.AppendText($"Multi-View ({GetCurrentEngineName()})"); // Uses Settings engine
             _workflowCombo.AppendText("Feature Matching (SfM)");
             _workflowCombo.AppendText("TripoSR (Single Image)");
-            _workflowCombo.AppendText("LGM (Single Image)");
+            _workflowCombo.AppendText("LGM (4 Images)");
             _workflowCombo.AppendText("Wonder3D (Single Image)");
             _workflowCombo.Active = 0;
             wfBox.PackStart(_workflowCombo, false, false, 0);
@@ -543,7 +543,7 @@ namespace Deep3DStudio
                 "ai_gauss",
                 iconSize,
                 "LGM",
-                "LGM: Single-image Gaussian model (standalone)",
+                "LGM: 4-image Gaussian model (standalone)",
                 (s, e) => OnRunSingleStep(AIModels.WorkflowStep.LGMGeneration),
                 ConfigureAiModelOptions);
             toolbar.Insert(lgmBtn, -1);

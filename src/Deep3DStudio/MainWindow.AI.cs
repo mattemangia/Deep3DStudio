@@ -111,9 +111,9 @@ namespace Deep3DStudio
 
         private void OnLGMGenerate(object? sender, EventArgs e)
         {
-            if (_imagePaths.Count == 0)
+            if (_imagePaths.Count < 4)
             {
-                ShowMessage("No Images", "Please load at least one image for LGM generation.");
+                ShowMessage("Insufficient Images", "LGM requires exactly 4 images (front, left, back, right views).");
                 return;
             }
 
@@ -530,11 +530,18 @@ namespace Deep3DStudio
                     break;
 
                 case AIModels.WorkflowStep.TripoSRGeneration:
-                case AIModels.WorkflowStep.LGMGeneration:
                 case AIModels.WorkflowStep.Wonder3DGeneration:
                     if (_imagePaths.Count == 0)
                     {
                         ShowMessage("No Images", "Please load at least one image.");
+                        return;
+                    }
+                    break;
+
+                case AIModels.WorkflowStep.LGMGeneration:
+                    if (_imagePaths.Count < 4)
+                    {
+                        ShowMessage("Insufficient Images", "LGM requires exactly 4 images (front, left, back, right views).");
                         return;
                     }
                     break;

@@ -40,7 +40,7 @@ The application is developed as part of research at the **Universita degli Studi
 | **MUSt3R** | Multi-view network optimized for many images and video (8-11 FPS) |
 | **TripoSR** | Fast single-image to 3D generation |
 | **TripoSF** | High-resolution mesh refinement (requires an existing mesh) |
-| **LGM** | Single-image Gaussian model for high-quality reconstruction |
+| **LGM** | 4-image Gaussian model for high-quality reconstruction |
 | **Wonder3D** | Single-image to multi-view generation and reconstruction |
 
 ### Mesh Processing & Refinement
@@ -151,8 +151,8 @@ Download the latest release for your platform from the [Releases](https://github
   3. **Choose reconstruction method**
      - Select your preferred AI model from the dropdown in the left panel
      - Options: Dust3r, MASt3R, MUSt3R, TripoSR, LGM, Wonder3D
-     - For multi-view inputs: Dust3r, MASt3R, MUSt3R, or SfM
-     - For single-image inputs: TripoSR, LGM, or Wonder3D
+     - For multi-view inputs: Dust3r, MASt3R, MUSt3R, LGM (4 images), or SfM
+     - For single-image inputs: TripoSR or Wonder3D
 
   4. **Configure AI device (optional)**
      - Settings -> AI Inference Device defaults to **Auto** (selects CUDA/DirectML/MPS if available)
@@ -519,7 +519,7 @@ This project incorporates or builds upon the following open-source projects:
 - [MUSt3R](https://github.com/naver/must3r) - Multi-view Network for Stereo 3D Reconstruction (video support)
 - [TripoSR](https://github.com/VAST-AI-Research/TripoSR) - Single-image 3D generation
 - [TripoSF](https://github.com/VAST-AI-Research/TripoSF) - High-resolution mesh refinement
-- [LGM](https://github.com/3DTopia/LGM) - Single-image Gaussian model
+- [LGM](https://github.com/3DTopia/LGM) - 4-image Gaussian model
 - [Wonder3D](https://github.com/xxlong0/Wonder3D) - Single-image to multi-view generation
 - [UniRig](https://github.com/VAST-AI-Research/UniRig) - Automatic rigging
 

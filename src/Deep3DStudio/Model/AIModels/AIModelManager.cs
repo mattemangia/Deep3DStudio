@@ -97,8 +97,8 @@ namespace Deep3DStudio.Model.AIModels
 
         public static WorkflowPipeline ImageToLGM => new()
         {
-            Name = "Image -> LGM -> Mesh",
-            Description = "Single-image 3D using LGM (Gaussian model)",
+            Name = "Images -> LGM -> Mesh",
+            Description = "4-image 3D generation using LGM (Gaussian model)",
             Steps = new List<WorkflowStep> { WorkflowStep.LoadImages, WorkflowStep.LGMGeneration }
         };
 
@@ -247,7 +247,7 @@ namespace Deep3DStudio.Model.AIModels
         public Dust3rInference? Dust3r => _dust3r ??= new Dust3rInference();  // Dust3r doesn't inherit from BasePythonInference
 
         private SceneResult? GenerateFromSingleImageInternal(
-            string imagePath,
+            List<string> imagePaths,
             ImageTo3DModel model,
             Action<string>? statusCallback = null,
             CancellationToken cancellationToken = default)
@@ -255,14 +255,16 @@ namespace Deep3DStudio.Model.AIModels
             try
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                statusCallback?.Invoke($"Loading image: {Path.GetFileName(imagePath)}...");
+                if (imagePaths.Count == 0) return null;
+
+                statusCallback?.Invoke($"Loading image(s): {Path.GetFileName(imagePaths[0])}...");
                 MeshData? mesh = null;
 
                 switch (model)
                 {
-                    case ImageTo3DModel.TripoSR: mesh = TripoSR?.GenerateFromImage(imagePath, cancellationToken); break;
-                    case ImageTo3DModel.LGM: mesh = LGM?.GenerateFromImage(imagePath, cancellationToken); break;
-                    case ImageTo3DModel.Wonder3D: mesh = Wonder3D?.GenerateFromImage(imagePath, cancellationToken); break;
+                    case ImageTo3DModel.TripoSR: mesh = TripoSR?.GenerateFromImage(imagePaths[0], cancellationToken); break;
+                    case ImageTo3DModel.LGM: mesh = LGM?.GenerateFromImages(imagePaths, cancellationToken); break;
+                    case ImageTo3DModel.Wonder3D: mesh = Wonder3D?.GenerateFromImage(imagePaths[0], cancellationToken); break;
                 }
 
                 if (mesh != null && mesh.Vertices.Count > 0)
@@ -287,13 +289,13 @@ namespace Deep3DStudio.Model.AIModels
         }
 
         public async Task<SceneResult?> GenerateFromSingleImageAsync(
-            string imagePath,
+            List<string> imagePaths,
             ImageTo3DModel model,
             Action<string>? statusCallback = null,
             System.Threading.CancellationToken cancellationToken = default)
         {
             return await Task.Run(() =>
-                GenerateFromSingleImageInternal(imagePath, model, statusCallback, cancellationToken),
+                GenerateFromSingleImageInternal(imagePaths, model, statusCallback, cancellationToken),
                 cancellationToken);
         }
 
@@ -628,7 +630,7 @@ namespace Deep3DStudio.Model.AIModels
                                 try
                                 {
                                     currentResult = GenerateFromSingleImageInternal(
-                                        imagePaths[0],
+                                        imagePaths,
                                         ImageTo3DModel.TripoSR,
                                         msg => Report(msg, 0.1f),
                                         cancellationToken);
@@ -663,7 +665,7 @@ namespace Deep3DStudio.Model.AIModels
                                 try
                                 {
                                     currentResult = GenerateFromSingleImageInternal(
-                                        imagePaths[0],
+                                        imagePaths,
                                         ImageTo3DModel.LGM,
                                         msg => Report(msg, 0.1f),
                                         cancellationToken);
@@ -698,7 +700,7 @@ namespace Deep3DStudio.Model.AIModels
                                 try
                                 {
                                     currentResult = GenerateFromSingleImageInternal(
-                                        imagePaths[0],
+                                        imagePaths,
                                         ImageTo3DModel.Wonder3D,
                                         msg => Report(msg, 0.1f),
                                         cancellationToken);

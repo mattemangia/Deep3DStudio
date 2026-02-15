@@ -1804,7 +1804,7 @@ def infer_wonder3d(images_data, num_steps=50, guidance_scale=3.0):
         return {"success": False, "error": str(e)}
 
 def infer_lgm(images_data):
-    """LGM (Large Gaussian Model) inference - single image to 3D gaussians"""
+    """LGM (Large Gaussian Model) inference - 4 images (front, left, back, right) to 3D gaussians"""
     import torch
     import numpy as np
     from PIL import Image
@@ -1831,15 +1831,15 @@ def infer_lgm(images_data):
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
         ])
 
-        # Prepare 4 multi-view images
+        # Prepare 4 multi-view images (front, left, back, right)
         if len(pil_images) >= 4:
-            # Use provided multi-views if available
+            # Use provided multi-views
             imgs = [im.convert('RGB').resize((resolution, resolution), Image.LANCZOS) for im in pil_images[:4]]
             img_tensors = [transform(im).unsqueeze(0) for im in imgs]
             img_4 = torch.stack(img_tensors, dim=1).to(device) # [1, 4, 3, H, W]
         else:
-            # Single image provided: repeat it for 4 views (as a baseline)
-            # In a full pipeline, we would use a multi-view diffusion model here.
+            # Fallback (not recommended): repeat first image for 4 views
+            log(f"Warning: LGM requires 4 images, but only {len(pil_images)} provided. Repeating first image.")
             img = pil_images[0].convert('RGB').resize((resolution, resolution), Image.LANCZOS)
             img_tensor = transform(img).unsqueeze(0).unsqueeze(1).to(device) # [1, 1, 3, H, W]
             img_4 = img_tensor.repeat(1, 4, 1, 1, 1) # [1, 4, 3, H, W]
@@ -1849,6 +1849,15 @@ def infer_lgm(images_data):
         if hasattr(model, 'prepare_default_rays'):
             rays = model.prepare_default_rays(device) # [4, 6, H, W]
             rays = rays.unsqueeze(0) # [1, 4, 6, H, W]
+            # Ensure rays match the input resolution (interpolate if needed)
+            if rays.shape[3] != resolution or rays.shape[4] != resolution:
+                log(f"LGM: interpolating rays from {rays.shape[3]}x{rays.shape[4]} to {resolution}x{resolution}")
+                rays = torch.nn.functional.interpolate(
+                    rays.view(1, 4 * 6, rays.shape[3], rays.shape[4]),
+                    size=(resolution, resolution),
+                    mode='bilinear',
+                    align_corners=False
+                ).view(1, 4, 6, resolution, resolution)
         else:
             log("LGM model missing prepare_default_rays, using zero rays")
             rays = torch.zeros((1, 4, 6, resolution, resolution), device=device)
@@ -1915,11 +1924,6 @@ def infer_lgm(images_data):
             img_pil.close()
 
         return {"success": True, "results": results}
-
-    except Exception as e:
-        log(f"LGM Error: {e}")
-        traceback.print_exc(file=sys.stderr)
-        return {"success": False, "error": str(e)}
 
     except Exception as e:
         log(f"LGM Error: {e}")

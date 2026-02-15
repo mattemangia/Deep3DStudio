@@ -1073,11 +1073,11 @@ def load_model(model_name, weights_path, device=None):
              base_dir = os.path.dirname(weights_path)
              is_cuda = (device_obj.type == 'cuda')
              report_progress("load", 0.4, "Loading Wonder3D pipeline...")
-            model = MVDiffusionPipeline.from_pretrained(
-                base_dir,
-                torch_dtype=torch.float16 if is_cuda else torch.float32,
-                use_safetensors=False
-            )
+             model = MVDiffusionPipeline.from_pretrained(
+                 base_dir,
+                 torch_dtype=torch.float16 if is_cuda else torch.float32,
+                 use_safetensors=False
+             )
              report_progress("load", 0.7, "Moving Wonder3D to device...")
              model.to(device_obj)
              loaded_models[model_name] = model
@@ -1917,28 +1917,37 @@ def infer_triposf(image_bytes, resolution=512):
         'colors': colors.astype(np.float32)
     }
 
-def infer_lgm(image_bytes, resolution=256, flow_steps=25):
+def infer_lgm(images_bytes_list, resolution=256, flow_steps=25):
     model = loaded_models.get('lgm')
     if not model: return None
 
-    img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-    device = next(model.parameters()).device
+    if not isinstance(images_bytes_list, list) or len(images_bytes_list) < 1:
+        return None
 
-    # LGM expects 4 views with 9 channels each (3 RGB + 6 Ray Embeddings)
-    # The input shape must be [B, 4, 9, H, W]
+    device = next(model.parameters()).device
     opt = model.opt if hasattr(model, 'opt') else None
     input_resolution = opt.input_size if opt and hasattr(opt, 'input_size') else 256
     
-    # Preprocess for LGM: Use configured resolution, normalized
-    img = img.resize((input_resolution, input_resolution), Image.LANCZOS)
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])
-    img_tensor = transform(img).unsqueeze(0).to(device) # [1, 3, H, W]
 
-    # Prepare 4 multi-view images (repeat single image for now)
-    img_4 = img_tensor.unsqueeze(1).repeat(1, 4, 1, 1, 1) # [1, 4, 3, H, W]
+    # If we have 4 images, use them. If 1, repeat it.
+    tensors = []
+    if len(images_bytes_list) >= 4:
+        for i in range(4):
+            img = Image.open(io.BytesIO(images_bytes_list[i])).convert('RGB')
+            img = img.resize((input_resolution, input_resolution), Image.LANCZOS)
+            tensors.append(transform(img).unsqueeze(0)) # [1, 3, H, W]
+    else:
+        img = Image.open(io.BytesIO(images_bytes_list[0])).convert('RGB')
+        img = img.resize((input_resolution, input_resolution), Image.LANCZOS)
+        img_tensor = transform(img).unsqueeze(0)
+        for i in range(4):
+            tensors.append(img_tensor)
+
+    img_4 = torch.stack(tensors, dim=1).to(device) # [1, 4, 3, H, W]
 
     # Prepare ray embeddings [1, 4, 6, H, W]
     if hasattr(model, 'prepare_default_rays'):

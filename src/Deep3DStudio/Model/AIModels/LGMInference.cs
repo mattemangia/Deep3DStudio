@@ -8,7 +8,7 @@ using Deep3DStudio.Python;
 namespace Deep3DStudio.Model.AIModels
 {
     /// <summary>
-    /// LGM (Large Gaussian Model) - Fast 3D Gaussian generation from images.
+    /// LGM (Large Gaussian Model) - Fast 3D Gaussian generation from 4 images.
     /// Uses subprocess-based Python inference for complete process isolation.
     /// </summary>
     public class LGMInference : IDisposable, IInferenceWithProgress
@@ -118,7 +118,7 @@ namespace Deep3DStudio.Model.AIModels
             }
         }
 
-        public MeshData GenerateFromImage(string imagePath, System.Threading.CancellationToken cancellationToken = default)
+        public MeshData GenerateFromImages(List<string> imagePaths, System.Threading.CancellationToken cancellationToken = default)
         {
             Initialize();
             var mesh = new MeshData();
@@ -131,14 +131,26 @@ namespace Deep3DStudio.Model.AIModels
 
             try
             {
-                if (!File.Exists(imagePath))
+                var imagesBytes = new List<byte[]>();
+                foreach (var path in imagePaths)
                 {
-                    Log($"[LGM] Image not found: {imagePath}");
+                    if (File.Exists(path))
+                    {
+                        imagesBytes.Add(File.ReadAllBytes(path));
+                    }
+                    else
+                    {
+                        Log($"[LGM] Image not found: {path}");
+                    }
+                }
+
+                if (imagesBytes.Count == 0)
+                {
+                    Log("[LGM] No valid images provided.");
                     return mesh;
                 }
 
-                var imagesBytes = new List<byte[]> { File.ReadAllBytes(imagePath) };
-                Log($"[LGM] Processing image...");
+                Log($"[LGM] Processing {imagesBytes.Count} images...");
 
                 cancellationToken.ThrowIfCancellationRequested();
                 var meshes = _inference.Infer(imagesBytes, false, cancellationToken);

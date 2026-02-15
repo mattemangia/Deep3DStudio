@@ -517,7 +517,7 @@ namespace Deep3DStudio
             tripoSRItem.Activated += OnTripoSRGenerate;
             imageTo3DMenu.Append(tripoSRItem);
 
-            var lgmItem = new MenuItem("_LGM (Single Image)");
+            var lgmItem = new MenuItem("_LGM (4 Images)");
             lgmItem.Activated += OnLGMGenerate;
             imageTo3DMenu.Append(lgmItem);
 

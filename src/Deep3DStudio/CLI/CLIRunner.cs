@@ -1373,9 +1373,10 @@ namespace Deep3DStudio.CLI
                     foreach (var pipeline in pipelines)
                     {
                         Console.WriteLine($"=== Running {pipeline.Name} ===");
-                        if (RequiresMultiView(pipeline) && images.Count < 2)
+                        int minImages = pipeline.Steps.Contains(WorkflowStep.LGMGeneration) ? 4 : 2;
+                        if (RequiresMultiView(pipeline) && images.Count < minImages)
                         {
-                            Console.WriteLine($"Skipping {pipeline.Name}: requires at least 2 images.");
+                            Console.WriteLine($"Skipping {pipeline.Name}: requires at least {minImages} images.");
                             allOk = false;
                             continue;
                         }
@@ -2165,7 +2166,8 @@ namespace Deep3DStudio.CLI
             return pipeline.Steps.Contains(WorkflowStep.Dust3rReconstruction) ||
                    pipeline.Steps.Contains(WorkflowStep.Mast3rReconstruction) ||
                    pipeline.Steps.Contains(WorkflowStep.Must3rReconstruction) ||
-                   pipeline.Steps.Contains(WorkflowStep.SfMReconstruction);
+                   pipeline.Steps.Contains(WorkflowStep.SfMReconstruction) ||
+                   pipeline.Steps.Contains(WorkflowStep.LGMGeneration);
         }
 
         private List<string> ResolveInputImages()

@@ -174,18 +174,19 @@ namespace Deep3DStudio
                 }
             }
 
-            // Special check for LGM workflow to allow single image pass-through (handled in Meshing phase)
+            // Special check for LGM workflow to allow multi-image pass-through (handled in Meshing phase)
             bool isLGM = !string.IsNullOrEmpty(workflow) && workflow.Contains("LGM");
 
             bool requiresMultiView = !isLGM && (method == ReconstructionMethod.Dust3r ||
                                      method == ReconstructionMethod.Mast3r ||
                                      method == ReconstructionMethod.Must3r ||
                                      method == ReconstructionMethod.FeatureMatching);
-            int minImages = requiresMultiView ? 2 : 1;
+            int minImages = isLGM ? 4 : (requiresMultiView ? 2 : 1);
 
             if (_imagePaths.Count < minImages)
             {
-                ShowMessage($"Please add at least {minImages} image{(minImages > 1 ? "s" : "")} for {method}.");
+                string requirement = isLGM ? "exactly 4 images (front, left, back, right views)" : $"{minImages} image{(minImages > 1 ? "s" : "")}";
+                ShowMessage("Insufficient Images", $"Please add at least {requirement} for {method}.");
                 return false;
             }
 
@@ -223,7 +224,7 @@ namespace Deep3DStudio
                     case ReconstructionMethod.TripoSR:
                         _statusLabel.Text = "Estimating Geometry (TripoSR)...";
                         var tripoResult = await AIModels.AIModelManager.Instance.GenerateFromSingleImageAsync(
-                            _imagePaths[0],
+                            _imagePaths,
                             ImageTo3DModel.TripoSR,
                             msg => Application.Invoke((s, e) => _statusLabel.Text = msg));
                         if (tripoResult != null)
@@ -235,7 +236,7 @@ namespace Deep3DStudio
                     case ReconstructionMethod.Wonder3D:
                         _statusLabel.Text = "Estimating Geometry (Wonder3D)...";
                         var wonderResult = await AIModels.AIModelManager.Instance.GenerateFromSingleImageAsync(
-                            _imagePaths[0],
+                            _imagePaths,
                             ImageTo3DModel.Wonder3D,
                             msg => Application.Invoke((s, e) => _statusLabel.Text = msg));
                         if (wonderResult != null)
