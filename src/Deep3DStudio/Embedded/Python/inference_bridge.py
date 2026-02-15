@@ -2162,34 +2162,64 @@ def infer_triposf(image_bytes, resolution=512):
         'colors': colors.astype(np.float32)
     }
 
-def infer_lgm(image_bytes, resolution=512, flow_steps=25):
+def infer_lgm(image_bytes, resolution=256, flow_steps=25):
     model = loaded_models.get('lgm')
     if not model: return None
 
     img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
     device = next(model.parameters()).device
 
+    # LGM expects 4 views with 9 channels each (3 RGB + 6 Ray Embeddings)
+    # The input shape must be [B, 4, 9, H, W]
+    opt = model.opt if hasattr(model, 'opt') else None
+    input_resolution = opt.input_size if opt and hasattr(opt, 'input_size') else 256
+    
     # Preprocess for LGM: Use configured resolution, normalized
-    img = img.resize((resolution, resolution))
+    img = img.resize((input_resolution, input_resolution), Image.LANCZOS)
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])
-    img_tensor = transform(img).unsqueeze(0).to(device)
+    img_tensor = transform(img).unsqueeze(0).to(device) # [1, 3, H, W]
+
+    # Prepare 4 multi-view images (repeat single image for now)
+    img_4 = img_tensor.unsqueeze(1).repeat(1, 4, 1, 1, 1) # [1, 4, 3, H, W]
+
+    # Prepare ray embeddings [1, 4, 6, H, W]
+    if hasattr(model, 'prepare_default_rays'):
+        rays = model.prepare_default_rays(device) # [4, 6, H, W]
+        rays = rays.unsqueeze(0) # [1, 4, 6, H, W]
+    else:
+        rays = torch.zeros((1, 4, 6, input_resolution, input_resolution), device=device)
+
+    # Concatenate RGB and Rays -> [1, 4, 9, H, W]
+    input_features = torch.cat([img_4, rays], dim=2)
 
     with torch.no_grad():
-        # LGM inference with flow steps if supported
-        if hasattr(model, 'forward') and 'num_steps' in model.forward.__code__.co_varnames:
-            gaussians = model(img_tensor, num_steps=flow_steps)
+        # Call forward_gaussians directly
+        if hasattr(model, 'forward_gaussians'):
+            gaussians = model.forward_gaussians(input_features)
         else:
-            gaussians = model(img_tensor)
+            gaussians = model({'input': input_features})
+            if isinstance(gaussians, dict) and 'gaussians' in gaussians:
+                gaussians = gaussians['gaussians']
 
-        if 'means3D' in gaussians:
+        if isinstance(gaussians, dict) and 'means3D' in gaussians:
             means = gaussians['means3D'].squeeze(0).cpu().numpy()
             if 'rgb' in gaussians:
                 colors = gaussians['rgb'].squeeze(0).cpu().numpy()
             else:
                 colors = np.ones_like(means) * 0.5
+        elif torch.is_tensor(gaussians):
+            gaussians = gaussians[0]  # [N, 14]
+            means = gaussians[:, 0:3].cpu().numpy()
+            opacity = gaussians[:, 3:4].cpu().numpy()
+            colors = gaussians[:, 11:14].cpu().numpy()
+            
+            # Filter by opacity
+            mask = opacity.squeeze() > 0.1
+            means = means[mask]
+            colors = colors[mask]
         else:
             means = np.zeros((1,3), dtype=np.float32)
             colors = np.zeros((1,3), dtype=np.float32)
