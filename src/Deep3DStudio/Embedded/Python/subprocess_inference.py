@@ -1637,7 +1637,12 @@ def infer_triposf(mesh_path):
         return {"success": False, "error": str(e)}
 
 def infer_wonder3d(images_data, num_steps=50, guidance_scale=3.0):
-    """Wonder3D inference"""
+    """Wonder3D inference - generates multi-view images then creates colored point cloud.
+
+    Wonder3D's MVDiffusionImagePipeline generates 6 multi-view color images + normal maps.
+    Mesh reconstruction (NeuS/Instant-NSR) is a separate step not included in the pipeline.
+    Instead, we project the 6 views onto oriented planes to create a 3D point cloud.
+    """
     import torch
     import numpy as np
 
@@ -1656,50 +1661,107 @@ def infer_wonder3d(images_data, num_steps=50, guidance_scale=3.0):
 
         with torch.no_grad():
             try:
-                output = model(img, num_inference_steps=num_steps, guidance_scale=guidance_scale)
+                # Request tensor output for direct processing
+                output = model(img, num_inference_steps=num_steps, guidance_scale=guidance_scale, output_type='pt')
             except RuntimeError as e:
                 # Catch OOM or other runtime errors and try CPU fallback
                 err_msg = str(e).lower()
                 if "memory" in err_msg or "allocate" in err_msg:
-                    if model.device.type != "cpu":
+                    if hasattr(model, 'device') and model.device.type != "cpu":
                         log(f"Wonder3D failed on {model.device} ({e}), falling back to CPU...")
                         model = model.to("cpu")
-                        # CPU doesn't support float16 for many ops, cast to float32
-                        # Safely cast components if they exist
                         if hasattr(model, 'unet'): model.unet = model.unet.float()
                         if hasattr(model, 'vae'): model.vae = model.vae.float()
                         if hasattr(model, 'text_encoder'): model.text_encoder = model.text_encoder.float()
                         if hasattr(model, 'image_encoder'): model.image_encoder = model.image_encoder.float()
-                        output = model(img, num_inference_steps=num_steps, guidance_scale=guidance_scale)
+                        output = model(img, num_inference_steps=num_steps, guidance_scale=guidance_scale, output_type='pt')
                     else:
                         raise e
                 else:
                     raise e
+            except TypeError:
+                # Some pipeline versions don't support output_type='pt', fall back to default
+                output = model(img, num_inference_steps=num_steps, guidance_scale=guidance_scale)
 
-            if hasattr(output, 'meshes') and output.meshes:
-                mesh = output.meshes[0]
-                verts = mesh.vertices.cpu().numpy().tolist()
-                faces_flat = mesh.faces.cpu().numpy().flatten().tolist()
+            # Extract multi-view images from pipeline output
+            mv_images = None
+            if hasattr(output, 'images') and output.images is not None:
+                imgs = output.images
+                if isinstance(imgs, torch.Tensor):
+                    # Tensor output: [B, N, C, H, W] or [N, C, H, W]
+                    if imgs.dim() == 5:
+                        mv_images = imgs[0].permute(0, 2, 3, 1).cpu().numpy()  # [N, H, W, C]
+                    elif imgs.dim() == 4:
+                        mv_images = imgs.permute(0, 2, 3, 1).cpu().numpy()  # [N, H, W, C]
+                elif isinstance(imgs, list):
+                    # PIL images list
+                    mv_images = np.stack([np.array(im.convert('RGB')).astype(np.float32) / 255.0 for im in imgs])
 
-                colors = [[0.8, 0.8, 0.8]] * len(verts)
-                if hasattr(mesh, 'vertex_colors') and mesh.vertex_colors is not None:
-                    colors = mesh.vertex_colors.cpu().numpy().tolist()
+            if mv_images is not None and len(mv_images) >= 6:
+                log(f"Wonder3D generated {len(mv_images)} multi-view images, creating point cloud...")
+
+                # Project 6 views onto oriented planes (front, right, back, left, top, bottom)
+                rots = [
+                    np.eye(3),                                              # front
+                    np.array([[0, 0, -1], [0, 1, 0], [1, 0, 0]]),          # right
+                    np.array([[-1, 0, 0], [0, 1, 0], [0, 0, -1]]),         # back
+                    np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]]),          # left
+                    np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]]),          # top
+                    np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]])           # bottom
+                ]
+
+                vertices = []
+                colors = []
+
+                for v in range(6):
+                    img_v = mv_images[v]
+                    # Ensure values are in [0, 1]
+                    if img_v.max() > 1.0:
+                        img_v = img_v / 255.0
+                    H, W = img_v.shape[:2]
+                    grid_y, grid_x = np.mgrid[:H, :W]
+                    u = (grid_x - W / 2.0) / (W / 2.0)
+                    v_ = (grid_y - H / 2.0) / (H / 2.0)
+                    z = np.zeros_like(u)
+
+                    pts = np.stack([u, v_, z], axis=-1).reshape(-1, 3)
+                    pts = pts @ rots[v].T
+                    col = img_v[:, :, :3].reshape(-1, 3)
+
+                    vertices.append(pts)
+                    colors.append(col)
+
+                all_verts = np.concatenate(vertices, axis=0)
+                all_cols = np.concatenate(colors, axis=0)
+
+                # Subsample to manageable size
+                max_points = 100000
+                if len(all_verts) > max_points:
+                    idx = np.random.choice(len(all_verts), max_points, replace=False)
+                    all_verts = all_verts[idx]
+                    all_cols = all_cols[idx]
+
+                log(f"Wonder3D point cloud: {len(all_verts)} points from 6 views")
 
                 results.append({
-                    'vertices': verts,
-                    'colors': colors,
-                    'faces': faces_flat,
+                    'vertices': all_verts.astype(np.float32).tolist(),
+                    'colors': np.clip(all_cols, 0, 1).astype(np.float32).tolist(),
+                    'faces': [],
                     'image_index': 0
                 })
+            else:
+                num_views = len(mv_images) if mv_images is not None else 0
+                log(f"Wonder3D: got {num_views} views (need >= 6), no point cloud generated")
+                return {"success": False, "error": f"Wonder3D generated only {num_views} views, expected at least 6"}
 
         clear_gpu()
-        for img in pil_images:
-            img.close()
+        for img_pil in pil_images:
+            img_pil.close()
 
         return {"success": True, "results": results}
 
     except Exception as e:
-        log(f"Error: {e}")
+        log(f"Wonder3D Error: {e}")
         traceback.print_exc(file=sys.stderr)
         return {"success": False, "error": str(e)}
 
