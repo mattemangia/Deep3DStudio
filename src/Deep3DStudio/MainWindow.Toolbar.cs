@@ -685,6 +685,11 @@ namespace Deep3DStudio
                 OnBridgeSelectedTriangles, null);
             toolbar.Insert(bridgeBtn, -1);
 
+            var splitPlaneBtn = CreateActionButton("splitting_plane", iconSize, "Split Plane", 
+                "Splitting Plane (Y) - Cut selected mesh by adjustable plane",
+                OnSplittingPlaneClicked, null);
+            toolbar.Insert(splitPlaneBtn, -1);
+
             RegisterToolbarItems(toolbar);
             return toolbar;
         }

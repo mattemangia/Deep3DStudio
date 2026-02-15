@@ -78,6 +78,10 @@ namespace Deep3DStudio
             var splitBtn = CreateIconButton("split", "Split", btnSize, () => OnSplitClicked(null, EventArgs.Empty));
             vbox.PackStart(splitBtn, false, false, 1);
 
+            var splitPlaneBtn = CreateIconButton("splitting_plane", "Splitting Plane (Y)", btnSize, 
+                () => OnSplittingPlaneClicked(null, EventArgs.Empty));
+            vbox.PackStart(splitPlaneBtn, false, false, 1);
+
             vbox.PackStart(new Separator(Orientation.Horizontal), false, false, 5);
 
             // Merge/Align
@@ -417,21 +421,17 @@ namespace Deep3DStudio
                     break;
 
                 case "pen":
-                    // Pen/pencil icon for triangle editing
                     cr.LineWidth = 2;
-                    cr.SetSourceRGB(1.0, 0.6, 0.2); // Orange color
-                    // Pen body (diagonal)
+                    cr.SetSourceRGB(1.0, 0.6, 0.2);
                     cr.MoveTo(s - 4, 4);
                     cr.LineTo(6, s - 6);
                     cr.Stroke();
-                    // Pen tip
                     cr.SetSourceRGB(0.4, 0.4, 0.4);
                     cr.MoveTo(6, s - 6);
                     cr.LineTo(4, s - 4);
                     cr.LineTo(8, s - 8);
                     cr.ClosePath();
                     cr.Fill();
-                    // Triangle indicator
                     cr.SetSourceRGB(0.3, 0.8, 0.3);
                     cr.LineWidth = 1.5;
                     cr.MoveTo(s - 8, s / 2);
@@ -439,6 +439,23 @@ namespace Deep3DStudio
                     cr.LineTo(s / 2, s - 4);
                     cr.ClosePath();
                     cr.Stroke();
+                    break;
+
+                case "splitting_plane":
+                    cr.LineWidth = 1.5;
+                    cr.SetSourceRGBA(0.9, 0.7, 0.2, 0.5);
+                    cr.Rectangle(size * 0.15, size * 0.25, size * 0.7, size * 0.5);
+                    cr.FillPreserve();
+                    cr.SetSourceRGB(0.8, 0.55, 0.1);
+                    cr.Stroke();
+                    cr.SetSourceRGB(1.0, 0.25, 0.25);
+                    cr.LineWidth = 2;
+                    cr.MoveTo(size * 0.2, size * 0.82);
+                    cr.LineTo(size * 0.8, size * 0.18);
+                    cr.Stroke();
+                    cr.SetSourceRGB(0.95, 0.35, 0.1);
+                    cr.Arc(size * 0.65, size * 0.32, size * 0.06, 0, 2 * Math.PI);
+                    cr.Fill();
                     break;
 
                 default:

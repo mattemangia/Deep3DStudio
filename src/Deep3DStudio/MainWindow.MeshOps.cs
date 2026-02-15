@@ -1555,5 +1555,87 @@ namespace Deep3DStudio
             }
             ppsDlg.Destroy();
         }
+
+        private void OnSplittingPlaneClicked(object? sender, EventArgs e)
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count == 0)
+            {
+                ShowMessage("Please select a mesh first.");
+                return;
+            }
+            if (selectedMeshes.Count > 1)
+            {
+                ShowMessage("Please select only one mesh for splitting by plane.");
+                return;
+            }
+
+            _viewport.SetGizmoMode(GizmoMode.SplittingPlane);
+            _statusLabel.Text = "Splitting Plane mode - Adjust plane, press Enter to cut, Esc to cancel";
+        }
+
+        private void ApplySplittingPlane()
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count == 0)
+                return;
+
+            var meshObj = selectedMeshes[0];
+            var splittingTool = _viewport.GetSplittingPlaneTool();
+            if (splittingTool == null)
+                return;
+
+            var (planePoint, planeNormal) = splittingTool.GetPlaneEquation();
+
+            ProgressDialog.Instance.Start("Splitting mesh by plane...", OperationType.Processing);
+
+            var originalName = meshObj.Name;
+            var originalMesh = meshObj.MeshData;
+
+            Task.Run(() => {
+                try {
+                    var progress = new Progress<float>(p => {
+                        ProgressDialog.Instance.Update(p, $"Processing... {(int)(p * 100)}%");
+                    });
+
+                    var (above, below) = SplittingPlaneTool.SplitMeshByPlane(
+                        originalMesh, planePoint, planeNormal, progress);
+
+                    Application.Invoke((s, args) => {
+                        if (above.Vertices.Count > 0 && below.Vertices.Count > 0)
+                        {
+                            _sceneGraph.RemoveObject(meshObj);
+
+                            var aboveObj = new MeshObject($"{originalName}_Above", above);
+                            var belowObj = new MeshObject($"{originalName}_Below", below);
+
+                            _sceneGraph.AddObject(aboveObj);
+                            _sceneGraph.AddObject(belowObj);
+
+                            _sceneTreeView.RefreshTree();
+                            _viewport.QueueDraw();
+                            ProgressDialog.Instance.Complete();
+                    _statusLabel.Text = $"Split into 2 meshes: {above.Indices.Count / 3} + {below.Indices.Count / 3} triangles";
+                            _isDirty = true;
+                            UpdateTitle();
+                        }
+                        else if (above.Vertices.Count > 0 || below.Vertices.Count > 0)
+                        {
+                            ProgressDialog.Instance.Fail(new Exception(
+                                "Plane does not properly intersect mesh. All vertices are on one side of the plane. Adjust the plane position."));
+                        }
+                        else
+                        {
+                            ProgressDialog.Instance.Fail(new Exception("Mesh is empty after split."));
+                        }
+                    });
+                }
+                catch (Exception ex) {
+                    Application.Invoke((s, args) => ProgressDialog.Instance.Fail(ex));
+                }
+            });
+
+            _viewport.SetGizmoMode(GizmoMode.Select);
+        }
     }
 }

@@ -18,10 +18,11 @@ namespace Deep3DStudio.Viewport
         Rotate,
         Scale,
         Select,
-        Pen,          // Triangle editing mode
-        Rigging,      // Skeleton rigging mode
-        LassoSelect,  // Lasso selection for points/triangles
-        RectSelect    // Rectangle selection for points/triangles
+        Pen,
+        Rigging,
+        LassoSelect,
+        RectSelect,
+        SplittingPlane
     }
 
     public class ThreeDView
@@ -67,6 +68,11 @@ namespace Deep3DStudio.Viewport
         // Mesh Editing Tool for Pen mode
         private MeshEditingTool _meshEditingTool = new MeshEditingTool();
         public MeshEditingTool MeshEditingTool => _meshEditingTool;
+
+        // Splitting Plane Tool
+        private SplittingPlaneTool? _splittingPlaneTool = null;
+        public SplittingPlaneTool? GetSplittingPlaneTool() => _splittingPlaneTool;
+        public event EventHandler? SplittingPlaneConfirmed;
 
         // Triangle selection events
         public event EventHandler? TriangleSelectionChanged;
@@ -140,7 +146,16 @@ namespace Deep3DStudio.Viewport
         public GizmoMode CurrentGizmoMode
         {
             get => _gizmoMode;
-            set => _gizmoMode = value;
+            set
+            {
+                if (_gizmoMode == GizmoMode.SplittingPlane && value != GizmoMode.SplittingPlane)
+                    _splittingPlaneTool = null;
+                
+                if (value == GizmoMode.SplittingPlane && _splittingPlaneTool == null)
+                    _splittingPlaneTool = new SplittingPlaneTool();
+                
+                _gizmoMode = value;
+            }
         }
 
         public void InitGL()
@@ -264,6 +279,12 @@ namespace Deep3DStudio.Viewport
                 && _selectedPoints.Count > 0)
             {
                 DrawSelectedPoints();
+            }
+
+            // Draw splitting plane
+            if (_gizmoMode == GizmoMode.SplittingPlane && _splittingPlaneTool != null)
+            {
+                _splittingPlaneTool.Render();
             }
         }
 

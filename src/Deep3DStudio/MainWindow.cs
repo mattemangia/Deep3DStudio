@@ -206,6 +206,7 @@ namespace Deep3DStudio
             _viewport = new ThreeDView();
             _viewport.SetSceneGraph(_sceneGraph);
             _viewport.ObjectPicked += OnViewportObjectPicked;
+            _viewport.SplittingPlaneConfirmed += (s, e) => ApplySplittingPlane();
             // Ensure viewport has minimum size
             _viewport.SetSizeRequest(400, 300);
 

@@ -85,7 +85,8 @@ namespace Deep3DStudio.Viewport
         FillHoles,
         LassoSelect,
         RectSelect,
-        ShrinkSelection
+        ShrinkSelection,
+        SplittingPlane
     }
 
     public class ImGuiIconFactory : IDisposable
@@ -995,6 +996,19 @@ namespace Deep3DStudio.Viewport
                 canvas.DrawRect(w * 0.15f, h * 0.2f, w * 0.45f, h * 0.55f, p);
                 var pArrow = new SKPaint { Color = SKColors.LimeGreen, StrokeWidth = 3, Style = SKPaintStyle.Stroke };
                 canvas.DrawLine(w * 0.62f, h * 0.55f, w * 0.88f, h * 0.55f, pArrow);
+            });
+
+            _icons[IconType.SplittingPlane] = CreateIcon(SKColors.DarkOrange, (canvas, w, h) => {
+                var pFill = new SKPaint { Color = SKColors.White.WithAlpha(160), Style = SKPaintStyle.Fill, IsAntialias = true };
+                var pStroke = new SKPaint { Color = SKColors.White, StrokeWidth = 2.5f, Style = SKPaintStyle.Stroke, IsAntialias = true };
+                var pCut = new SKPaint { Color = SKColors.Red, StrokeWidth = 3.5f, Style = SKPaintStyle.Stroke, IsAntialias = true };
+                
+                canvas.DrawRect(w * 0.15f, h * 0.25f, w * 0.7f, h * 0.5f, pFill);
+                canvas.DrawRect(w * 0.15f, h * 0.25f, w * 0.7f, h * 0.5f, pStroke);
+                canvas.DrawLine(w * 0.2f, h * 0.82f, w * 0.8f, h * 0.18f, pCut);
+                
+                var dot = new SKPaint { Color = SKColors.Gold, Style = SKPaintStyle.Fill, IsAntialias = true };
+                canvas.DrawCircle(w * 0.65f, h * 0.32f, 5, dot);
             });
         }
 

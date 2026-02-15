@@ -273,6 +273,7 @@ namespace Deep3DStudio
             _sceneGraph = new SceneGraph();
             _sceneGraph.SceneChanged += (s, e) => { _isDirty = true; UpdateTitle(); };
             _viewport = new ThreeDView(_sceneGraph);
+            _viewport.SplittingPlaneConfirmed += (s, e) => ApplySplittingPlane();
 
             // Keep callback alive
             unsafe
@@ -711,8 +712,13 @@ namespace Deep3DStudio
                     case Keys.T: _viewport.CurrentGizmoMode = GizmoMode.Rigging; break;
                     case Keys.L: _viewport.CurrentGizmoMode = GizmoMode.LassoSelect; break;
                     case Keys.B: _viewport.CurrentGizmoMode = GizmoMode.RectSelect; break;
+                    case Keys.Y: _viewport.CurrentGizmoMode = GizmoMode.SplittingPlane; break;
                     case Keys.F: _viewport.FocusOnSelection(); break;
                     case Keys.F11: ToggleFullscreen(); break;
+                    case Keys.Enter:
+                        if (_viewport.CurrentGizmoMode == GizmoMode.SplittingPlane)
+                            ApplySplittingPlane();
+                        break;
                     case Keys.Delete:
                     {
                         // In selection modes, delete selected geometry
@@ -744,6 +750,13 @@ namespace Deep3DStudio
                     }
                     case Keys.Escape:
                     {
+                        // In splitting plane mode, cancel the tool
+                        if (_viewport.CurrentGizmoMode == GizmoMode.SplittingPlane)
+                        {
+                            _viewport.CurrentGizmoMode = GizmoMode.Select;
+                            break;
+                        }
+
                         // In selection modes, clear selection first
                         bool inSelMode2 = _viewport.CurrentGizmoMode == GizmoMode.Pen ||
                                           _viewport.CurrentGizmoMode == GizmoMode.LassoSelect ||
@@ -1669,6 +1682,9 @@ namespace Deep3DStudio
                     OpenPenInsetOptionsDialog);
                 ImGui.SameLine();
                 DrawToolbarButton("##PenBridge", IconType.Bridge, false, ApplyPenBridge, "Bridge two selected triangles", size);
+                ImGui.SameLine();
+                DrawToolbarButton("##SplitPlane", IconType.SplittingPlane, _viewport.CurrentGizmoMode == GizmoMode.SplittingPlane,
+                    OnSplittingPlaneClicked, "Splitting Plane (Y) - Cut mesh by plane", size);
 
                 ImGui.SameLine();
                 ImGui.Text("|");
@@ -5112,6 +5128,86 @@ namespace Deep3DStudio
             {
                 _logBuffer += "Bridge failed. Select exactly 2 triangles on the same mesh.\n";
             }
+        }
+
+        private void OnSplittingPlaneClicked()
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count == 0)
+            {
+                ShowError("No Selection", "Please select a mesh first.");
+                return;
+            }
+            if (selectedMeshes.Count > 1)
+            {
+                ShowError("Multiple Selection", "Please select only one mesh for splitting by plane.");
+                return;
+            }
+
+            _viewport.CurrentGizmoMode = GizmoMode.SplittingPlane;
+            _logBuffer += "Splitting Plane mode active. Adjust plane, press Enter to cut, Esc to cancel.\n";
+        }
+
+        private void ApplySplittingPlane()
+        {
+            var selectedMeshes = _sceneGraph.SelectedObjects.OfType<MeshObject>().ToList();
+            if (selectedMeshes.Count == 0)
+                return;
+
+            var meshObj = selectedMeshes[0];
+            var splittingTool = _viewport.GetSplittingPlaneTool();
+            if (splittingTool == null)
+                return;
+
+            var (planePoint, planeNormal) = splittingTool.GetPlaneEquation();
+
+            var originalName = meshObj.Name;
+            var originalMesh = meshObj.MeshData;
+
+            ProgressDialog.Instance.Start("Splitting mesh by plane...", OperationType.Processing);
+
+            Task.Run(() => {
+                try {
+                    var progress = new Progress<float>(p => {
+                        ProgressDialog.Instance.Update(p, $"Processing... {(int)(p * 100)}%");
+                    });
+
+                    var (above, below) = SplittingPlaneTool.SplitMeshByPlane(
+                        originalMesh, planePoint, planeNormal, progress);
+
+                    EnqueueAction(() => {
+                        if (above.Vertices.Count > 0 && below.Vertices.Count > 0)
+                        {
+                            _sceneGraph.RemoveObject(meshObj);
+
+                            var aboveObj = new MeshObject($"{originalName}_Above", above);
+                            var belowObj = new MeshObject($"{originalName}_Below", below);
+
+                            _sceneGraph.AddObject(aboveObj);
+                            _sceneGraph.AddObject(belowObj);
+
+                            ProgressDialog.Instance.Complete();
+                            _logBuffer += $"Split into 2 meshes: {above.Indices.Count / 3} + {below.Indices.Count / 3} triangles.\n";
+                            _isDirty = true;
+                            UpdateTitle();
+                        }
+                        else if (above.Vertices.Count > 0 || below.Vertices.Count > 0)
+                        {
+                            ProgressDialog.Instance.Fail(new Exception(
+                                "Plane does not properly intersect mesh. All vertices are on one side of the plane. Adjust the plane position."));
+                        }
+                        else
+                        {
+                            ProgressDialog.Instance.Fail(new Exception("Mesh is empty after split."));
+                        }
+                    });
+                }
+                catch (Exception ex) {
+                    EnqueueAction(() => ProgressDialog.Instance.Fail(ex));
+                }
+            });
+
+            _viewport.CurrentGizmoMode = GizmoMode.Select;
         }
 
         private List<PointCloudObject> GetSelectedPointCloudObjects()

@@ -22,8 +22,9 @@ namespace Deep3DStudio.Viewport
         Rotate,
         Scale,
         Select,
-        Pen, // Triangle editing mode
-        Rigging // Skeleton rigging mode
+        Pen,
+        Rigging,
+        SplittingPlane
     }
 
     /// <summary>
@@ -137,6 +138,13 @@ namespace Deep3DStudio.Viewport
         private MeshEditingTool _meshEditingTool = new MeshEditingTool();
         public MeshEditingTool MeshEditingTool => _meshEditingTool;
 
+        // Splitting Plane Tool
+        private SplittingPlaneTool? _splittingPlaneTool = null;
+        public SplittingPlaneTool? GetSplittingPlaneTool() => _splittingPlaneTool;
+
+        // Event for splitting plane confirmation
+        public event EventHandler? SplittingPlaneConfirmed;
+
         // Triangle editing events
         public event EventHandler? TriangleSelectionChanged;
 
@@ -222,6 +230,12 @@ namespace Deep3DStudio.Viewport
 
         public void SetGizmoMode(GizmoMode mode)
         {
+            if (_gizmoMode == GizmoMode.SplittingPlane && mode != GizmoMode.SplittingPlane)
+                _splittingPlaneTool = null;
+
+            if (mode == GizmoMode.SplittingPlane && _splittingPlaneTool == null)
+                _splittingPlaneTool = new SplittingPlaneTool();
+
             _gizmoMode = mode;
             this.QueueRender();
         }
@@ -805,6 +819,12 @@ namespace Deep3DStudio.Viewport
                 if (_showCropBox)
                 {
                     DrawCropBox();
+                }
+
+                // Draw splitting plane
+                if (_gizmoMode == GizmoMode.SplittingPlane && _splittingPlaneTool != null)
+                {
+                    _splittingPlaneTool.Render();
                 }
 
                 // Draw info overlay (2D)
@@ -3069,9 +3089,22 @@ namespace Deep3DStudio.Viewport
         {
             this.GrabFocus();
 
-            if (args.Event.Button == 1) // Left click
+            if (args.Event.Button == 1)
             {
-                // Pen mode: triangle picking
+                if (_gizmoMode == GizmoMode.SplittingPlane && _splittingPlaneTool != null)
+                {
+                    var (rayOrigin, rayDir) = GetRayFromScreenPoint((int)args.Event.X, (int)args.Event.Y);
+                    int handleAxis = _splittingPlaneTool.CheckHandleIntersection(rayOrigin, rayDir, _finalViewMatrix, _projectionMatrix);
+                    
+                    if (handleAxis >= 0)
+                    {
+                        _splittingPlaneTool.StartDrag(handleAxis, rayOrigin, rayDir);
+                        _isDragging = true;
+                        _lastMousePos = new Point((int)args.Event.X, (int)args.Event.Y);
+                        return;
+                    }
+                }
+
                 if (_gizmoMode == GizmoMode.Pen)
                 {
                     HandlePenModeClick((int)args.Event.X, (int)args.Event.Y, args.Event.State);
@@ -3080,7 +3113,6 @@ namespace Deep3DStudio.Viewport
                     return;
                 }
 
-                // Check gizmo first
                 int gizmoAxis = CheckGizmoSelection((int)args.Event.X, (int)args.Event.Y);
                 if (gizmoAxis >= 0 && _sceneGraph?.SelectedObjects.Count > 0)
                 {
@@ -3097,17 +3129,14 @@ namespace Deep3DStudio.Viewport
                     return;
                 }
 
-                // Check crop box handles
                 if (_selectedHandle != -1)
                 {
                     _isDragging = true;
                 }
                 else
                 {
-                    // Object picking - Always allow picking in Select mode or if no gizmo was hit
                     var picked = PickObject((int)args.Event.X, (int)args.Event.Y);
 
-                    // Allow Shift for multiple selection
                     bool multipleSelection = (args.Event.State & Gdk.ModifierType.ShiftMask) != 0 ||
                                              (args.Event.State & Gdk.ModifierType.ControlMask) != 0;
 
@@ -3115,7 +3144,6 @@ namespace Deep3DStudio.Viewport
                     {
                         if (multipleSelection)
                         {
-                            // Toggle selection
                             if (picked.Selected)
                                 _sceneGraph.Deselect(picked);
                             else
@@ -3130,7 +3158,6 @@ namespace Deep3DStudio.Viewport
                     }
                     else if (_sceneGraph != null && !multipleSelection)
                     {
-                        // Deselect all if clicked on empty space without shift
                         _sceneGraph.ClearSelection();
                     }
 
@@ -3140,8 +3167,6 @@ namespace Deep3DStudio.Viewport
             }
             else if (args.Event.Button == 2 || (args.Event.Button == 1 && (args.Event.State & Gdk.ModifierType.ShiftMask) != 0))
             {
-                // Pan with middle mouse or Shift+Left.
-                // Prioritize panning over selection if Shift is held and drag initiates.
                 _isPanning = true;
                 _lastMousePos = new Point((int)args.Event.X, (int)args.Event.Y);
             }
@@ -3151,6 +3176,10 @@ namespace Deep3DStudio.Viewport
         {
             if (args.Event.Button == 1)
             {
+                if (_splittingPlaneTool != null)
+                {
+                    _splittingPlaneTool.EndDrag();
+                }
                 _isDragging = false;
                 _isPanning = false;
                 _isDraggingGizmo = false;
@@ -3172,6 +3201,13 @@ namespace Deep3DStudio.Viewport
 
             if (!_isDragging && !_isPanning && !_isDraggingGizmo)
             {
+                if (_gizmoMode == GizmoMode.SplittingPlane && _splittingPlaneTool != null)
+                {
+                    var (rayOrigin, rayDir) = GetRayFromScreenPoint(x, y);
+                    int handleAxis = _splittingPlaneTool.CheckHandleIntersection(rayOrigin, rayDir, _finalViewMatrix, _projectionMatrix);
+                    _splittingPlaneTool.EndDrag();
+                }
+                
                 CheckHandleSelection(x, y);
                 int gizmoAxis = CheckGizmoSelection(x, y);
                 if (_activeGizmoAxis != gizmoAxis)
@@ -3181,7 +3217,13 @@ namespace Deep3DStudio.Viewport
                 }
             }
 
-            if (_isDraggingGizmo && _sceneGraph != null)
+            if (_isDragging && _gizmoMode == GizmoMode.SplittingPlane && _splittingPlaneTool != null)
+            {
+                var (rayOrigin, rayDir) = GetRayFromScreenPoint(x, y);
+                _splittingPlaneTool.UpdateDrag(rayOrigin, rayDir);
+                this.QueueRender();
+            }
+            else if (_isDraggingGizmo && _sceneGraph != null)
             {
                 int deltaX = x - (int)_gizmoDragStart.X;
                 int deltaY = y - (int)_gizmoDragStart.Y;
@@ -3219,9 +3261,6 @@ namespace Deep3DStudio.Viewport
             }
             else if (_isDragging && !_isPanning)
             {
-                // Rotate view if not dragging a handle and not selecting.
-                // In Select mode, left drag rotates the view (box selection is not implemented).
-
                 int deltaX = x - _lastMousePos.X;
                 int deltaY = y - _lastMousePos.Y;
 
@@ -3282,7 +3321,7 @@ namespace Deep3DStudio.Viewport
         {
             switch (args.Event.Key)
             {
-                case Gdk.Key.q: // Q for Select
+                case Gdk.Key.q:
                 case Gdk.Key.Q:
                     SetGizmoMode(GizmoMode.Select);
                     break;
@@ -3302,12 +3341,22 @@ namespace Deep3DStudio.Viewport
                 case Gdk.Key.P:
                     SetGizmoMode(GizmoMode.Pen);
                     break;
+                case Gdk.Key.y:
+                case Gdk.Key.Y:
+                    SetGizmoMode(GizmoMode.SplittingPlane);
+                    break;
                 case Gdk.Key.f:
                 case Gdk.Key.F:
                     FocusOnSelection();
                     break;
+                case Gdk.Key.Return:
+                case Gdk.Key.KP_Enter:
+                    if (_gizmoMode == GizmoMode.SplittingPlane)
+                    {
+                        SplittingPlaneConfirmed?.Invoke(this, EventArgs.Empty);
+                    }
+                    break;
                 case Gdk.Key.Delete:
-                    // In Pen mode, delete selected triangles
                     if (_gizmoMode == GizmoMode.Pen && _meshEditingTool.SelectedTriangles.Count > 0)
                     {
                         _meshEditingTool.DeleteSelectedTriangles();
@@ -3322,8 +3371,11 @@ namespace Deep3DStudio.Viewport
                     }
                     break;
                 case Gdk.Key.Escape:
-                    // In Pen mode, clear triangle selection first
-                    if (_gizmoMode == GizmoMode.Pen && _meshEditingTool.SelectedTriangles.Count > 0)
+                    if (_gizmoMode == GizmoMode.SplittingPlane)
+                    {
+                        SetGizmoMode(GizmoMode.Select);
+                    }
+                    else if (_gizmoMode == GizmoMode.Pen && _meshEditingTool.SelectedTriangles.Count > 0)
                     {
                         _meshEditingTool.ClearSelection();
                         TriangleSelectionChanged?.Invoke(this, EventArgs.Empty);

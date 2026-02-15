@@ -69,6 +69,7 @@ namespace Deep3DStudio.Icons
                         case "dem": DrawDemIcon(cr, size); break;
                         case "geo_export": DrawGeoExportIcon(cr, size); break;
                         case "fill_holes": DrawFillHolesIcon(cr, size); break;
+                        case "splitting_plane": DrawSplittingPlaneIcon(cr, size); break;
                     }
                 }
 
@@ -978,6 +979,33 @@ namespace Deep3DStudio.Icons
             cr.MoveTo(size * 0.43, size * 0.7);
             cr.LineTo(size * 0.57, size * 0.7);
             cr.Stroke();
+        }
+
+        private static void DrawSplittingPlaneIcon(Context cr, int size)
+        {
+            cr.SetSourceRGBA(0.9, 0.7, 0.2, 0.6);
+            cr.MoveTo(size * 0.15, size * 0.25);
+            cr.LineTo(size * 0.85, size * 0.25);
+            cr.LineTo(size * 0.85, size * 0.75);
+            cr.LineTo(size * 0.15, size * 0.75);
+            cr.ClosePath();
+            cr.FillPreserve();
+
+            cr.SetSourceRGB(0.8, 0.55, 0.1);
+            cr.LineWidth = 1.5;
+            cr.Stroke();
+
+            cr.SetSourceRGB(1.0, 0.25, 0.25);
+            cr.LineWidth = 2.5;
+            cr.MoveTo(size * 0.2, size * 0.82);
+            cr.LineTo(size * 0.8, size * 0.18);
+            cr.Stroke();
+
+            cr.SetSourceRGB(0.95, 0.35, 0.1);
+            cr.Arc(size * 0.65, size * 0.32, size * 0.08, 0, 2 * Math.PI);
+            cr.Fill();
+
+            cr.LineWidth = 1;
         }
 
     }
