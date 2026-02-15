@@ -179,9 +179,31 @@ namespace Deep3DStudio.Model
                 cancellationToken.ThrowIfCancellationRequested();
                 var meshes = _inference.Infer(imagesBytes, useRetrieval, cancellationToken);
 
+                if (meshes.Count == 0)
+                {
+                    Log("[Must3r] No meshes returned from inference.");
+                }
+
                 for (int i = 0; i < meshes.Count; i++)
                 {
                     var mesh = meshes[i];
+                    
+                    if (mesh.Vertices.Count > 0)
+                    {
+                        var min = new Vector3(float.MaxValue);
+                        var max = new Vector3(float.MinValue);
+                        foreach (var v in mesh.Vertices)
+                        {
+                            min = Vector3.ComponentMin(min, v);
+                            max = Vector3.ComponentMax(max, v);
+                        }
+                        Log($"[Must3r] Mesh {i}: {mesh.Vertices.Count} points, bounds min({min.X:F2},{min.Y:F2},{min.Z:F2}) max({max.X:F2},{max.Y:F2},{max.Z:F2})");
+                    }
+                    else
+                    {
+                        Log($"[Must3r] Mesh {i} has 0 vertices.");
+                    }
+
                     if (ReconstructionPoseNormalizer.TryApplyPoseIfLikelyLocal(mesh, out float localScore, out float worldScore))
                     {
                         Log($"[Must3r] Applied pose to point cloud {i}: localScore={localScore:F2}, worldScore={worldScore:F2}");

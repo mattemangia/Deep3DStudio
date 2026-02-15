@@ -225,8 +225,11 @@ namespace Deep3DStudio.Viewport
             if (height == 0) height = 1;
 
             // Setup Matrices
+            float sceneSize = (_sceneGraph != null) ? (_sceneGraph.GetSceneBounds().max - _sceneGraph.GetSceneBounds().min).Length : 100.0f;
+            float farPlane = Math.Max(10000.0f, sceneSize * 10.0f);
+            
             _projectionMatrix = Matrix4.CreatePerspectiveFieldOfView(
-                MathHelper.DegreesToRadians(45f), (float)width / height, 0.1f, 1000f);
+                MathHelper.DegreesToRadians(45f), (float)width / height, 0.1f, farPlane);
 
             var s = IniSettings.Instance;
             Matrix4 coordTransform = Matrix4.Identity;
@@ -1063,28 +1066,72 @@ namespace Deep3DStudio.Viewport
         }
 
         /// <summary>
-        /// Focus camera on the currently selected objects
+        /// Focus camera on the currently selected objects using robust statistical bounds
         /// </summary>
         public void FocusOnSelection()
         {
-            if (_sceneGraph == null || _sceneGraph.SelectedObjects.Count == 0) return;
+            if (_sceneGraph == null) return;
+            var targets = (_sceneGraph.SelectedObjects.Count > 0) ? _sceneGraph.SelectedObjects : _sceneGraph.GetVisibleObjects().ToList();
+            if (targets.Count == 0) return;
 
-            Vector3 center = Vector3.Zero;
-            Vector3 boundsMin = new Vector3(float.MaxValue);
-            Vector3 boundsMax = new Vector3(float.MinValue);
+            Vector3 min = new Vector3(float.MaxValue);
+            Vector3 max = new Vector3(float.MinValue);
+            bool found = false;
 
-            foreach (var obj in _sceneGraph.SelectedObjects)
+            foreach (var obj in targets)
             {
-                var (min, max) = obj.GetWorldBounds();
-                boundsMin = Vector3.ComponentMin(boundsMin, min);
-                boundsMax = Vector3.ComponentMax(boundsMax, max);
+                if (obj is PointCloudObject pc && pc.Points.Count > 100)
+                {
+                    var (pMean, pMin, pMax) = CalculateRobustBounds(pc.Points);
+                    var transform = pc.GetWorldTransform();
+                    min = Vector3.ComponentMin(min, Vector3.TransformPosition(pMin, transform));
+                    max = Vector3.ComponentMax(max, Vector3.TransformPosition(pMax, transform));
+                    found = true;
+                }
+                else
+                {
+                    var (objMin, objMax) = obj.GetWorldBounds();
+                    min = Vector3.ComponentMin(min, objMin);
+                    max = Vector3.ComponentMax(max, objMax);
+                    found = true;
+                }
             }
 
-            center = (boundsMin + boundsMax) * 0.5f;
-            float size = (boundsMax - boundsMin).Length;
+            // Validate bounds
+            if (!found || !IsFinite(min) || !IsFinite(max))
+            {
+                _cameraTarget = Vector3.Zero;
+                _zoom = -5.0f;
+                return;
+            }
+
+            var center = (min + max) * 0.5f;
+            float size = (max - min).Length;
+            if (size < 0.1f) size = 1.0f;
 
             _cameraTarget = center;
-            _zoom = Math.Max(-size * 2.5f, -50f);
+            _zoom = Math.Max(-size * 1.2f, -10000f);
+        }
+
+        private (Vector3 mean, Vector3 min, Vector3 max) CalculateRobustBounds(List<Vector3> points)
+        {
+            if (points.Count == 0) return (Vector3.Zero, Vector3.Zero, Vector3.Zero);
+            Vector3 sum = Vector3.Zero;
+            foreach (var p in points) sum += p;
+            Vector3 mean = sum / points.Count;
+            Vector3 sumSq = Vector3.Zero;
+            foreach (var p in points)
+            {
+                var diff = p - mean;
+                sumSq += new Vector3(diff.X * diff.X, diff.Y * diff.Y, diff.Z * diff.Z);
+            }
+            Vector3 stdDev = new Vector3(MathF.Sqrt(sumSq.X / points.Count), MathF.Sqrt(sumSq.Y / points.Count), MathF.Sqrt(sumSq.Z / points.Count));
+            return (mean, mean - stdDev * 2.0f, mean + stdDev * 2.0f);
+        }
+
+        private static bool IsFinite(Vector3 v)
+        {
+            return float.IsFinite(v.X) && float.IsFinite(v.Y) && float.IsFinite(v.Z);
         }
 
         /// <summary>
@@ -1115,14 +1162,36 @@ namespace Deep3DStudio.Viewport
 
         private void DrawGrid()
         {
+            float sceneSize = 10.0f;
+            if (_sceneGraph != null)
+            {
+                var (min, max) = _sceneGraph.GetSceneBounds();
+                sceneSize = (max - min).Length;
+            }
+
+            // Determine appropriate grid size and step
+            float size = Math.Max(10.0f, sceneSize * 0.8f);
+            
+            // Round size to nice numbers (powers of 10)
+            float log10 = MathF.Log10(size);
+            float p10 = MathF.Pow(10, MathF.Floor(log10));
+            float roundedSize = MathF.Ceiling(size / p10) * p10;
+            float step = p10 / 10.0f;
+            if (step < 0.1f) step = 0.1f;
+
             GL.Begin(PrimitiveType.Lines);
             var s = IniSettings.Instance;
-            GL.Color4(s.GridColorR, s.GridColorG, s.GridColorB, 0.5f);
-            int size = 10;
-            for (int i = -size; i <= size; i++)
+            
+            for (float i = -roundedSize; i <= roundedSize; i += step)
             {
-                GL.Vertex3(i, 0, -size); GL.Vertex3(i, 0, size);
-                GL.Vertex3(-size, 0, i); GL.Vertex3(size, 0, i);
+                bool isMajor = MathF.Abs(i % p10) < (step * 0.1f);
+                float alpha = isMajor ? 0.5f : 0.2f;
+                GL.Color4(s.GridColorR, s.GridColorG, s.GridColorB, alpha);
+
+                // Z-lines
+                GL.Vertex3(i, 0, -roundedSize); GL.Vertex3(i, 0, roundedSize);
+                // X-lines
+                GL.Vertex3(-roundedSize, 0, i); GL.Vertex3(roundedSize, 0, i);
             }
             GL.End();
         }

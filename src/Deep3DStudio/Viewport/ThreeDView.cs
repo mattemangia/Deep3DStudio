@@ -219,11 +219,92 @@ namespace Deep3DStudio.Viewport
 
         #region Public Methods
 
+        public void UpdateGrid()
+        {
+            if (!_loaded || !_useModernGL) return;
+
+            this.MakeCurrent();
+
+            float sceneSize = 10.0f;
+            if (_sceneGraph != null)
+            {
+                var (min, max) = _sceneGraph.GetSceneBounds();
+                sceneSize = (max - min).Length;
+            }
+            else if (_meshes != null && _meshes.Count > 0)
+            {
+                // Fallback for legacy meshes
+                Vector3 min = new Vector3(float.MaxValue);
+                Vector3 max = new Vector3(float.MinValue);
+                foreach (var m in _meshes)
+                {
+                    foreach (var v in m.Vertices)
+                    {
+                        min = Vector3.ComponentMin(min, v);
+                        max = Vector3.ComponentMax(max, v);
+                    }
+                }
+                sceneSize = (max - min).Length;
+            }
+
+            // Determine appropriate grid size and step
+            float size = Math.Max(10.0f, sceneSize * 0.8f);
+            
+            // Round size to nice numbers (powers of 10)
+            float log10 = MathF.Log10(size);
+            float p10 = MathF.Pow(10, MathF.Floor(log10));
+            float roundedSize = MathF.Ceiling(size / p10) * p10;
+            float step = p10 / 10.0f;
+            if (step < 0.1f) step = 0.1f;
+
+            List<float> gridVerts = new List<float>();
+            var s = IniSettings.Instance;
+
+            for (float i = -roundedSize; i <= roundedSize; i += step)
+            {
+                bool isMajor = MathF.Abs(i % p10) < (step * 0.1f);
+                float r = isMajor ? s.GridColorR : s.GridColorR * 0.5f;
+                float g = isMajor ? s.GridColorG : s.GridColorG * 0.5f;
+                float b = isMajor ? s.GridColorB : s.GridColorB * 0.5f;
+
+                // Z-lines
+                gridVerts.Add(i); gridVerts.Add(0); gridVerts.Add(-roundedSize);
+                gridVerts.Add(r); gridVerts.Add(g); gridVerts.Add(b);
+
+                gridVerts.Add(i); gridVerts.Add(0); gridVerts.Add(roundedSize);
+                gridVerts.Add(r); gridVerts.Add(g); gridVerts.Add(b);
+
+                // X-lines
+                gridVerts.Add(-roundedSize); gridVerts.Add(0); gridVerts.Add(i);
+                gridVerts.Add(r); gridVerts.Add(g); gridVerts.Add(b);
+
+                gridVerts.Add(roundedSize); gridVerts.Add(0); gridVerts.Add(i);
+                gridVerts.Add(r); gridVerts.Add(g); gridVerts.Add(b);
+            }
+
+            _gridVertexCount = gridVerts.Count / 6;
+
+            if (_gridVao == 0) _gridVao = GL.GenVertexArray();
+            if (_gridVbo == 0) _gridVbo = GL.GenBuffer();
+
+            GL.BindVertexArray(_gridVao);
+            GL.BindBuffer(BufferTarget.ArrayBuffer, _gridVbo);
+            GL.BufferData(BufferTarget.ArrayBuffer, gridVerts.Count * sizeof(float), gridVerts.ToArray(), BufferUsageHint.StaticDraw);
+
+            GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 0);
+            GL.EnableVertexAttribArray(0);
+            GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 3 * sizeof(float));
+            GL.EnableVertexAttribArray(1);
+
+            GL.BindVertexArray(0);
+        }
+
         public void SetSceneGraph(SceneGraph sceneGraph)
         {
             _sceneGraph = sceneGraph;
             _sceneGraph.SelectionChanged += (s, e) => this.QueueRender();
-            _sceneGraph.SceneChanged += (s, e) => this.QueueRender();
+            _sceneGraph.SceneChanged += (s, e) => { UpdateGrid(); this.QueueRender(); };
+            UpdateGrid();
             AutoCenter();
             this.QueueRender();
         }
@@ -267,56 +348,86 @@ namespace Deep3DStudio.Viewport
         }
 
         /// <summary>
-        /// Focuses the view on selected objects or entire scene
+        /// Focuses the view on selected objects or entire scene using robust statistical bounds
         /// </summary>
         public void FocusOnSelection()
         {
-            Vector3 min, max;
+            Vector3 min = new Vector3(float.MaxValue);
+            Vector3 max = new Vector3(float.MinValue);
+            bool found = false;
 
-            if (_sceneGraph != null && _sceneGraph.SelectedObjects.Count > 0)
+            var targets = (_sceneGraph != null && _sceneGraph.SelectedObjects.Count > 0) 
+                ? _sceneGraph.SelectedObjects 
+                : _sceneGraph?.GetVisibleObjects();
+
+            if (targets == null) return;
+
+            foreach (var obj in targets)
             {
-                min = new Vector3(float.MaxValue);
-                max = new Vector3(float.MinValue);
-
-                foreach (var obj in _sceneGraph.SelectedObjects)
+                if (obj is PointCloudObject pc && pc.Points.Count > 100)
+                {
+                    // Robust bounds for point clouds: use mean +/- 2*sigma to ignore outliers
+                    var (pMean, pMin, pMax) = CalculateRobustBounds(pc.Points);
+                    var transform = pc.GetWorldTransform();
+                    min = Vector3.ComponentMin(min, Vector3.TransformPosition(pMin, transform));
+                    max = Vector3.ComponentMax(max, Vector3.TransformPosition(pMax, transform));
+                    found = true;
+                }
+                else
                 {
                     var (objMin, objMax) = obj.GetWorldBounds();
                     min = Vector3.ComponentMin(min, objMin);
                     max = Vector3.ComponentMax(max, objMax);
+                    found = true;
                 }
             }
-            else if (_sceneGraph != null)
-            {
-                (min, max) = _sceneGraph.GetSceneBounds();
-            }
-            else
-            {
-                return;
-            }
 
-            // Validate bounds
-            if (float.IsInfinity(min.X) || float.IsInfinity(max.X) ||
-                float.IsNaN(min.X) || float.IsNaN(max.X))
+            if (!found || !IsFinite(min) || !IsFinite(max))
             {
-                Console.WriteLine("FocusOnSelection: Invalid bounds, using defaults");
                 _cameraTarget = Vector3.Zero;
                 _zoom = -5.0f;
+                UpdateGrid();
                 this.QueueRender();
                 return;
             }
 
             var center = (min + max) * 0.5f;
             var size = (max - min).Length;
-
-            // Ensure minimum zoom distance
             if (size < 0.1f) size = 1.0f;
 
             _cameraTarget = center;
-            _zoom = -size * 1.5f;
+            _zoom = -size * 1.2f; // Slightly tighter zoom
 
-            Console.WriteLine($"FocusOnSelection: center({center.X:F2},{center.Y:F2},{center.Z:F2}), zoom={_zoom:F2}");
+            Console.WriteLine($"FocusOnSelection (Robust): center({center.X:F2},{center.Y:F2},{center.Z:F2}), zoom={_zoom:F2}");
 
+            UpdateGrid();
             this.QueueRender();
+        }
+
+        private (Vector3 mean, Vector3 min, Vector3 max) CalculateRobustBounds(List<Vector3> points)
+        {
+            if (points.Count == 0) return (Vector3.Zero, Vector3.Zero, Vector3.Zero);
+            
+            Vector3 sum = Vector3.Zero;
+            foreach (var p in points) sum += p;
+            Vector3 mean = sum / points.Count;
+
+            Vector3 sumSq = Vector3.Zero;
+            foreach (var p in points)
+            {
+                var diff = p - mean;
+                sumSq += new Vector3(diff.X * diff.X, diff.Y * diff.Y, diff.Z * diff.Z);
+            }
+            Vector3 stdDev = new Vector3(
+                MathF.Sqrt(sumSq.X / points.Count),
+                MathF.Sqrt(sumSq.Y / points.Count),
+                MathF.Sqrt(sumSq.Z / points.Count));
+
+            // Use 2 standard deviations for robustness (covers ~95% of points if normally distributed)
+            Vector3 robustMin = mean - stdDev * 2.0f;
+            Vector3 robustMax = mean + stdDev * 2.0f;
+
+            return (mean, robustMin, robustMax);
         }
 
         public void ApplyCrop()
@@ -336,6 +447,11 @@ namespace Deep3DStudio.Viewport
         #endregion
 
         #region Private Methods
+
+        private static bool IsFinite(Vector3 v)
+        {
+            return float.IsFinite(v.X) && float.IsFinite(v.Y) && float.IsFinite(v.Z);
+        }
 
         private void AutoCenter()
         {
@@ -497,45 +613,7 @@ namespace Deep3DStudio.Viewport
 
                 _shader = new Shader(vs, fs);
 
-                // Initialize Grid Buffers
-                List<float> gridVerts = new List<float>();
-                int size = 10;
-                float step = 1.0f;
-                var s = IniSettings.Instance;
-
-                for (float i = -size; i <= size; i += step)
-                {
-                    // Z-lines
-                    gridVerts.Add(i); gridVerts.Add(0); gridVerts.Add(-size);
-                    gridVerts.Add(s.GridColorR); gridVerts.Add(s.GridColorG); gridVerts.Add(s.GridColorB);
-
-                    gridVerts.Add(i); gridVerts.Add(0); gridVerts.Add(size);
-                    gridVerts.Add(s.GridColorR); gridVerts.Add(s.GridColorG); gridVerts.Add(s.GridColorB);
-
-                    // X-lines
-                    gridVerts.Add(-size); gridVerts.Add(0); gridVerts.Add(i);
-                    gridVerts.Add(s.GridColorR); gridVerts.Add(s.GridColorG); gridVerts.Add(s.GridColorB);
-
-                    gridVerts.Add(size); gridVerts.Add(0); gridVerts.Add(i);
-                    gridVerts.Add(s.GridColorR); gridVerts.Add(s.GridColorG); gridVerts.Add(s.GridColorB);
-                }
-
-                _gridVertexCount = gridVerts.Count / 6; // 6 floats per vertex (pos + color)
-
-                _gridVao = GL.GenVertexArray();
-                _gridVbo = GL.GenBuffer();
-
-                GL.BindVertexArray(_gridVao);
-                GL.BindBuffer(BufferTarget.ArrayBuffer, _gridVbo);
-                GL.BufferData(BufferTarget.ArrayBuffer, gridVerts.Count * sizeof(float), gridVerts.ToArray(), BufferUsageHint.StaticDraw);
-
-                // Position
-                GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 0);
-                GL.EnableVertexAttribArray(0);
-
-                // Color
-                GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 6 * sizeof(float), 3 * sizeof(float));
-                GL.EnableVertexAttribArray(1);
+                UpdateGrid();
 
                 // Axes Buffers - Longer and clearer axes
                 float[] axesVerts = {
@@ -645,8 +723,11 @@ namespace Deep3DStudio.Viewport
             GL.Viewport(0, 0, w, h);
 
             // Setup matrices
+            float sceneSize = (_sceneGraph != null) ? (_sceneGraph.GetSceneBounds().max - _sceneGraph.GetSceneBounds().min).Length : 100.0f;
+            float farPlane = Math.Max(10000.0f, sceneSize * 10.0f);
+            
             _projectionMatrix = Matrix4.CreatePerspectiveFieldOfView(
-                MathHelper.DegreesToRadians(45f), (float)w / h, 0.1f, 1000f);
+                MathHelper.DegreesToRadians(45f), (float)w / h, 0.1f, farPlane);
 
             // Apply Coordinate System Transformation
             Matrix4 coordTransform = Matrix4.Identity;

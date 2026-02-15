@@ -1057,6 +1057,7 @@ namespace Deep3DStudio
                     Application.Invoke((s, args) => {
                         _sceneTreeView.RefreshTree();
                         UpdatePointCloudVisibilityControls();
+                        _viewport.FocusOnSelection();
                         _viewport.QueueDraw();
                         _statusLabel.Text = $"Outlier filter complete. Removed {totalRemoved:N0} points.";
                         _isDirty = true;
@@ -1126,6 +1127,7 @@ namespace Deep3DStudio
                     Application.Invoke((s, args) => {
                         _sceneTreeView.RefreshTree();
                         UpdatePointCloudVisibilityControls();
+                        _viewport.FocusOnSelection();
                         _viewport.QueueDraw();
                         _statusLabel.Text = $"Duplicate removal complete. Removed {totalRemoved:N0} points.";
                         _isDirty = true;
@@ -1193,6 +1195,7 @@ namespace Deep3DStudio
                     Application.Invoke((s, args) => {
                         _sceneTreeView.RefreshTree();
                         UpdatePointCloudVisibilityControls();
+                        _viewport.FocusOnSelection();
                         _viewport.QueueDraw();
                         _statusLabel.Text = $"Sky/blue filter complete. Removed {totalRemoved:N0} points.";
                         _isDirty = true;

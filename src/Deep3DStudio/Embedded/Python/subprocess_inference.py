@@ -321,8 +321,18 @@ def _ensure_dense_mask(mask, points, min_points=3000):
 
 def _sanitize_for_json(obj):
     import math
+    import numpy as np
+    # Handle numpy scalars
+    if isinstance(obj, (np.floating, np.integer)):
+        obj = obj.item()
+
     if isinstance(obj, float):
-        return obj if math.isfinite(obj) else 0.0
+        if not math.isfinite(obj):
+            return 0.0
+        # Clip extremely large values that would break the 3D viewport
+        if abs(obj) > 1e15:
+            return 0.0
+        return obj
     if isinstance(obj, list):
         return [_sanitize_for_json(x) for x in obj]
     if isinstance(obj, dict):
@@ -1170,10 +1180,25 @@ def infer_must3r(images_data, use_retrieval=True):
                 # Extract pose if available
                 pose_c2w = None
                 if 'c2w' in all_outputs[i]:
-                    pose_c2w = all_outputs[i]['c2w'].cpu().numpy().tolist()
+                    c2w_t = all_outputs[i]['c2w']
+                    if hasattr(c2w_t, 'detach'): c2w_t = c2w_t.detach()
+                    if hasattr(c2w_t, 'cpu'): c2w_t = c2w_t.cpu()
+                    c2w_np = np.asarray(c2w_t)
+                    if c2w_np.ndim == 3 and c2w_np.shape[0] == 1:
+                        c2w_np = c2w_np[0]
+                    if c2w_np.shape == (4, 4):
+                        pose_c2w = c2w_np.tolist()
                 elif 'world_view_transform' in all_outputs[i]:
-                    # Convert w2c to c2w if needed, but must3r usually provides c2w
-                    pose_c2w = all_outputs[i]['world_view_transform'].inverse().cpu().numpy().tolist()
+                    w2c_t = all_outputs[i]['world_view_transform']
+                    if hasattr(w2c_t, 'inverse'):
+                        c2w_t = w2c_t.inverse()
+                        if hasattr(c2w_t, 'detach'): c2w_t = c2w_t.detach()
+                        if hasattr(c2w_t, 'cpu'): c2w_t = c2w_t.cpu()
+                        c2w_np = np.asarray(c2w_t)
+                        if c2w_np.ndim == 3 and c2w_np.shape[0] == 1:
+                            c2w_np = c2w_np[0]
+                        if c2w_np.shape == (4, 4):
+                            pose_c2w = c2w_np.tolist()
 
                 # Get colors from image
                 h, w = pts.shape[:2]
@@ -1186,7 +1211,7 @@ def infer_must3r(images_data, use_retrieval=True):
                 # Build an adaptive confidence mask to avoid overly sparse outputs.
                 if conf is not None:
                     conf_np = conf.cpu().numpy() if hasattr(conf, 'cpu') else conf
-                    mask = _build_confidence_mask(conf_np, pts.shape[:2], default_threshold=1.0, min_points=3000, max_points=120000)
+                    mask = _build_confidence_mask(conf_np, pts.shape[:2], default_threshold=0.9, min_points=3000, max_points=120000)
                 else:
                     conf_np = None
                     mask = np.ones(pts.shape[:2], dtype=bool)

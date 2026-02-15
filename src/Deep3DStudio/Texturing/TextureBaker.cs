@@ -379,7 +379,7 @@ namespace Deep3DStudio.Texturing
 
             // Get camera matrices
             var viewMatrix = camera.Pose.WorldToCamera;
-            var projMatrix = CreatePerspectiveProjection(camera.FieldOfView, camera.AspectRatio, 0.1f, 1000f);
+            var projMatrix = CreatePerspectiveProjection(camera.FieldOfView, camera.AspectRatio, 0.1f, 10000.0f);
             var cameraPos = camera.Pose.CameraToWorld.ExtractTranslation();
 
             // Process each triangle

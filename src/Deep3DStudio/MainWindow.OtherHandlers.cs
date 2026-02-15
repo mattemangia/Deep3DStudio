@@ -724,10 +724,16 @@ namespace Deep3DStudio
             var camerasGroup = new GroupObject("Cameras");
             _sceneGraph.AddObject(camerasGroup);
 
+            // Calculate appropriate frustum scale based on scene size
+            var (min, max) = _sceneGraph.GetSceneBounds();
+            float sceneSize = (max - min).Length;
+            float frustumScale = Math.Max(0.1f, sceneSize * 0.05f);
+
             for (int i = 0; i < result.Poses.Count; i++)
             {
                 var pose = result.Poses[i];
                 var camObj = new CameraObject($"Camera {i + 1}", pose);
+                camObj.FrustumScale = frustumScale;
                 _sceneGraph.AddObject(camObj, camerasGroup);
             }
         }

@@ -5302,6 +5302,7 @@ namespace Deep3DStudio
 
                     EnqueueAction(() => {
                         _logBuffer += $"Outlier filter removed {totalRemoved:N0} points.\n";
+                        _viewport.FocusOnSelection();
                         _isDirty = true;
                         UpdateTitle();
                         ProgressDialog.Instance.Complete();
@@ -5349,6 +5350,7 @@ namespace Deep3DStudio
 
                     EnqueueAction(() => {
                         _logBuffer += $"Duplicate removal removed {totalRemoved:N0} points.\n";
+                        _viewport.FocusOnSelection();
                         _isDirty = true;
                         UpdateTitle();
                         ProgressDialog.Instance.Complete();
@@ -5403,6 +5405,7 @@ namespace Deep3DStudio
 
                     EnqueueAction(() => {
                         _logBuffer += $"Sky/blue filter removed {totalRemoved:N0} points.\n";
+                        _viewport.FocusOnSelection();
                         _isDirty = true;
                         UpdateTitle();
                         ProgressDialog.Instance.Complete();
@@ -7431,10 +7434,16 @@ namespace Deep3DStudio
                 _sceneGraph.Select(firstPc);
             }
 
+            // Calculate appropriate frustum scale based on scene size
+            var (sceneMin, sceneMax) = _sceneGraph.GetSceneBounds();
+            float sceneSize = (sceneMax - sceneMin).Length;
+            float frustumScale = Math.Max(0.1f, sceneSize * 0.05f);
+
             for (int i = 0; i < result.Poses.Count; i++)
             {
                 var pose = result.Poses[i];
                 var camObj = new CameraObject($"Camera {i + 1}", pose);
+                camObj.FrustumScale = frustumScale;
                 _sceneGraph.AddObject(camObj);
             }
 
