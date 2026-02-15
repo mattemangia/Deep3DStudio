@@ -27,12 +27,46 @@ namespace Deep3DStudio.Viewport
         SplittingPlane
     }
 
+    public enum FilterPreviewMode
+    {
+        None,
+        ColorRange,
+        Distance
+    }
+
     /// <summary>
     /// Enhanced 3D viewport with scene graph support, camera visualization, and transform gizmos
     /// </summary>
     public class ThreeDView : GLArea
     {
         private bool _loaded;
+        // Filter Preview State
+        private FilterPreviewMode _previewMode = FilterPreviewMode.None;
+        private Vector3 _previewColorTarget = Vector3.Zero;
+        private float _previewColorThreshold = 0.1f;
+        private float _previewDistanceMax = 100.0f;
+
+        public void SetColorFilterPreview(Vector3 color, float threshold)
+        {
+            _previewMode = FilterPreviewMode.ColorRange;
+            _previewColorTarget = color;
+            _previewColorThreshold = threshold;
+            this.QueueRender();
+        }
+
+        public void SetDistanceFilterPreview(float maxDistance)
+        {
+            _previewMode = FilterPreviewMode.Distance;
+            _previewDistanceMax = maxDistance;
+            this.QueueRender();
+        }
+
+        public void ClearFilterPreview()
+        {
+            _previewMode = FilterPreviewMode.None;
+            this.QueueRender();
+        }
+
         private float _zoom = -5.0f;
         private float _rotationX = 0f;
         private float _rotationY = 0f;
@@ -591,8 +625,11 @@ namespace Deep3DStudio.Viewport
                     uniform mat4 projection;
                     uniform float pointSize;
                     out vec3 vertexColor;
+                    out vec3 worldPos;
                     void main() {
-                        gl_Position = projection * view * model * vec4(aPos, 1.0);
+                        vec4 wPos = model * vec4(aPos, 1.0);
+                        worldPos = wPos.xyz;
+                        gl_Position = projection * view * wPos;
                         vertexColor = aColor;
                         gl_PointSize = pointSize > 0.0 ? pointSize : 8.0;
                     }";
@@ -600,14 +637,41 @@ namespace Deep3DStudio.Viewport
                 string fs = @"
                     #version 330 core
                     in vec3 vertexColor;
+                    in vec3 worldPos;
                     uniform vec4 uniformColor;
                     uniform bool useUniformColor;
+                    
+                    // Preview uniforms
+                    uniform int previewMode; // 0=None, 1=ColorRange, 2=Distance
+                    uniform vec3 previewColorTarget;
+                    uniform float previewColorThreshold;
+                    uniform float previewDistanceMax;
+
                     out vec4 FragColor;
                     void main() {
+                        vec4 col;
                         if (useUniformColor) {
-                            FragColor = uniformColor;
+                            col = uniformColor;
                         } else {
-                            FragColor = vec4(vertexColor, 1.0);
+                            col = vec4(vertexColor, 1.0);
+                        }
+
+                        if (previewMode == 1) { // Color Range
+                            float dist = length(vertexColor - previewColorTarget);
+                            if (dist <= previewColorThreshold) {
+                                FragColor = vec4(1.0, 0.0, 0.0, 1.0); // Highlight matching in red
+                            } else {
+                                FragColor = vec4(col.rgb * 0.3, 0.5); // Dim others
+                            }
+                        } else if (previewMode == 2) { // Distance
+                            float dist = length(worldPos); // Distance from origin
+                            if (dist > previewDistanceMax) {
+                                FragColor = vec4(1.0, 0.0, 0.0, 1.0); // Highlight far points in red
+                            } else {
+                                FragColor = vec4(col.rgb * 0.3, 0.5); // Dim others
+                            }
+                        } else {
+                            FragColor = col;
                         }
                     }";
 
@@ -1666,6 +1730,18 @@ namespace Deep3DStudio.Viewport
             _shader.SetMatrix4("view", _finalViewMatrix);
             _shader.SetMatrix4("model", pc.GetWorldTransform());
             _shader.SetFloat("pointSize", pc.PointSize);
+
+            // Set preview uniforms
+            _shader.SetInt("previewMode", (int)_previewMode);
+            if (_previewMode == FilterPreviewMode.ColorRange)
+            {
+                _shader.SetVector3("previewColorTarget", _previewColorTarget);
+                _shader.SetFloat("previewColorThreshold", _previewColorThreshold);
+            }
+            else if (_previewMode == FilterPreviewMode.Distance)
+            {
+                _shader.SetFloat("previewDistanceMax", _previewDistanceMax);
+            }
 
             // Enable point size from shader
             GL.Enable(EnableCap.ProgramPointSize);

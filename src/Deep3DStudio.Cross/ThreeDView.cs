@@ -25,6 +25,13 @@ namespace Deep3DStudio.Viewport
         SplittingPlane
     }
 
+    public enum FilterPreviewMode
+    {
+        None,
+        ColorRange,
+        Distance
+    }
+
     public class ThreeDView
     {
         private SceneGraph _sceneGraph;
@@ -32,6 +39,30 @@ namespace Deep3DStudio.Viewport
         private float _rotationX = 0f;
         private float _rotationY = 0f;
         private Vector3 _cameraTarget = Vector3.Zero;
+
+        // Filter Preview State
+        private FilterPreviewMode _previewMode = FilterPreviewMode.None;
+        private Vector3 _previewColorTarget = Vector3.Zero;
+        private float _previewColorThreshold = 0.1f;
+        private float _previewDistanceMax = 100.0f;
+
+        public void SetColorFilterPreview(Vector3 color, float threshold)
+        {
+            _previewMode = FilterPreviewMode.ColorRange;
+            _previewColorTarget = color;
+            _previewColorThreshold = threshold;
+        }
+
+        public void SetDistanceFilterPreview(float maxDistance)
+        {
+            _previewMode = FilterPreviewMode.Distance;
+            _previewDistanceMax = maxDistance;
+        }
+
+        public void ClearFilterPreview()
+        {
+            _previewMode = FilterPreviewMode.None;
+        }
 
         // Input state
         private bool _isDragging;
@@ -1580,9 +1611,12 @@ namespace Deep3DStudio.Viewport
             // Simple ID for non-scene-object clouds (use negative hash to avoid collision)
             int cloudId = -Math.Abs(points.GetHashCode());
 
+            bool previewActive = _previewMode != FilterPreviewMode.None;
+
             if (!_pointCloudBuffers.TryGetValue(cloudId, out var buffers)
                 || buffers.count != points.Count
-                || buffers.colorMode != colorMode)
+                || buffers.colorMode != colorMode
+                || previewActive)
             {
                 if (buffers.vao != 0) GL.DeleteVertexArray(buffers.vao);
                 if (buffers.vbo != 0) GL.DeleteBuffer(buffers.vbo);
@@ -1591,6 +1625,19 @@ namespace Deep3DStudio.Viewport
                 for (int i = 0; i < points.Count; i++)
                 {
                     var c = GetPointColor(i, points, colors, confidence, colorMode, minValue, range, depthFallback);
+                    
+                    if (_previewMode == FilterPreviewMode.ColorRange)
+                    {
+                        float d = (c - _previewColorTarget).Length;
+                        if (d <= _previewColorThreshold) c = new Vector3(1, 0, 0); // Red
+                        else c *= 0.3f; // Dim
+                    }
+                    else if (_previewMode == FilterPreviewMode.Distance)
+                    {
+                        if (points[i].Length > _previewDistanceMax) c = new Vector3(1, 0, 0); // Red
+                        else c *= 0.3f; // Dim
+                    }
+
                     data[i * 6 + 0] = points[i].X;
                     data[i * 6 + 1] = points[i].Y;
                     data[i * 6 + 2] = points[i].Z;
@@ -1658,9 +1705,12 @@ namespace Deep3DStudio.Viewport
                 UpdatePointCloudLegend(colorMode, min, max, depthFallback);
             }
 
+            bool previewActive = _previewMode != FilterPreviewMode.None;
+
             if (!_pointCloudBuffers.TryGetValue(pointCloud.Id, out var buffers)
                 || buffers.count != visibleCount
-                || buffers.colorMode != colorMode)
+                || buffers.colorMode != colorMode
+                || previewActive)
             {
                 if (buffers.vao != 0) GL.DeleteVertexArray(buffers.vao);
                 if (buffers.vbo != 0) GL.DeleteBuffer(buffers.vbo);
@@ -1681,6 +1731,18 @@ namespace Deep3DStudio.Viewport
                         minValue,
                         range,
                         depthFallback);
+
+                    if (_previewMode == FilterPreviewMode.ColorRange)
+                    {
+                        float d = (c - _previewColorTarget).Length;
+                        if (d <= _previewColorThreshold) c = new Vector3(1, 0, 0); // Red
+                        else c *= 0.3f; // Dim
+                    }
+                    else if (_previewMode == FilterPreviewMode.Distance)
+                    {
+                        if (pointCloud.Points[sourceIndex].Length > _previewDistanceMax) c = new Vector3(1, 0, 0); // Red
+                        else c *= 0.3f; // Dim
+                    }
 
                     data[i * 6 + 0] = pointCloud.Points[sourceIndex].X;
                     data[i * 6 + 1] = pointCloud.Points[sourceIndex].Y;

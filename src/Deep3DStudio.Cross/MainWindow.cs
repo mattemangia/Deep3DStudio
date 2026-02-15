@@ -237,6 +237,9 @@ namespace Deep3DStudio
         private float _pcSkyMaxRed = 0.60f;
         private float _pcSkyMaxGreen = 0.75f;
         private float _pcSkyBlueDominance = 0.08f;
+        private System.Numerics.Vector3 _pcFilterColor = new System.Numerics.Vector3(1, 1, 1);
+        private float _pcFilterColorThreshold = 0.1f;
+        private float _pcFilterMaxDist = 100.0f;
 
         // Rigging state
         private SkeletonObject? _activeSkeletonObject = null;
@@ -253,6 +256,8 @@ namespace Deep3DStudio
         private bool _showPcRadiusDialog = false;
         private bool _showPcDenseDialog = false;
         private bool _showPcSkyBlueDialog = false;
+        private bool _showPcColorFilterDialog = false;
+        private bool _showPcDistanceFilterDialog = false;
         private bool _showPenMoveDialog = false;
         private bool _showPenExtrudeDialog = false;
         private bool _showPenInsetDialog = false;
@@ -1230,6 +1235,8 @@ namespace Deep3DStudio
             if (_showPcOutliersDialog) DrawPointCloudOutliersDialog();
             if (_showPcDuplicatesDialog) DrawPointCloudDuplicatesDialog();
             if (_showPcSkyBlueDialog) DrawPointCloudSkyBlueDialog();
+            if (_showPcColorFilterDialog) DrawPointCloudColorFilterDialog();
+            if (_showPcDistanceFilterDialog) DrawPointCloudDistanceFilterDialog();
             if (_showPcNormalsDialog) DrawPointCloudNormalsDialog();
             if (_showPcPassDialog) DrawPointCloudPassDialog();
             if (_showPcRadiusDialog) DrawPointCloudRadiusDialog();
@@ -1729,6 +1736,12 @@ namespace Deep3DStudio
                 ImGui.SameLine();
                 DrawToolbarButton("##PcDense", IconType.DenseCloud, false, () => ApplyPointCloudDenseCloud(), "Point Cloud to Dense Cloud", size,
                     OpenPointCloudDenseOptionsDialog);
+                ImGui.SameLine();
+                DrawToolbarButton("##PcColorFilter", IconType.ColorFilter, false, () => ApplyPointCloudColorFilter(), "Remove Color Range", size,
+                    OpenPointCloudColorFilterOptionsDialog);
+                ImGui.SameLine();
+                DrawToolbarButton("##PcDistFilter", IconType.DistanceFilter, false, () => ApplyPointCloudDistanceFilter(), "Remove Far Points", size,
+                    OpenPointCloudDistanceFilterOptionsDialog);
 
                 ImGui.SameLine();
                 ImGui.Text("|");
@@ -5002,6 +5015,145 @@ namespace Deep3DStudio
                     _showPcSkyBlueDialog = false;
                 ImGui.EndPopup();
             }
+        }
+
+        private void DrawPointCloudColorFilterDialog()
+        {
+            if (!_showPcColorFilterDialog) return;
+            if (ImGui.BeginPopup("Color Filter", ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                if (ImGui.ColorEdit3("Target Color", ref _pcFilterColor))
+                {
+                    _viewport.SetColorFilterPreview(new Vector3(_pcFilterColor.X, _pcFilterColor.Y, _pcFilterColor.Z), _pcFilterColorThreshold);
+                }
+                if (ImGui.SliderFloat("Threshold", ref _pcFilterColorThreshold, 0.0f, 1.0f))
+                {
+                    _viewport.SetColorFilterPreview(new Vector3(_pcFilterColor.X, _pcFilterColor.Y, _pcFilterColor.Z), _pcFilterColorThreshold);
+                }
+
+                ImGui.TextDisabled("Red = will be removed");
+
+                if (ImGui.Button("Apply", new System.Numerics.Vector2(120, 0)) || ImGui.IsKeyPressed(ImGuiKey.Enter))
+                {
+                    _showPcColorFilterDialog = false;
+                    _viewport.ClearFilterPreview();
+                    ApplyPointCloudColorFilter();
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showPcColorFilterDialog = false;
+                    _viewport.ClearFilterPreview();
+                }
+                ImGui.EndPopup();
+            }
+        }
+
+        private void DrawPointCloudDistanceFilterDialog()
+        {
+            if (!_showPcDistanceFilterDialog) return;
+            if (ImGui.BeginPopup("Distance Filter", ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                if (ImGui.InputFloat("Max Distance", ref _pcFilterMaxDist, 0.1f, 1.0f, "%.2f"))
+                {
+                    _viewport.SetDistanceFilterPreview(_pcFilterMaxDist);
+                }
+
+                ImGui.TextDisabled("Red = will be removed");
+
+                if (ImGui.Button("Apply", new System.Numerics.Vector2(120, 0)) || ImGui.IsKeyPressed(ImGuiKey.Enter))
+                {
+                    _showPcDistanceFilterDialog = false;
+                    _viewport.ClearFilterPreview();
+                    ApplyPointCloudDistanceFilter();
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0)))
+                {
+                    _showPcDistanceFilterDialog = false;
+                    _viewport.ClearFilterPreview();
+                }
+                ImGui.EndPopup();
+            }
+        }
+
+        private void OpenPointCloudColorFilterOptionsDialog()
+        {
+            _showPcColorFilterDialog = true;
+            _popupToOpen = "Color Filter";
+            _viewport.SetColorFilterPreview(new Vector3(_pcFilterColor.X, _pcFilterColor.Y, _pcFilterColor.Z), _pcFilterColorThreshold);
+        }
+
+        private void OpenPointCloudDistanceFilterOptionsDialog()
+        {
+            _showPcDistanceFilterDialog = true;
+            _popupToOpen = "Distance Filter";
+            _viewport.SetDistanceFilterPreview(_pcFilterMaxDist);
+        }
+
+        private void ApplyPointCloudColorFilter()
+        {
+            var selected = GetSelectedPointCloudObjects();
+            if (selected.Count == 0) return;
+
+            Vector3 color = new Vector3(_pcFilterColor.X, _pcFilterColor.Y, _pcFilterColor.Z);
+            float threshold = _pcFilterColorThreshold;
+            ProgressDialog.Instance.Start("Filtering Color...", OperationType.Processing);
+
+            Task.Run(() => {
+                try {
+                    int totalRemoved = 0;
+                    for (int i = 0; i < selected.Count; i++) {
+                        var progress = new Progress<string>(msg => ProgressDialog.Instance.Log(msg));
+                        var removed = PointCloudOperations.RemoveColorRangeAsync(
+                            selected[i], color, threshold,
+                            ProgressDialog.Instance.CancellationTokenSource!.Token,
+                            progress).Result;
+                        totalRemoved += removed;
+                    }
+                    EnqueueAction(() => {
+                        _logBuffer += $"Color filter removed {totalRemoved:N0} points.\n";
+                        _viewport.FocusOnSelection();
+                        _isDirty = true;
+                        UpdateTitle();
+                        ProgressDialog.Instance.Complete();
+                    });
+                } catch (Exception ex) {
+                    EnqueueAction(() => ProgressDialog.Instance.Fail(ex));
+                }
+            });
+        }
+
+        private void ApplyPointCloudDistanceFilter()
+        {
+            var selected = GetSelectedPointCloudObjects();
+            if (selected.Count == 0) return;
+
+            float maxDist = _pcFilterMaxDist;
+            ProgressDialog.Instance.Start("Filtering Distance...", OperationType.Processing);
+
+            Task.Run(() => {
+                try {
+                    int totalRemoved = 0;
+                    for (int i = 0; i < selected.Count; i++) {
+                        var progress = new Progress<string>(msg => ProgressDialog.Instance.Log(msg));
+                        var removed = PointCloudOperations.RemoveFarPointsAsync(
+                            selected[i], maxDist,
+                            ProgressDialog.Instance.CancellationTokenSource!.Token,
+                            progress).Result;
+                        totalRemoved += removed;
+                    }
+                    EnqueueAction(() => {
+                        _logBuffer += $"Distance filter removed {totalRemoved:N0} points.\n";
+                        _viewport.FocusOnSelection();
+                        _isDirty = true;
+                        UpdateTitle();
+                        ProgressDialog.Instance.Complete();
+                    });
+                } catch (Exception ex) {
+                    EnqueueAction(() => ProgressDialog.Instance.Fail(ex));
+                }
+            });
         }
 
         private void DrawPointCloudNormalsDialog()

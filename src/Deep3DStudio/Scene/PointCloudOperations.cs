@@ -683,6 +683,155 @@ namespace Deep3DStudio.Scene
             }, cancellationToken);
         }
 
+        public static int RemoveColorRange(PointCloudObject pointCloud, Vector3 targetColor, float threshold)
+        {
+            if (pointCloud.Points.Count == 0) return 0;
+            int before = pointCloud.Points.Count;
+            var outPoints = new List<Vector3>(before);
+            var outColors = new List<Vector3>(before);
+            var outNormals = pointCloud.Normals.Count == before ? new List<Vector3>(before) : new List<Vector3>();
+            var outConfidence = pointCloud.Confidence.Count == before ? new List<float>(before) : new List<float>();
+
+            for (int i = 0; i < before; i++)
+            {
+                var color = i < pointCloud.Colors.Count ? pointCloud.Colors[i] : new Vector3(0.85f);
+                float dist = (color - targetColor).Length;
+                if (dist <= threshold) continue;
+
+                outPoints.Add(pointCloud.Points[i]);
+                outColors.Add(color);
+                if (outNormals.Capacity > 0) outNormals.Add(pointCloud.Normals[i]);
+                if (outConfidence.Capacity > 0) outConfidence.Add(pointCloud.Confidence[i]);
+            }
+
+            pointCloud.Points = outPoints;
+            pointCloud.Colors = outColors;
+            pointCloud.Normals = outNormals;
+            pointCloud.Confidence = outConfidence;
+            pointCloud.UpdateBounds();
+            return before - pointCloud.Points.Count;
+        }
+
+        public static async Task<int> RemoveColorRangeAsync(
+            PointCloudObject pointCloud,
+            Vector3 targetColor,
+            float threshold,
+            CancellationToken cancellationToken = default,
+            IProgress<string>? progress = null)
+        {
+            return await Task.Run(() =>
+            {
+                if (pointCloud.Points.Count == 0) return 0;
+                progress?.Report("Filtering points by color range...");
+                int before = pointCloud.Points.Count;
+                var outIndices = new ConcurrentBag<int>();
+                
+                Parallel.For(0, before, new ParallelOptions { CancellationToken = cancellationToken }, i =>
+                {
+                    var color = i < pointCloud.Colors.Count ? pointCloud.Colors[i] : new Vector3(0.85f);
+                    float dist = (color - targetColor).Length;
+                    if (dist > threshold) outIndices.Add(i);
+                });
+
+                var indices = outIndices.ToList();
+                indices.Sort();
+
+                var finalPoints = new List<Vector3>(indices.Count);
+                var finalColors = new List<Vector3>(indices.Count);
+                var finalNormals = pointCloud.Normals.Count == before ? new List<Vector3>(indices.Count) : new List<Vector3>();
+                var finalConfidence = pointCloud.Confidence.Count == before ? new List<float>(indices.Count) : new List<float>();
+
+                foreach (int idx in indices)
+                {
+                    finalPoints.Add(pointCloud.Points[idx]);
+                    finalColors.Add(idx < pointCloud.Colors.Count ? pointCloud.Colors[idx] : new Vector3(0.85f));
+                    if (finalNormals.Capacity > 0) finalNormals.Add(pointCloud.Normals[idx]);
+                    if (finalConfidence.Capacity > 0) finalConfidence.Add(pointCloud.Confidence[idx]);
+                }
+
+                pointCloud.Points = finalPoints;
+                pointCloud.Colors = finalColors;
+                pointCloud.Normals = finalNormals;
+                pointCloud.Confidence = finalConfidence;
+                pointCloud.UpdateBounds();
+                
+                progress?.Report($"Color filter removed {before - indices.Count:N0} points");
+                return before - indices.Count;
+            }, cancellationToken);
+        }
+
+        public static int RemoveFarPoints(PointCloudObject pointCloud, float maxDistance)
+        {
+            if (pointCloud.Points.Count == 0) return 0;
+            int before = pointCloud.Points.Count;
+            var outPoints = new List<Vector3>(before);
+            var outColors = new List<Vector3>(before);
+            var outNormals = pointCloud.Normals.Count == before ? new List<Vector3>(before) : new List<Vector3>();
+            var outConfidence = pointCloud.Confidence.Count == before ? new List<float>(before) : new List<float>();
+
+            for (int i = 0; i < before; i++)
+            {
+                if (pointCloud.Points[i].Length > maxDistance) continue;
+
+                outPoints.Add(pointCloud.Points[i]);
+                outColors.Add(i < pointCloud.Colors.Count ? pointCloud.Colors[i] : new Vector3(0.85f));
+                if (outNormals.Capacity > 0) outNormals.Add(pointCloud.Normals[i]);
+                if (outConfidence.Capacity > 0) outConfidence.Add(pointCloud.Confidence[i]);
+            }
+
+            pointCloud.Points = outPoints;
+            pointCloud.Colors = outColors;
+            pointCloud.Normals = outNormals;
+            pointCloud.Confidence = outConfidence;
+            pointCloud.UpdateBounds();
+            return before - pointCloud.Points.Count;
+        }
+
+        public static async Task<int> RemoveFarPointsAsync(
+            PointCloudObject pointCloud,
+            float maxDistance,
+            CancellationToken cancellationToken = default,
+            IProgress<string>? progress = null)
+        {
+            return await Task.Run(() =>
+            {
+                if (pointCloud.Points.Count == 0) return 0;
+                progress?.Report($"Removing points further than {maxDistance:F2}...");
+                int before = pointCloud.Points.Count;
+                var outIndices = new ConcurrentBag<int>();
+
+                Parallel.For(0, before, new ParallelOptions { CancellationToken = cancellationToken }, i =>
+                {
+                    if (pointCloud.Points[i].Length <= maxDistance) outIndices.Add(i);
+                });
+
+                var indices = outIndices.ToList();
+                indices.Sort();
+
+                var finalPoints = new List<Vector3>(indices.Count);
+                var finalColors = new List<Vector3>(indices.Count);
+                var finalNormals = pointCloud.Normals.Count == before ? new List<Vector3>(indices.Count) : new List<Vector3>();
+                var finalConfidence = pointCloud.Confidence.Count == before ? new List<float>(indices.Count) : new List<float>();
+
+                foreach (int idx in indices)
+                {
+                    finalPoints.Add(pointCloud.Points[idx]);
+                    finalColors.Add(idx < pointCloud.Colors.Count ? pointCloud.Colors[idx] : new Vector3(0.85f));
+                    if (finalNormals.Capacity > 0) finalNormals.Add(pointCloud.Normals[idx]);
+                    if (finalConfidence.Capacity > 0) finalConfidence.Add(pointCloud.Confidence[idx]);
+                }
+
+                pointCloud.Points = finalPoints;
+                pointCloud.Colors = finalColors;
+                pointCloud.Normals = finalNormals;
+                pointCloud.Confidence = finalConfidence;
+                pointCloud.UpdateBounds();
+
+                progress?.Report($"Distance filter removed {before - indices.Count:N0} points");
+                return before - indices.Count;
+            }, cancellationToken);
+        }
+
         public static PointCloudData ToData(PointCloudObject pointCloud)
         {
             return new PointCloudData

@@ -1213,6 +1213,174 @@ namespace Deep3DStudio
             });
         }
 
+        private void OnPointCloudRemoveColorRangeClicked(object? sender, EventArgs e)
+        {
+            ConfigurePointCloudColorFilter();
+        }
+
+        private void ConfigurePointCloudColorFilter()
+        {
+            var selected = GetSelectedPointClouds();
+            if (selected.Count == 0)
+            {
+                ShowMessage("Please select at least one point cloud first.");
+                return;
+            }
+
+            var dlg = new Dialog("Color Range Filter", this, DialogFlags.Modal);
+            dlg.SetDefaultSize(300, 150);
+            dlg.AddButton("Cancel", ResponseType.Cancel);
+            dlg.AddButton("Apply", ResponseType.Ok);
+
+            var area = dlg.ContentArea;
+            area.BorderWidth = 10;
+            area.Spacing = 8;
+
+            var colorBtn = new ColorButton { Color = new Gdk.Color((byte)(_pcFilterColor.X * 255), (byte)(_pcFilterColor.Y * 255), (byte)(_pcFilterColor.Z * 255)) };
+            var thresholdSpin = new SpinButton(0.0, 1.0, 0.01) { Digits = 3, Value = _pcFilterColorThreshold };
+
+            area.PackStart(new Label("Target Color"), false, false, 0);
+            area.PackStart(colorBtn, false, false, 0);
+            area.PackStart(new Label("Threshold"), false, false, 0);
+            area.PackStart(thresholdSpin, false, false, 0);
+            area.PackStart(new Label("Red = will be removed") { Opacity = 0.7 }, false, false, 0);
+
+            void UpdatePreview()
+            {
+                var c = colorBtn.Color;
+                var target = new Vector3(c.Red / 65535f, c.Green / 65535f, c.Blue / 65535f);
+                _pcFilterColor = target;
+                _pcFilterColorThreshold = (float)thresholdSpin.Value;
+                _viewport.SetColorFilterPreview(target, _pcFilterColorThreshold);
+            }
+
+            colorBtn.ColorSet += (s, e) => UpdatePreview();
+            thresholdSpin.ValueChanged += (s, e) => UpdatePreview();
+
+            UpdatePreview();
+            dlg.ShowAll();
+
+            if (dlg.Run() == (int)ResponseType.Ok)
+            {
+                _viewport.ClearFilterPreview();
+                ApplyPointCloudColorFilter(selected);
+            }
+            else
+            {
+                _viewport.ClearFilterPreview();
+            }
+            dlg.Destroy();
+        }
+
+        private void ApplyPointCloudColorFilter(List<PointCloudObject> selected)
+        {
+            Vector3 target = _pcFilterColor;
+            float threshold = _pcFilterColorThreshold;
+            ProgressDialog.Instance.Start("Filtering Color...", OperationType.Processing);
+
+            Task.Run(() => {
+                try {
+                    int totalRemoved = 0;
+                    for (int i = 0; i < selected.Count; i++) {
+                        var progress = new Progress<string>(msg => ProgressDialog.Instance.Log(msg));
+                        var removed = PointCloudOperations.RemoveColorRangeAsync(
+                            selected[i], target, threshold,
+                            ProgressDialog.Instance.CancellationTokenSource!.Token,
+                            progress).Result;
+                        totalRemoved += removed;
+                    }
+                    Application.Invoke((s, a) => {
+                        _viewport.FocusOnSelection();
+                        _viewport.QueueDraw();
+                        _statusLabel.Text = $"Color filter complete. Removed {totalRemoved:N0} points.";
+                        _isDirty = true;
+                        ProgressDialog.Instance.Complete();
+                    });
+                } catch (Exception ex) {
+                    Application.Invoke((s, a) => ProgressDialog.Instance.Fail(ex));
+                }
+            });
+        }
+
+        private void OnPointCloudRemoveFarPointsClicked(object? sender, EventArgs e)
+        {
+            ConfigurePointCloudFarPoints();
+        }
+
+        private void ConfigurePointCloudFarPoints()
+        {
+            var selected = GetSelectedPointClouds();
+            if (selected.Count == 0)
+            {
+                ShowMessage("Please select at least one point cloud first.");
+                return;
+            }
+
+            var dlg = new Dialog("Distance Filter", this, DialogFlags.Modal);
+            dlg.SetDefaultSize(300, 120);
+            dlg.AddButton("Cancel", ResponseType.Cancel);
+            dlg.AddButton("Apply", ResponseType.Ok);
+
+            var area = dlg.ContentArea;
+            area.BorderWidth = 10;
+            area.Spacing = 8;
+
+            var distSpin = new SpinButton(0.1, 100000.0, 1.0) { Value = _pcFilterMaxDist };
+            area.PackStart(new Label("Max Distance from Origin"), false, false, 0);
+            area.PackStart(distSpin, false, false, 0);
+            area.PackStart(new Label("Red = will be removed") { Opacity = 0.7 }, false, false, 0);
+
+            void UpdatePreview()
+            {
+                _pcFilterMaxDist = (float)distSpin.Value;
+                _viewport.SetDistanceFilterPreview(_pcFilterMaxDist);
+            }
+
+            distSpin.ValueChanged += (s, e) => UpdatePreview();
+            UpdatePreview();
+            dlg.ShowAll();
+
+            if (dlg.Run() == (int)ResponseType.Ok)
+            {
+                _viewport.ClearFilterPreview();
+                ApplyPointCloudDistanceFilter(selected);
+            }
+            else
+            {
+                _viewport.ClearFilterPreview();
+            }
+            dlg.Destroy();
+        }
+
+        private void ApplyPointCloudDistanceFilter(List<PointCloudObject> selected)
+        {
+            float maxDist = _pcFilterMaxDist;
+            ProgressDialog.Instance.Start("Filtering Distance...", OperationType.Processing);
+
+            Task.Run(() => {
+                try {
+                    int totalRemoved = 0;
+                    for (int i = 0; i < selected.Count; i++) {
+                        var progress = new Progress<string>(msg => ProgressDialog.Instance.Log(msg));
+                        var removed = PointCloudOperations.RemoveFarPointsAsync(
+                            selected[i], maxDist,
+                            ProgressDialog.Instance.CancellationTokenSource!.Token,
+                            progress).Result;
+                        totalRemoved += removed;
+                    }
+                    Application.Invoke((s, a) => {
+                        _viewport.FocusOnSelection();
+                        _viewport.QueueDraw();
+                        _statusLabel.Text = $"Distance filter complete. Removed {totalRemoved:N0} points.";
+                        _isDirty = true;
+                        ProgressDialog.Instance.Complete();
+                    });
+                } catch (Exception ex) {
+                    Application.Invoke((s, a) => ProgressDialog.Instance.Fail(ex));
+                }
+            });
+        }
+
         private void ConfigurePointCloudSkyBlue()
         {
             var dlg = new Dialog("Sky / Blue Filter", this, DialogFlags.Modal);
