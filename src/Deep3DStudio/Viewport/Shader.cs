@@ -66,6 +66,12 @@ namespace Deep3DStudio.Viewport
             GL.Uniform1(location, data ? 1 : 0);
         }
 
+        public void SetInt(string name, int data)
+        {
+            int location = GL.GetUniformLocation(Handle, name);
+            GL.Uniform1(location, data);
+        }
+
         private void CheckShaderCompileStatus(int shader)
         {
             GL.GetShader(shader, ShaderParameter.CompileStatus, out int success);

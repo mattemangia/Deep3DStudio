@@ -15,6 +15,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Linq;
 using Action = System.Action;
+using OpenTK.Mathematics;
 
 namespace Deep3DStudio
 {
@@ -101,6 +102,9 @@ namespace Deep3DStudio
         private float _pcSkyMaxRed = 0.60f;
         private float _pcSkyMaxGreen = 0.75f;
         private float _pcSkyBlueDominance = 0.08f;
+        private Vector3 _pcFilterColor = new Vector3(1, 1, 1);
+        private float _pcFilterColorThreshold = 0.1f;
+        private float _pcFilterMaxDist = 100.0f;
         private Scale? _pcVisibilityScale;
         private Label? _pcVisibilityLabel;
         private bool _updatingPointCloudVisibilityControls = false;

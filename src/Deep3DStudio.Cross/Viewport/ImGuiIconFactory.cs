@@ -86,7 +86,9 @@ namespace Deep3DStudio.Viewport
         LassoSelect,
         RectSelect,
         ShrinkSelection,
-        SplittingPlane
+        SplittingPlane,
+        ColorFilter,
+        DistanceFilter
     }
 
     public class ImGuiIconFactory : IDisposable

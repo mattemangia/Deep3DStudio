@@ -15,6 +15,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using System.Linq;
 using Action = System.Action;
+using OpenTK.Mathematics;
 
 namespace Deep3DStudio
 {
