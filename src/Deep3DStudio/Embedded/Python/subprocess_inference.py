@@ -1460,9 +1460,27 @@ def infer_triposr(images_data, resolution=256, mc_resolution=256):
                 for f in faces:
                     face_indices.extend(f)
 
+                # Extract vertex colors from mesh if available
+                colors = [[0.8, 0.8, 0.8]] * len(verts)  # fallback gray
+                if hasattr(mesh, 'visual') and hasattr(mesh.visual, 'vertex_colors') and mesh.visual.vertex_colors is not None:
+                    vc = mesh.visual.vertex_colors
+                    if hasattr(vc, 'tolist'):
+                        vc_np = np.array(vc[:, :3], dtype=np.float32)
+                        if vc_np.max() > 1.0:
+                            vc_np = vc_np / 255.0
+                        colors = vc_np.tolist()
+                    else:
+                        colors = [[c / 255.0 for c in row[:3]] for row in vc]
+                elif hasattr(mesh, 'vertex_colors') and mesh.vertex_colors is not None:
+                    vc = mesh.vertex_colors
+                    if hasattr(vc, 'cpu'):
+                        colors = vc.cpu().numpy().tolist()
+                    else:
+                        colors = list(vc)
+
                 results.append({
                     'vertices': verts,
-                    'colors': [[0.8, 0.8, 0.8]] * len(verts),  # Default gray
+                    'colors': colors,
                     'faces': face_indices,
                     'image_index': 0
                 })
@@ -1686,11 +1704,11 @@ def infer_wonder3d(images_data, num_steps=50, guidance_scale=3.0):
         return {"success": False, "error": str(e)}
 
 def infer_lgm(images_data):
-    """LGM (Large Gaussian Model) inference - generates 3D gaussians from multi-view images"""
+    """LGM (Large Gaussian Model) inference - single image to 3D gaussians"""
     import torch
-    import torch.nn.functional as F
     import numpy as np
     from PIL import Image
+    from torchvision import transforms
 
     model = loaded_models.get('lgm')
     if not model:
@@ -1702,61 +1720,73 @@ def infer_lgm(images_data):
             return {"success": False, "error": "No images"}
 
         device = next(model.parameters()).device
-        opt = model.opt
+        img = pil_images[0].convert('RGB')
 
-        # Prepare input: LGM expects 4 views with specific preprocessing
-        # If we have less than 4 images, repeat the first image
-        while len(pil_images) < 4:
-            pil_images.append(pil_images[0].copy())
+        # Try single-image approach first (matches inference_bridge.py)
+        # Normalize to [-1, 1] range as expected by LGM
+        opt = model.opt if hasattr(model, 'opt') else None
+        resolution = opt.input_size if opt and hasattr(opt, 'input_size') else 512
+        img = img.resize((resolution, resolution), Image.LANCZOS)
 
-        # Process images
-        input_size = opt.input_size
-        images_tensor = []
-        for img in pil_images[:4]:
-            # Resize to input size
-            img = img.convert('RGB').resize((input_size, input_size), Image.LANCZOS)
-            img_np = np.array(img).astype(np.float32) / 255.0
-            img_tensor = torch.from_numpy(img_np).permute(2, 0, 1)  # [3, H, W]
-            images_tensor.append(img_tensor)
-
-        images_tensor = torch.stack(images_tensor, dim=0)  # [4, 3, H, W]
-
-        # Prepare rays embedding
-        rays_embeddings = model.prepare_default_rays(device)  # [4, 6, H, W]
-
-        # Concatenate images with ray embeddings
-        images_input = torch.cat([images_tensor.to(device), rays_embeddings], dim=1)  # [4, 9, H, W]
-        images_input = images_input.unsqueeze(0)  # [1, 4, 9, H, W]
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+        ])
+        img_tensor = transform(img).unsqueeze(0).to(device)
 
         results = []
         with torch.no_grad():
-            # Generate gaussians
-            gaussians = model.forward_gaussians(images_input)  # [1, N, 14]
+            # Try direct forward pass (single-image LGM)
+            if hasattr(model, 'forward') and 'num_steps' in model.forward.__code__.co_varnames:
+                gaussians = model(img_tensor, num_steps=25)
+            else:
+                gaussians = model(img_tensor)
 
-            # Extract gaussian parameters
-            gaussians = gaussians[0]  # [N, 14]
-            pos = gaussians[:, 0:3].cpu().numpy()  # positions
-            opacity = gaussians[:, 3:4].cpu().numpy()  # opacity
-            rgb = gaussians[:, 11:14].cpu().numpy()  # colors
+            if isinstance(gaussians, dict) and 'means3D' in gaussians:
+                # Dict output format: {'means3D': tensor, 'rgb': tensor, ...}
+                means = gaussians['means3D'].squeeze(0).cpu().numpy()
+                if 'rgb' in gaussians:
+                    colors = gaussians['rgb'].squeeze(0).cpu().numpy()
+                else:
+                    colors = np.ones_like(means) * 0.5
 
-            # Filter by opacity threshold
-            mask = opacity.squeeze() > 0.1
-            pos = pos[mask]
-            rgb = rgb[mask]
+                log(f"LGM generated {len(means)} gaussian splats (single-image mode)")
 
-            log(f"LGM generated {len(pos)} gaussian splats")
+                results.append({
+                    'vertices': means.tolist(),
+                    'colors': colors.tolist(),
+                    'faces': [],
+                    'image_index': 0,
+                    'type': 'gaussians'
+                })
+            elif isinstance(gaussians, torch.Tensor):
+                # Tensor output [1, N, 14]: pos(3), opacity(1), scale(3), rotation(4), rgb(3)
+                gaussians = gaussians[0]  # [N, 14]
+                pos = gaussians[:, 0:3].cpu().numpy()
+                opacity = gaussians[:, 3:4].cpu().numpy()
+                rgb = gaussians[:, 11:14].cpu().numpy()
 
-            results.append({
-                'vertices': [[float(x) for x in p] for p in pos],
-                'colors': [[float(x) for x in c] for c in rgb],
-                'faces': [],
-                'image_index': 0,
-                'type': 'gaussians'
-            })
+                # Filter by opacity threshold
+                mask = opacity.squeeze() > 0.1
+                pos = pos[mask]
+                rgb = rgb[mask]
+
+                log(f"LGM generated {len(pos)} gaussian splats (tensor mode)")
+
+                results.append({
+                    'vertices': pos.tolist(),
+                    'colors': rgb.tolist(),
+                    'faces': [],
+                    'image_index': 0,
+                    'type': 'gaussians'
+                })
+            else:
+                log(f"LGM: unexpected output type: {type(gaussians)}")
+                return {"success": False, "error": f"Unexpected LGM output type: {type(gaussians)}"}
 
         clear_gpu()
-        for img in pil_images:
-            img.close()
+        for img_pil in pil_images:
+            img_pil.close()
 
         return {"success": True, "results": results}
 

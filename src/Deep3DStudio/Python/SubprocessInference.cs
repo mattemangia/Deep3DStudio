@@ -874,60 +874,24 @@ namespace Deep3DStudio.Python
                 TryRunMacHealthcheck();
             }
 
-            try
+            // Skip launching a separate subprocess to load the model.
+            // Each Infer() call spawns a new Python process that loads the model
+            // via _ensure_loaded() anyway, so a separate Load subprocess is wasted
+            // work — the model is discarded when that process exits.
+            OnProgress?.Invoke("load", 0.5f, $"Configuring {_modelName}...");
+
+            // Validate weights path if it's a local path (not a HuggingFace model ID)
+            if (!string.IsNullOrEmpty(weightsPath) &&
+                !weightsPath.Contains('/') &&
+                !File.Exists(weightsPath) && !Directory.Exists(weightsPath))
             {
-                OnProgress?.Invoke("load", 0.1f, $"Loading {_modelName}...");
-
-                string args = $"--command load --model {_modelName} --weights \"{weightsPath}\" --device {device}";
-                var (exitCode, stdout, stderr) = RunPythonCommand(args, 600000); // 10 min timeout for loading
-
-                if (exitCode == 0)
-                {
-                    try
-                    {
-                        var result = JsonSerializer.Deserialize<Dictionary<string, object>>(stdout, JsonOptions);
-                        if (result != null && result.TryGetValue("success", out var success))
-                        {
-                            if (success is JsonElement je && je.GetBoolean())
-                            {
-                                _isLoaded = true;
-                                OnProgress?.Invoke("load", 1.0f, $"{_modelName} loaded successfully");
-                                Log("Model loaded successfully");
-                                return true;
-                            }
-                        }
-                    }
-                    catch (JsonException)
-                    {
-                        // stdout might have extra content, try to find JSON
-                        int jsonStart = stdout.IndexOf('{');
-                        if (jsonStart >= 0)
-                        {
-                            string jsonStr = stdout.Substring(jsonStart);
-                            var result = JsonSerializer.Deserialize<Dictionary<string, object>>(jsonStr, JsonOptions);
-                            if (result != null && result.TryGetValue("success", out var success))
-                            {
-                                if (success is JsonElement je && je.GetBoolean())
-                                {
-                                    _isLoaded = true;
-                                    OnProgress?.Invoke("load", 1.0f, $"{_modelName} loaded successfully");
-                                    return true;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Log($"Failed to load model. Exit code: {exitCode}");
-                Log($"stdout: {stdout}");
-                Log($"stderr: {stderr}");
-                return false;
+                Log($"Warning: Weights path not found: {weightsPath}");
             }
-            catch (Exception ex)
-            {
-                Log($"Exception during load: {ex.Message}");
-                return false;
-            }
+
+            _isLoaded = true;
+            OnProgress?.Invoke("load", 1.0f, $"{_modelName} configured");
+            Log($"Model configured (will load on first inference)");
+            return true;
         }
 
         private void TryRunMacHealthcheck()
