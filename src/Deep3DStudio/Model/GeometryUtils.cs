@@ -326,38 +326,61 @@ namespace Deep3DStudio.Model
             if (source.Vertices.Count == 0 || target.Vertices.Count == 0)
                 return (0, float.MaxValue, 0);
 
-            var targetSet = new HashSet<(int, int, int)>();
             float cellSize = distanceThreshold;
+            var targetBuckets = new Dictionary<(int, int, int), List<Vector3>>();
 
             foreach (var v in target.Vertices)
             {
-                int cx = (int)(v.X / cellSize);
-                int cy = (int)(v.Y / cellSize);
-                int cz = (int)(v.Z / cellSize);
-                targetSet.Add((cx, cy, cz));
+                int cx = (int)Math.Floor(v.X / cellSize);
+                int cy = (int)Math.Floor(v.Y / cellSize);
+                int cz = (int)Math.Floor(v.Z / cellSize);
+                var key = (cx, cy, cz);
+                if (!targetBuckets.ContainsKey(key))
+                    targetBuckets[key] = new List<Vector3>();
+                targetBuckets[key].Add(v);
             }
 
             int matches = 0;
             float sumSqDist = 0;
+            float sqThreshold = distanceThreshold * distanceThreshold;
 
             foreach (var v in source.Vertices)
             {
                 var transformed = TransformPoint(v, transform);
-                int cx = (int)(transformed.X / cellSize);
-                int cy = (int)(transformed.Y / cellSize);
-                int cz = (int)(transformed.Z / cellSize);
+                int cx = (int)Math.Floor(transformed.X / cellSize);
+                int cy = (int)Math.Floor(transformed.Y / cellSize);
+                int cz = (int)Math.Floor(transformed.Z / cellSize);
 
-                bool found = false;
-                for (int dx = -1; dx <= 1 && !found; dx++)
-                    for (int dy = -1; dy <= 1 && !found; dy++)
-                        for (int dz = -1; dz <= 1 && !found; dz++)
-                            if (targetSet.Contains((cx + dx, cy + dy, cz + dz)))
-                                found = true;
+                float minSqDist = float.MaxValue;
+                bool foundAny = false;
 
-                if (found)
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        for (int dz = -1; dz <= 1; dz++)
+                        {
+                            var key = (cx + dx, cy + dy, cz + dz);
+                            if (targetBuckets.TryGetValue(key, out var bucket))
+                            {
+                                foreach (var tv in bucket)
+                                {
+                                    float distSq = (transformed - tv).LengthSquared;
+                                    if (distSq < minSqDist)
+                                    {
+                                        minSqDist = distSq;
+                                        foundAny = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (foundAny && minSqDist <= sqThreshold)
                 {
                     matches++;
-                    sumSqDist += cellSize * cellSize * 0.5f;
+                    sumSqDist += minSqDist;
                 }
             }
 
