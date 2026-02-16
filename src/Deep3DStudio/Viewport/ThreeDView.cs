@@ -3226,11 +3226,22 @@ namespace Deep3DStudio.Viewport
                 var screenPos = Project(center, _viewMatrix, _projectionMatrix, w, h);
                 float dist = (screenPos - mouse).Length;
 
-                // Simple distance check to center
+                // Also check distance to object's world position (origin)
+                // This is crucial for objects with large bounds (like cameras with large frustums)
+                // where the center might be far from the visual representation.
+                var worldTransform = obj.GetWorldTransform();
+                var worldOrigin = worldTransform.ExtractTranslation();
+                var screenPosOrigin = Project(worldOrigin, _viewMatrix, _projectionMatrix, w, h);
+                float distOrigin = (screenPosOrigin - mouse).Length;
+
+                // Use the closest relevant point
+                float bestDist = Math.Min(dist, distOrigin);
+
+                // Simple distance check to center or origin
                 // A better approach would be ray-AABB intersection
-                if (dist < 50 && dist < minDist)
+                if (bestDist < 50 && bestDist < minDist)
                 {
-                    minDist = dist;
+                    minDist = bestDist;
                     closest = obj;
                 }
             }
