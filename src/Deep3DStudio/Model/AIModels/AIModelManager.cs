@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Diagnostics;
 using Deep3DStudio.Configuration;
 using Deep3DStudio.Meshing;
 using Deep3DStudio.Model.SfM;
@@ -335,7 +336,7 @@ namespace Deep3DStudio.Model.AIModels
                         }
                         catch (Exception callbackEx)
                         {
-                            Console.WriteLine($"[AIModelManager] ProgressUpdated callback failed: {callbackEx.Message}");
+                            Debug.WriteLine($"[AIModelManager] ProgressUpdated callback failed: {callbackEx.Message}");
                         }
 
                         try
@@ -344,7 +345,7 @@ namespace Deep3DStudio.Model.AIModels
                         }
                         catch (Exception callbackEx)
                         {
-                            Console.WriteLine($"[AIModelManager] progressCallback failed: {callbackEx.Message}");
+                            Debug.WriteLine($"[AIModelManager] progressCallback failed: {callbackEx.Message}");
                         }
                     }
 
@@ -951,7 +952,7 @@ namespace Deep3DStudio.Model.AIModels
                     }
                     catch (Exception callbackEx)
                     {
-                        Console.WriteLine($"[AIModelManager] progressCallback failed: {callbackEx.Message}");
+                        Debug.WriteLine($"[AIModelManager] progressCallback failed: {callbackEx.Message}");
                     }
                 }
                 else
@@ -962,7 +963,7 @@ namespace Deep3DStudio.Model.AIModels
                     }
                     catch (Exception callbackEx)
                     {
-                        Console.WriteLine($"[AIModelManager] progressCallback failed: {callbackEx.Message}");
+                        Debug.WriteLine($"[AIModelManager] progressCallback failed: {callbackEx.Message}");
                     }
                 }
 
