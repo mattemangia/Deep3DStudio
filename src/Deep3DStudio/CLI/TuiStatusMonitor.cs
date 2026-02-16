@@ -402,9 +402,6 @@ namespace Deep3DStudio.CLI
                         
                         int topRow = Math.Max(0, _logView.Lines - height);
                         _logView.ScrollTo(topRow);
-                        
-                        // Debug log to verify scrolling logic
-                        // try { File.AppendAllText("tui_debug.log", $"Scroll: Lines={_logView.Lines}, Height={height}, TopRow={topRow}\n"); } catch { }
                     }
                         
                     _logView.SetNeedsDisplay();
