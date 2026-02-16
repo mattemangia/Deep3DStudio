@@ -474,8 +474,7 @@ namespace Deep3DStudio.Scene
         public CameraObject(string name) : base(name)
         {
             ObjectType = SceneObjectType.Camera;
-            BoundsMin = new Vector3(-0.1f);
-            BoundsMax = new Vector3(0.1f);
+            UpdateBounds();
         }
 
         public CameraObject(string name, CameraPose pose) : base(name)
@@ -491,8 +490,7 @@ namespace Deep3DStudio.Scene
             var pos = pose.CameraToWorld.ExtractTranslation();
             Position = pos;
 
-            BoundsMin = new Vector3(-0.1f);
-            BoundsMax = new Vector3(0.1f);
+            UpdateBounds();
         }
 
         /// <summary>
@@ -563,9 +561,28 @@ namespace Deep3DStudio.Scene
 
         public override void UpdateBounds()
         {
-            // Camera bounds are fixed for now
-            BoundsMin = new Vector3(-FrustumScale);
-            BoundsMax = new Vector3(FrustumScale);
+            float halfFovRad = MathHelper.DegreesToRadians(FieldOfView * 0.5f);
+            float tanHalfFov = (float)Math.Tan(halfFovRad);
+
+            // Calculate dimensions at far plane (largest extent)
+            float halfHeightFar = FarPlane * tanHalfFov;
+            float halfWidthFar = halfHeightFar * AspectRatio;
+
+            // In camera space, looking down -Z axis.
+            // Z ranges from -FarPlane to -NearPlane.
+            // BoundsMin is the corner with minimum coordinates (most negative).
+            // BoundsMax is the corner with maximum coordinates (most positive).
+
+            // X: [-halfWidthFar, +halfWidthFar]
+            // Y: [-halfHeightFar, +halfHeightFar]
+            // Z: [-FarPlane, -NearPlane] (assuming standard camera looking down -Z)
+
+            // Ensure the camera center (0,0,0) is included for usability (picking/framing)
+            float minZ = -FarPlane;
+            float maxZ = Math.Max(0, -NearPlane);
+
+            BoundsMin = new Vector3(-halfWidthFar, -halfHeightFar, minZ);
+            BoundsMax = new Vector3(halfWidthFar, halfHeightFar, maxZ);
         }
 
         public override SceneObject Clone()
