@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Deep3DStudio", "src\Deep3DS
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Deep3DStudio.Cross", "src\Deep3DStudio.Cross\Deep3DStudio.Cross.csproj", "{5322099A-E128-4B7F-8636-8F435321E107}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Deep3DStudio.Tests", "src\Deep3DStudio.Tests\Deep3DStudio.Tests.csproj", "{10B4C3DB-A8FF-4EC7-9173-59025F48F78E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,9 +28,14 @@ Global
 		{5322099A-E128-4B7F-8636-8F435321E107}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5322099A-E128-4B7F-8636-8F435321E107}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5322099A-E128-4B7F-8636-8F435321E107}.Release|Any CPU.Build.0 = Release|Any CPU
+		{10B4C3DB-A8FF-4EC7-9173-59025F48F78E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{10B4C3DB-A8FF-4EC7-9173-59025F48F78E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{10B4C3DB-A8FF-4EC7-9173-59025F48F78E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{10B4C3DB-A8FF-4EC7-9173-59025F48F78E}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{DEF09A4E-E2E1-4D2F-A2ED-7A0195B01399} = {0098835A-B9BF-4955-9D0D-D4769293F586}
 		{5322099A-E128-4B7F-8636-8F435321E107} = {0098835A-B9BF-4955-9D0D-D4769293F586}
+		{10B4C3DB-A8FF-4EC7-9173-59025F48F78E} = {0098835A-B9BF-4955-9D0D-D4769293F586}
 	EndGlobalSection
 EndGlobal
