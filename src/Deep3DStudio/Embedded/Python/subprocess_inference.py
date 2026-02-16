@@ -1167,8 +1167,15 @@ def infer_must3r(images_data, use_retrieval=True):
                 num_refinements_iterations=0
             )
 
-        # Combine results
-        all_outputs = x_out_0 + x_out if x_out else x_out_0
+        # Prefer rendered results (x_out, full memory context) over first-pass (x_out_0)
+        if x_out and len(x_out) > 0:
+            all_outputs = list(x_out)
+            # Fill in any None entries from first-pass results
+            for idx in range(len(all_outputs)):
+                if all_outputs[idx] is None and idx < len(x_out_0) and x_out_0[idx] is not None:
+                    all_outputs[idx] = x_out_0[idx]
+        else:
+            all_outputs = list(x_out_0) if x_out_0 else []
 
         # Extract point cloud and poses from outputs
         results = []
@@ -1187,7 +1194,7 @@ def infer_must3r(images_data, use_retrieval=True):
                     if c2w_np.ndim == 3 and c2w_np.shape[0] == 1:
                         c2w_np = c2w_np[0]
                     if c2w_np.shape == (4, 4):
-                        pose_c2w = c2w_np.tolist()
+                        pose_c2w = c2w_np.T.tolist()  # Transpose for OpenTK row-vector convention
                 elif 'world_view_transform' in all_outputs[i]:
                     w2c_t = all_outputs[i]['world_view_transform']
                     if hasattr(w2c_t, 'inverse'):
@@ -1198,7 +1205,7 @@ def infer_must3r(images_data, use_retrieval=True):
                         if c2w_np.ndim == 3 and c2w_np.shape[0] == 1:
                             c2w_np = c2w_np[0]
                         if c2w_np.shape == (4, 4):
-                            pose_c2w = c2w_np.tolist()
+                            pose_c2w = c2w_np.T.tolist()  # Transpose for OpenTK row-vector convention
 
                 # Get colors from image
                 h, w = pts.shape[:2]
@@ -1252,8 +1259,218 @@ def infer_must3r(images_data, use_retrieval=True):
         traceback.print_exc(file=sys.stderr)
         return {"success": False, "error": str(e)}
 
+def _load_images_for_mast3r(pil_images, size=512, device='cpu'):
+    """Load PIL images with [-1,1] normalization matching dust3r's ImgNorm.
+    dust3r's ImgNorm = ToTensor() + Normalize((0.5,0.5,0.5),(0.5,0.5,0.5))
+    which gives (pixel/255 - 0.5) / 0.5 = pixel/127.5 - 1  -> range [-1, 1]
+    This is REQUIRED for MASt3R's sparse_global_alignment (forward_mast3r uses
+    image tensors directly without additional normalization).
+    """
+    import torch
+    import numpy as np
+    from PIL import Image
+
+    patch_size = 16
+    result = []
+    for idx, img in enumerate(pil_images):
+        W1, H1 = img.size
+        # Resize long side to target size (same as dust3r load_images)
+        img_resized = img.convert('RGB')
+        if max(W1, H1) != size:
+            ratio = size / max(W1, H1)
+            new_W, new_H = int(W1 * ratio + 0.5), int(H1 * ratio + 0.5)
+            img_resized = img_resized.resize((new_W, new_H), Image.LANCZOS)
+
+        W, H = img_resized.size
+        cx, cy = W // 2, H // 2
+        # Crop to multiple of patch_size (same as dust3r load_images)
+        halfw = ((2 * cx) // patch_size) * patch_size / 2
+        halfh = ((2 * cy) // patch_size) * patch_size / 2
+        if W == H:
+            halfh = 3 * halfw / 4
+        img_cropped = img_resized.crop((cx - halfw, cy - halfh, cx + halfw, cy + halfh))
+        W2, H2 = img_cropped.size
+
+        # Normalize to [-1, 1] (matches dust3r's ImgNorm exactly)
+        img_np = np.array(img_cropped, dtype=np.float32) / 255.0
+        img_tensor = torch.from_numpy(img_np).permute(2, 0, 1)  # CxHxW in [0, 1]
+        img_tensor = (img_tensor - 0.5) / 0.5  # normalize to [-1, 1]
+
+        result.append({
+            'img': img_tensor[None].to(device),  # 1xCxHxW
+            'true_shape': np.int32([[H2, W2]]),
+            'idx': idx,
+            'instance': str(idx)
+        })
+        log(f"MASt3R image {idx}: {W1}x{H1} -> {W2}x{H2} (normalized [-1,1])")
+    return result
+
+
+def _infer_mast3r_native(images_data, use_retrieval=True):
+    """MASt3R inference using its native sparse global alignment pipeline.
+    Follows the official MASt3R demo pattern:
+    1. Load images with proper [-1,1] normalization
+    2. Create pairs, call sparse_global_alignment
+    3. Extract dense pts3d, poses, colors from SparseGA result
+    """
+    import torch
+    import numpy as np
+    import tempfile
+    import shutil
+    from PIL import Image
+    from dust3r.image_pairs import make_pairs
+    from mast3r.cloud_opt.sparse_ga import sparse_global_alignment
+
+    model = loaded_models.get('mast3r')
+    if not model:
+        return {"success": False, "error": "mast3r not loaded"}
+
+    cache_dir = None
+    try:
+        device = next(model.parameters()).device
+        pil_images = decode_images(images_data)
+
+        if len(pil_images) == 0:
+            return {"success": False, "error": "No images"}
+
+        # Load with proper [-1,1] normalization (critical for MASt3R)
+        imgs = _load_images_for_mast3r(pil_images, size=512, device=device)
+        n = len(imgs)
+        filelist = [str(i) for i in range(n)]
+
+        if n == 1:
+            import copy
+            imgs = [imgs[0], copy.deepcopy(imgs[0])]
+            imgs[1]['idx'] = 1
+            imgs[1]['instance'] = '1'
+            filelist = ['0', '1']
+            n = 2
+
+        scene_graph = 'complete' if n <= 8 else 'swin-4'
+        pairs = make_pairs(imgs, scene_graph=scene_graph, prefilter=None, symmetrize=True)
+        log(f"MASt3R: {n} images, {len(pairs)} pairs, graph={scene_graph}")
+
+        # sparse_global_alignment handles: forward pass + matching + 3D optimization
+        cache_dir = tempfile.mkdtemp(prefix='mast3r_cache_')
+        log("Running MASt3R sparse global alignment...")
+        scene = sparse_global_alignment(
+            filelist, pairs, cache_dir, model,
+            device=device, subsample=8
+        )
+
+        # Extract results (same as official demo's get_3D_model_from_scene)
+        rgbimgs = scene.imgs  # list of HxWx3 numpy arrays (0-1 range)
+        cams2world = scene.get_im_poses().cpu().numpy()  # Nx4x4 c2w matrices
+        pts3d_list, _, confs_list = scene.get_dense_pts3d(clean_depth=True)
+
+        results = []
+        for i in range(n):
+            # Transpose c2w for OpenTK row-vector convention:
+            # Python c2w has translation in column 3 (M[0:3,3])
+            # OpenTK Matrix4.ExtractTranslation() reads Row3 (M41,M42,M43)
+            # Transposing moves column→row so OpenTK reads it correctly.
+            pose_c2w = cams2world[i].T.tolist()
+
+            pts = pts3d_list[i]
+            if hasattr(pts, 'detach'):
+                pts = pts.detach().cpu().numpy()
+            else:
+                pts = np.asarray(pts)
+
+            conf = confs_list[i]
+            if hasattr(conf, 'detach'):
+                conf = conf.detach().cpu().numpy()
+            else:
+                conf = np.asarray(conf)
+
+            # Colors from scene (already at correct resolution, 0-1 range)
+            img_np = np.asarray(rgbimgs[i])
+
+            # Ensure pts is 3D (H,W,3) and conf is 2D (H,W)
+            # get_dense_pts3d may return flat tensors depending on version
+            if pts.ndim == 1:
+                # flat array, reshape to (H,W,3) using conf shape as reference
+                if conf.ndim == 2:
+                    H, W = conf.shape
+                    pts = pts.reshape(H, W, 3)
+                else:
+                    n_pts = len(pts) // 3
+                    side = int(np.sqrt(n_pts))
+                    pts = pts.reshape(side, -1, 3)
+            elif pts.ndim == 2 and pts.shape[-1] == 3:
+                # (N, 3) flat list of points - reshape using conf
+                if conf.ndim == 2:
+                    H, W = conf.shape
+                    if pts.shape[0] == H * W:
+                        pts = pts.reshape(H, W, 3)
+
+            if conf.ndim == 1 and pts.ndim == 3:
+                conf = conf.reshape(pts.shape[:2])
+
+            log(f"MASt3R image {i}: pts shape={pts.shape}, conf shape={conf.shape}, img shape={img_np.shape}")
+
+            # Confidence mask: conf > 2 is the official demo default (min_conf_thr=2)
+            finite_mask = np.isfinite(pts).all(axis=-1) if pts.ndim == 3 else np.isfinite(pts.reshape(-1, 3)).all(axis=-1).reshape(conf.shape)
+            mask = (conf > 2.0) & finite_mask
+
+            # Fallback if too sparse
+            if int(mask.sum()) < 1000:
+                mask = (conf > 1.0) & finite_mask
+            if int(mask.sum()) < 100:
+                mask = finite_mask
+
+            if pts.ndim == 3:
+                valid_pts = pts[mask].reshape(-1, 3)
+                if img_np.shape[:2] == pts.shape[:2]:
+                    valid_colors = img_np[mask].reshape(-1, 3)
+                else:
+                    # Resize image to match pts grid
+                    from PIL import Image as PILImage
+                    img_pil = PILImage.fromarray((img_np * 255).astype(np.uint8) if img_np.max() <= 1.0 else img_np.astype(np.uint8))
+                    img_pil = img_pil.resize((pts.shape[1], pts.shape[0]), PILImage.LANCZOS)
+                    img_resized = np.array(img_pil).astype(np.float32) / 255.0
+                    valid_colors = img_resized[mask].reshape(-1, 3)
+            else:
+                valid_pts = pts.reshape(-1, 3)
+                valid_colors = np.ones((len(valid_pts), 3)) * 0.7
+
+            valid_pts, valid_colors = _sanitize_points_colors(valid_pts, valid_colors)
+            if len(valid_colors) != len(valid_pts):
+                valid_colors = np.ones((len(valid_pts), 3)) * 0.7
+
+            if len(valid_pts) == 0:
+                log(f"MASt3R image {i}: 0 points (skipped)")
+                continue
+
+            results.append({
+                'vertices': valid_pts.tolist(),
+                'colors': valid_colors.tolist(),
+                'faces': [],
+                'image_index': i,
+                'pose': pose_c2w
+            })
+            log(f"MASt3R image {i}: {len(valid_pts)} points")
+
+        clear_gpu()
+        for img in pil_images:
+            img.close()
+
+        return {"success": True, "results": results}
+
+    except Exception as e:
+        log(f"MASt3R Error: {e}")
+        traceback.print_exc(file=sys.stderr)
+        return {"success": False, "error": str(e)}
+    finally:
+        if cache_dir:
+            try:
+                shutil.rmtree(cache_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+
 def infer_stereo_model(model_name, images_data, use_retrieval=True):
-    """Inference for MASt3R/DUSt3R (stereo reconstruction models)"""
+    """Inference for DUSt3R (stereo reconstruction model)"""
     import torch
     import numpy as np
     from PIL import Image
@@ -1263,6 +1480,11 @@ def infer_stereo_model(model_name, images_data, use_retrieval=True):
     # MUSt3R has its own inference path
     if model_name == 'must3r':
         return infer_must3r(images_data, use_retrieval)
+
+    # MASt3R uses its own pipeline (sparse_global_alignment) which requires
+    # properly normalized images via dust3r's load_images ([-1,1] range)
+    if model_name == 'mast3r':
+        return _infer_mast3r_native(images_data, use_retrieval)
 
     model = loaded_models.get(model_name)
     if not model:
@@ -1374,7 +1596,7 @@ def infer_stereo_model(model_name, images_data, use_retrieval=True):
 
             return fallback_results
 
-        # Global alignment
+        # Global alignment (DUSt3R only - MASt3R is handled by _infer_mast3r_native)
         results = []
         if _has_torchvision_nms():
             try:
@@ -1393,7 +1615,8 @@ def infer_stereo_model(model_name, images_data, use_retrieval=True):
                 for i, img in enumerate(pil_images):
                     pts = pts3d[i].detach().cpu().numpy()
                     mask = masks[i].detach().cpu().numpy()
-                    pose_c2w = poses[i].detach().cpu().numpy().tolist() # 4x4 list of lists
+                    # Transpose for OpenTK row-vector convention (translation in Row3)
+                    pose_c2w = poses[i].detach().cpu().numpy().T.tolist()
 
                     h, w = pts.shape[:2]
                     if img.size != (w, h):
