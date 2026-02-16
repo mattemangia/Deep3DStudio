@@ -315,7 +315,7 @@ namespace Deep3DStudio.Python
             throw new FileNotFoundException("Could not find subprocess_inference.py embedded resource");
         }
 
-        private (int exitCode, string stdout, string stderr) RunPythonCommand(string arguments, int timeoutMs = 300000, CancellationToken cancellationToken = default)
+        private (int exitCode, string stdout, string stderr) RunPythonCommand(IEnumerable<string> arguments, int timeoutMs = 300000, CancellationToken cancellationToken = default)
         {
             LastOpenMpShmError = false;
             LastErrorMessage = null;
@@ -600,11 +600,21 @@ namespace Deep3DStudio.Python
             }
         }
 
-        private static bool IsProfileSensitiveCommand(string arguments)
+        private static bool IsProfileSensitiveCommand(IEnumerable<string> arguments)
         {
-            return arguments.Contains("--command load", StringComparison.Ordinal)
-                || arguments.Contains("--command ping", StringComparison.Ordinal)
-                || arguments.Contains("--command healthcheck", StringComparison.Ordinal);
+            bool nextIsCommand = false;
+            foreach (var arg in arguments)
+            {
+                if (nextIsCommand)
+                {
+                    return arg == "load" || arg == "ping" || arg == "healthcheck";
+                }
+                if (arg == "--command")
+                {
+                    nextIsCommand = true;
+                }
+            }
+            return false;
         }
 
         private static bool IsMacRuntimeBootstrapError(int exitCode, string stderr)
@@ -698,13 +708,14 @@ namespace Deep3DStudio.Python
         }
 
         private (int exitCode, string stdout, string stderr) RunPythonCommandInternal(
-            string arguments,
+            IEnumerable<string> arguments,
             int timeoutMs = 300000,
             CancellationToken cancellationToken = default,
             bool safeOpenMpMode = false,
             MacRuntimeProfile? macProfile = null)
         {
-            Log($"Running: {_pythonPath} {_scriptPath} {arguments}");
+            var logArgs = string.Join(" ", arguments.Select(a => a.Contains(" ") ? $"\"{a}\"" : a));
+            Log($"Running: {_pythonPath} \"{_scriptPath}\" {logArgs}");
             if (safeOpenMpMode)
             {
                 Log("Applying safe OpenMP environment for this run");
@@ -719,7 +730,6 @@ namespace Deep3DStudio.Python
             var psi = new ProcessStartInfo
             {
                 FileName = _pythonPath,
-                Arguments = $"\"{_scriptPath}\" {arguments}",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -727,6 +737,12 @@ namespace Deep3DStudio.Python
                 StandardOutputEncoding = Encoding.UTF8,
                 StandardErrorEncoding = Encoding.UTF8
             };
+
+            psi.ArgumentList.Add(_scriptPath);
+            foreach (var arg in arguments)
+            {
+                psi.ArgumentList.Add(arg);
+            }
 
             // Set up environment - add Python directory to PATH
             string pythonDir = Path.GetDirectoryName(_pythonPath) ?? "";
@@ -905,7 +921,7 @@ namespace Deep3DStudio.Python
             {
                 string deviceArg = string.IsNullOrWhiteSpace(_device) ? "auto" : _device;
                 string modelArg = string.IsNullOrWhiteSpace(_modelName) ? "dust3r" : _modelName;
-                string args = $"--command healthcheck --model {modelArg} --device {deviceArg}";
+                var args = new List<string> { "--command", "healthcheck", "--model", modelArg, "--device", deviceArg };
                 var (exitCode, stdout, stderr) = RunPythonCommand(args, 120000);
                 if (exitCode == 0)
                 {
@@ -930,7 +946,7 @@ namespace Deep3DStudio.Python
 
             try
             {
-                string args = $"--command unload --model {_modelName}";
+                var args = new List<string> { "--command", "unload", "--model", _modelName };
                 RunPythonCommand(args, 30000);
                 _isLoaded = false;
                 Log("Model unloaded");
@@ -982,10 +998,24 @@ namespace Deep3DStudio.Python
                 OnProgress?.Invoke("inference", 0.2f, "Running inference...");
 
                 // Run inference - pass weights and device since each subprocess is a new process
-                string retrieval = useRetrieval ? "--use-retrieval" : "";
-                string weightsArg = !string.IsNullOrEmpty(_weightsPath) ? $"--weights \"{_weightsPath}\"" : "";
-                string deviceArg = $"--device {_device}";
-                string args = $"--command infer --model {_modelName} --input \"{inputPath}\" --output \"{outputPath}\" {weightsArg} {deviceArg} {retrieval}";
+                var args = new List<string>
+                {
+                    "--command", "infer",
+                    "--model", _modelName,
+                    "--input", inputPath,
+                    "--output", outputPath
+                };
+                if (!string.IsNullOrEmpty(_weightsPath))
+                {
+                    args.Add("--weights");
+                    args.Add(_weightsPath);
+                }
+                args.Add("--device");
+                args.Add(_device);
+                if (useRetrieval)
+                {
+                    args.Add("--use-retrieval");
+                }
 
                 var (exitCode, stdout, stderr) = RunPythonCommand(args, 600000, cancellationToken); // 10 min timeout
 
@@ -1176,9 +1206,20 @@ namespace Deep3DStudio.Python
                 OnProgress?.Invoke("inference", 0.2f, "Running mesh refinement...");
 
                 // Run inference with mesh path
-                string weightsArg = !string.IsNullOrEmpty(_weightsPath) ? $"--weights \"{_weightsPath}\"" : "";
-                string deviceArg = $"--device {_device}";
-                string args = $"--command infer --model {_modelName} --mesh-input \"{meshPath}\" --output \"{outputPath}\" {weightsArg} {deviceArg}";
+                var args = new List<string>
+                {
+                    "--command", "infer",
+                    "--model", _modelName,
+                    "--mesh-input", meshPath,
+                    "--output", outputPath
+                };
+                if (!string.IsNullOrEmpty(_weightsPath))
+                {
+                    args.Add("--weights");
+                    args.Add(_weightsPath);
+                }
+                args.Add("--device");
+                args.Add(_device);
 
                 var (exitCode, stdout, stderr) = RunPythonCommand(args, 600000, cancellationToken); // 10 min timeout
 
@@ -1320,9 +1361,24 @@ namespace Deep3DStudio.Python
 
                 OnProgress?.Invoke("inference", 0.2f, "Running UniRig inference...");
 
-                string weightsArg = !string.IsNullOrEmpty(_weightsPath) ? $"--weights \"{_weightsPath}\"" : "";
-                string deviceArg = $"--device {_device}";
-                string args = $"--command infer --model {_modelName} --input \"{inputPath}\" --output \"{outputPath}\" {weightsArg} {deviceArg} --max-joints {maxJoints} --max-bones {maxBonesPerVertex}";
+                var args = new List<string>
+                {
+                    "--command", "infer",
+                    "--model", _modelName,
+                    "--input", inputPath,
+                    "--output", outputPath
+                };
+                if (!string.IsNullOrEmpty(_weightsPath))
+                {
+                    args.Add("--weights");
+                    args.Add(_weightsPath);
+                }
+                args.Add("--device");
+                args.Add(_device);
+                args.Add("--max-joints");
+                args.Add(maxJoints.ToString());
+                args.Add("--max-bones");
+                args.Add(maxBonesPerVertex.ToString());
 
                 var (exitCode, stdout, stderr) = RunPythonCommand(args, 600000, cancellationToken);
 
@@ -1465,9 +1521,24 @@ namespace Deep3DStudio.Python
                 outputPath = Path.GetTempFileName();
                 TemporaryFileManager.RegisterFile(outputPath);
 
-                string weightsArg = !string.IsNullOrEmpty(_weightsPath) ? $"--weights \"{_weightsPath}\"" : "";
-                string deviceArg = $"--device {_device}";
-                string args = $"--command infer --model {_modelName} --mesh-input \"{meshPath}\" --output \"{outputPath}\" {weightsArg} {deviceArg} --max-joints {maxJoints} --max-bones {maxBonesPerVertex}";
+                var args = new List<string>
+                {
+                    "--command", "infer",
+                    "--model", _modelName,
+                    "--mesh-input", meshPath,
+                    "--output", outputPath
+                };
+                if (!string.IsNullOrEmpty(_weightsPath))
+                {
+                    args.Add("--weights");
+                    args.Add(_weightsPath);
+                }
+                args.Add("--device");
+                args.Add(_device);
+                args.Add("--max-joints");
+                args.Add(maxJoints.ToString());
+                args.Add("--max-bones");
+                args.Add(maxBonesPerVertex.ToString());
 
                 var (exitCode, stdout, stderr) = RunPythonCommand(args, 600000, cancellationToken);
 
